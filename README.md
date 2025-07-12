@@ -1,4 +1,15 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TraderLogs
+
+A Next.js application for tracking and analyzing trading activities through CSV imports. The app provides a visual calendar view of trades and detailed trade information.
+
+## Features
+
+- CSV Import: Upload trading data from various platforms
+- Trade Calendar: Visual representation of daily trading activity
+- Trade Details: Comprehensive view of individual trades
+- Multi-Currency Support: Handles both USD and EUR transactions
+- Profit/Loss Tracking: Accurate P&L calculations for trades
+- Transaction Types: Supports market orders, limit orders, dividends, and more
 
 ## Getting Started
 
