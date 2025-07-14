@@ -1,160 +1,322 @@
 'use client'
 
-import { useRef } from 'react'
+import { useState } from 'react'
 import { useTradeStore } from '@/utils/store'
+import { toast } from 'react-hot-toast'
+
+interface TradeFormData {
+  date: string
+  symbol: string
+  type: 'BUY' | 'SELL'
+  quantity: number
+  price: number
+  notes?: string
+  volume?: number
+  avgVolume?: number
+  weekHigh52?: number
+  weekPerf4?: number
+  marketCap?: number
+}
 
 export default function TradeUpload() {
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const { processCSV } = useTradeStore()
+  const [dragActive, setDragActive] = useState(false)
+  const [manualEntry, setManualEntry] = useState(false)
+  const [formData, setFormData] = useState<TradeFormData>({
+    date: new Date().toISOString().split('T')[0],
+    symbol: '',
+    type: 'BUY',
+    quantity: 0,
+    price: 0
+  })
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
+  const processCSV = useTradeStore(state => state.processCSV)
 
-    const reader = new FileReader()
-    reader.onload = (e) => {
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true)
+    } else if (e.type === 'dragleave') {
+      setDragActive(false)
+    }
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragActive(false)
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0]
+      if (file.type !== 'text/csv') {
+        toast.error('Please upload a CSV file')
+        return
+      }
+
       try {
-        const content = e.target?.result as string
-        processCSV(content)
+        await processCSV(file)
+        toast.success('Trades imported successfully')
       } catch (error) {
-        console.error('Error reading file:', error)
-        alert('Error processing file. Please check the format and try again.')
+        toast.error('Failed to import trades')
+        console.error(error)
       }
     }
-    reader.readAsText(file)
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0]
+      if (file.type !== 'text/csv') {
+        toast.error('Please upload a CSV file')
+        return
+      }
+
+      try {
+        await processCSV(file)
+        toast.success('Trades imported successfully')
+      } catch (error) {
+        toast.error('Failed to import trades')
+        console.error(error)
+      }
+    }
+  }
+
+  const handleManualSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    try {
+      const response = await fetch('/api/trades', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      })
+
+      if (!response.ok) throw new Error('Failed to save trade')
+      
+      toast.success('Trade saved successfully')
+      setFormData({
+        date: new Date().toISOString().split('T')[0],
+        symbol: '',
+        type: 'BUY',
+        quantity: 0,
+        price: 0
+      })
+    } catch (error) {
+      toast.error('Failed to save trade')
+      console.error(error)
+    }
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Upload Trade History (CSV)
-        </label>
-        <div className="flex items-center justify-center w-full">
+    <div>
+      <h2 className="text-xl font-bold text-gray-800 mb-4">Add Trades</h2>
+      
+      <div className="space-y-4">
+        <div
+          className={`border-2 border-dashed rounded-lg p-6 text-center ${
+            dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+          }`}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+        >
+          <input
+            type="file"
+            id="file-upload"
+            className="hidden"
+            accept=".csv"
+            onChange={handleFileChange}
+          />
           <label
             htmlFor="file-upload"
-            className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition"
+            className="cursor-pointer text-sm text-gray-600"
           >
-            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-              <svg
-                className="w-8 h-8 mb-3 text-gray-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-              <p className="mb-2 text-sm text-gray-500">
-                <span className="font-semibold">Click to upload</span> or drag and drop
-              </p>
-              <p className="text-xs text-gray-500">CSV only (Max 5MB)</p>
-            </div>
-            <input
-              id="file-upload"
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept=".csv"
-              onChange={handleFileUpload}
-            />
+            <span className="block mb-2">
+              Drag and drop a CSV file or click to upload
+            </span>
+            <span className="text-blue-600 hover:text-blue-700">
+              Browse files
+            </span>
           </label>
         </div>
-      </div>
 
-      <div className="bg-indigo-50 p-4 rounded-lg">
-        <h3 className="font-medium text-indigo-800 mb-2">CSV Format Requirements</h3>
-        <ul className="text-sm text-gray-700 space-y-1">
-          <li className="flex items-center">
-            <svg
-              className="w-4 h-4 mr-2 text-indigo-500"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
+        <div className="text-center">
+          <button
+            onClick={() => setManualEntry(!manualEntry)}
+            className="text-sm text-blue-600 hover:text-blue-700"
+          >
+            {manualEntry ? 'Hide manual entry' : 'Manual entry'}
+          </button>
+        </div>
+
+        {manualEntry && (
+          <form onSubmit={handleManualSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Date
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={formData.date}
+                  onChange={e => setFormData({ ...formData, date: e.target.value })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Symbol
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={formData.symbol}
+                  onChange={e => setFormData({ ...formData, symbol: e.target.value.toUpperCase() })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Type
+                </label>
+                <select
+                  required
+                  value={formData.type}
+                  onChange={e => setFormData({ ...formData, type: e.target.value as 'BUY' | 'SELL' })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                >
+                  <option value="BUY">Buy</option>
+                  <option value="SELL">Sell</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Quantity
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={formData.quantity || ''}
+                  onChange={e => setFormData({ ...formData, quantity: parseInt(e.target.value) })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Price
+                </label>
+                <input
+                  type="number"
+                  required
+                  step="0.01"
+                  min="0"
+                  value={formData.price || ''}
+                  onChange={e => setFormData({ ...formData, price: parseFloat(e.target.value) })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Volume
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.volume || ''}
+                  onChange={e => setFormData({ ...formData, volume: parseInt(e.target.value) })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Avg Volume (30d)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.avgVolume || ''}
+                  onChange={e => setFormData({ ...formData, avgVolume: parseInt(e.target.value) })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  52 Week High
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.weekHigh52 || ''}
+                  onChange={e => setFormData({ ...formData, weekHigh52: parseFloat(e.target.value) })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  4 Week Performance %
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.weekPerf4 || ''}
+                  onChange={e => setFormData({ ...formData, weekPerf4: parseFloat(e.target.value) })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Market Cap (M)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.marketCap || ''}
+                  onChange={e => setFormData({ ...formData, marketCap: parseFloat(e.target.value) })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Notes
+              </label>
+              <textarea
+                value={formData.notes || ''}
+                onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                rows={3}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                placeholder="Add any trade notes here..."
               />
-            </svg>
-            Action column (Market buy/Limit sell)
-          </li>
-          <li className="flex items-center">
-            <svg
-              className="w-4 h-4 mr-2 text-indigo-500"
-              fill="currentColor"
-              viewBox="0 0 20 20"
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Time column (YYYY-MM-DD format)
-          </li>
-          <li className="flex items-center">
-            <svg
-              className="w-4 h-4 mr-2 text-indigo-500"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Ticker column
-          </li>
-          <li className="flex items-center">
-            <svg
-              className="w-4 h-4 mr-2 text-indigo-500"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-            No. of shares column
-          </li>
-          <li className="flex items-center">
-            <svg
-              className="w-4 h-4 mr-2 text-indigo-500"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Price / share column
-          </li>
-          <li className="flex items-center">
-            <svg
-              className="w-4 h-4 mr-2 text-indigo-500"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Total column
-          </li>
-        </ul>
+              Save Trade
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )

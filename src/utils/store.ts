@@ -1,32 +1,48 @@
+'use client'
+
 import { create } from 'zustand'
-import { parse } from 'csv-parse/sync'
 
 export interface Trade {
+  id?: string
   date: string
-  action: string
-  ticker?: string
-  name?: string
-  buyPrice?: number
-  sellPrice?: number
-  shares?: number
-  profit?: number
-  buyDate?: string
-  amount?: number
-  currency?: string
+  symbol: string
+  type: 'BUY' | 'SELL'
+  quantity: number
+  price: number
+  total: number
+  profitLoss?: number
   notes?: string
+  volume?: number
+  avgVolume?: number
+  weekHigh52?: number
+  weekPerf4?: number
+  marketCap?: number
+}
+
+interface TradeSummary {
+  totalTrades: number
+  profitableTrades: number
+  losingTrades: number
+  netProfit: number
+  avgHoldingPeriod: number
+  bestHoldingPeriod: { days: number; profit: number } | null
+  winRate: number
+  avgProfitPerTrade: number
+  strategyCompliance: number
+}
+
+interface TradeData {
+  trades: Trade[]
+  source: string
 }
 
 interface TradeStore {
   trades: Trade[]
-  processedTrades: Record<string, Trade[]>
-  summary: {
-    totalTrades: number
-    profitableTrades: number
-    losingTrades: number
-    netProfit: number
-  }
-  setTrades: (trades: Trade[]) => void
-  processCSV: (content: string) => void
+  processedTrades: { [key: string]: Trade[] }
+  summary: TradeSummary
+  setTrades: (data: TradeData) => void
+  clearTrades: () => void
+  processCSV: (content: string) => Promise<void>
 }
 
 export const useTradeStore = create<TradeStore>((set, get) => ({
@@ -37,125 +53,134 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
     profitableTrades: 0,
     losingTrades: 0,
     netProfit: 0,
+    avgHoldingPeriod: 0,
+    bestHoldingPeriod: null,
+    winRate: 0,
+    avgProfitPerTrade: 0,
+    strategyCompliance: 0
   },
-  setTrades: (trades) => {
-    const processedTrades: Record<string, Trade[]> = {}
-    trades.forEach((trade) => {
-      const date = trade.date.split(' ')[0]
-      if (!processedTrades[date]) {
-        processedTrades[date] = []
+
+  clearTrades: () => {
+    set({
+      trades: [],
+      processedTrades: {},
+      summary: {
+        totalTrades: 0,
+        profitableTrades: 0,
+        losingTrades: 0,
+        netProfit: 0,
+        avgHoldingPeriod: 0,
+        bestHoldingPeriod: null,
+        winRate: 0,
+        avgProfitPerTrade: 0,
+        strategyCompliance: 0
       }
-      processedTrades[date].push(trade)
     })
-
-    const summary = {
-      totalTrades: trades.length,
-      profitableTrades: trades.filter((t) => t.profit && t.profit > 0).length,
-      losingTrades: trades.filter((t) => t.profit && t.profit < 0).length,
-      netProfit: trades.reduce((sum, t) => sum + (t.profit || 0), 0),
-    }
-
-    set({ trades, processedTrades, summary })
   },
-  processCSV: (content: string) => {
-    try {
-      const lines = parse(content, {
-        columns: true,
-        skip_empty_lines: true,
-      })
 
-      const buyOrders: Record<string, any[]> = {}
-      const trades: Trade[] = []
+  setTrades: (data) => {
+    set(state => {
+      const validTrades = data.trades.filter((trade: Trade) => 
+        trade.quantity > 0 && 
+        trade.price > 0 && 
+        trade.total > 0 && 
+        !trade.notes?.includes('Bank Transfer')
+      )
 
-      lines.forEach((line: any) => {
-        const action = line.Action.toLowerCase()
-        const [datePart] = line.Time.split(' ')
-        const [year, month, day] = datePart.split('-')
-        const date = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-        
-        const total = parseFloat(line.Total || '0')
-        const currency = line['Currency (Total)']
-        const exchangeRate = parseFloat(line['Exchange rate'] || '1')
+      const trades = validTrades.map(trade => ({
+        ...trade,
+        date: new Date(trade.date).toISOString().split('T')[0]
+      }))
 
-        // Convert amount to USD if in EUR
-        const amountInUSD = currency === 'EUR' ? total * exchangeRate : total
+      // Calculate summary
+      const profitableTrades = trades.filter(t => (t.profitLoss ?? 0) > 0).length
+      const losingTrades = trades.filter(t => (t.profitLoss ?? 0) < 0).length
+      const netProfit = trades.reduce((sum, t) => sum + (t.profitLoss ?? 0), 0)
 
-        // Base trade object
-        const trade: Trade = {
-          date,
-          action,
-          amount: total,
-          currency,
-          notes: line.Notes,
-          name: line.Name,
-          ticker: line.Ticker
-        }
-
-        if (action.includes('buy')) {
-          // Handle both market buy and limit buy
-          const ticker = line.Ticker
-          const shares = parseFloat(line['No. of shares'])
-          const price = parseFloat(line['Price / share'])
-
-          if (!buyOrders[ticker]) buyOrders[ticker] = []
-          buyOrders[ticker].push({
-            date,
-            shares,
-            price,
-            currency
-          })
-
-          trades.push({
-            ...trade,
-            shares,
-            buyPrice: price,
-            profit: 0 // No profit/loss on buy
-          })
-        } else if (action.includes('sell')) {
-          // Handle both market sell and limit sell
-          const ticker = line.Ticker
-          const shares = parseFloat(line['No. of shares'])
-          const sellPrice = parseFloat(line['Price / share'])
-          const buyOrder = buyOrders[ticker]?.shift()
-          
-          let profit: number | undefined
-          if (buyOrder) {
-            if (currency === buyOrder.currency) {
-              // If currencies match, calculate profit directly from total amount
-              profit = total - (buyOrder.price * shares)
-            } else {
-              // If currencies don't match, calculate in USD
-              const sellAmount = currency === 'EUR' ? total * exchangeRate : total
-              const buyAmount = buyOrder.currency === 'EUR' ? 
-                (buyOrder.price * shares * exchangeRate) : 
-                (buyOrder.price * shares)
-              profit = sellAmount - buyAmount
-            }
+      // Calculate holding periods
+      const holdingPeriods = trades.map(trade => {
+        if (trade.type === 'SELL') {
+          const buyTrade = trades.find(t => 
+            t.type === 'BUY' && 
+            t.symbol === trade.symbol && 
+            new Date(t.date) < new Date(trade.date)
+          )
+          if (buyTrade) {
+            const days = Math.round((new Date(trade.date).getTime() - new Date(buyTrade.date).getTime()) / (1000 * 60 * 60 * 24))
+            return { days, profit: trade.profitLoss ?? 0 }
           }
-
-          trades.push({
-            ...trade,
-            shares,
-            sellPrice,
-            buyPrice: buyOrder?.price,
-            buyDate: buyOrder?.date,
-            profit
-          })
-        } else if (action === 'dividend') {
-          trades.push({
-            ...trade,
-            profit: amountInUSD // Dividends are always profit
-          })
-        } else {
-          // Other transactions (deposits, lending, etc)
-          trades.push(trade)
         }
-      })
+        return null
+      }).filter(Boolean)
 
-      get().setTrades(trades)
-    } catch (error) {
-      console.error('Error processing CSV:', error)
-      throw new Error('Failed to process CSV file')
-    }
+      const avgHoldingPeriod = holdingPeriods.length > 0
+        ? holdingPeriods.reduce((sum, period) => sum + period!.days, 0) / holdingPeriods.length
+        : 0
+
+      const bestHoldingPeriod = holdingPeriods.length > 0
+        ? holdingPeriods.reduce((best, period) => 
+            (!best || (period!.profit > best.profit) ? period : best), holdingPeriods[0])
+        : null
+
+      // Calculate strategy compliance
+      const compliantTrades = trades.filter(trade => 
+        trade.price < 10 && 
+        (trade.volume ?? 0) > 1000000
+      ).length
+
+      const processedTrades = trades.reduce((acc: Record<string, Trade[]>, trade: Trade) => {
+        // Format date to YYYY-MM-DD for consistent lookup
+        const date = new Date(trade.date).toISOString().split('T')[0]
+        console.log('Store - Processing trade date:', { original: trade.date, formatted: date })
+        if (!acc[date]) {
+          acc[date] = []
+        }
+        acc[date].push(trade)
+        return acc
+      }, {})
+
+      console.log('Store - Processed trades:', processedTrades)
+
+      return {
+        ...state,
+        trades: validTrades,
+        processedTrades,
+        summary: {
+          totalTrades: validTrades.length,
+          profitableTrades,
+          losingTrades,
+          netProfit,
+          avgHoldingPeriod,
+          bestHoldingPeriod,
+          winRate: validTrades.length > 0 ? (profitableTrades / validTrades.length * 100) : 0,
+          avgProfitPerTrade: validTrades.length > 0 ? netProfit / validTrades.length : 0,
+          strategyCompliance: validTrades.length > 0 ? (compliantTrades / validTrades.length * 100) : 0
+        }
+      }
+    })
   },
+
+  processCSV: async (content: string) => {
+    try {
+      const { parseCSV } = await import('./csv')
+      const parsedTrades = await parseCSV(content)
+      
+      // First save to database
+      const response = await fetch('/api/trades', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trades: parsedTrades, source: 'CSV' })
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to save trades')
+      }
+      
+      // Then update store
+      get().setTrades({ trades: parsedTrades, source: 'CSV' })
+    } catch (error: unknown) {
+      console.error('Error processing CSV:', error)
+      throw error
+    }
+  }
 }))

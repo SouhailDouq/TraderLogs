@@ -2,8 +2,12 @@
 
 import { useTradeStore } from '@/utils/store'
 
+import { TradeStore } from '@/utils/store'
+
+const selectSummary = (state: TradeStore) => state.summary
+
 export default function TradeSummary() {
-  const { summary } = useTradeStore()
+  const summary = useTradeStore(selectSummary)
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
