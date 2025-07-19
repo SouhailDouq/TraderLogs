@@ -1,9 +1,10 @@
 'use client'
 
-import { useTradeStore, Trade } from '@/utils/store'
+import { useTradeStore, Trade, TradeStore } from '@/utils/store'
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isToday, addDays, addMonths } from 'date-fns'
 import { useState } from 'react'
 import TradeModal from '@/components/Trade/TradeModal'
+import { formatCurrency } from '@/utils/formatters'
 
 interface CalendarDay {
   date: string
@@ -13,9 +14,15 @@ interface CalendarDay {
   trades: Trade[]
   profit: number
   isProfitable: boolean
+  hasOpenPositions: boolean
+  closedTradesCount: number
+  openTradesCount: number
 }
 
-const selectProcessedTrades = (state: any) => state.processedTrades
+const selectProcessedTrades = (state: TradeStore) => {
+  console.log('Store state:', state)
+  return state.processedTrades
+}
 
 interface CalendarProps {
   currentMonth: Date
@@ -35,7 +42,11 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
     while (day <= end) {
       const dateStr = format(day, 'yyyy-MM-dd')
       const dayTrades = processedTrades[dateStr] || []
-      const profit = dayTrades.reduce((sum: number, t: Trade) => sum + (t.profitLoss ?? 0), 0)
+      
+      // Calculate profit only from closed positions
+      const closedTrades = dayTrades.filter(t => !t.isOpen)
+      const openTrades = dayTrades.filter(t => t.isOpen)
+      const profit = closedTrades.reduce((sum: number, t: Trade) => sum + (t.profitLoss ?? 0), 0)
 
       days.push({
         date: dateStr,
@@ -44,7 +55,10 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
         hasData: dayTrades.length > 0,
         trades: dayTrades,
         profit,
-        isProfitable: profit > 0
+        isProfitable: profit > 0,
+        hasOpenPositions: openTrades.length > 0,
+        closedTradesCount: closedTrades.length,
+        openTradesCount: openTrades.length
       })
 
       day = addDays(day, 1)
@@ -77,7 +91,7 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
         const formattedDate = format(day, 'yyyy-MM-dd')
         const dayTrades = processedTrades[formattedDate] || []
         const hasData = dayTrades.length > 0
-        const dayProfit = dayTrades.reduce((sum: number, t: { profitLoss?: number }) => sum + (t.profitLoss ?? 0), 0)
+        const dayProfit = dayTrades.reduce((sum: number, t: Trade) => sum + (t.profitLoss ?? 0), 0)
         const isProfitable = dayProfit > 0
 
         days.push(
@@ -102,7 +116,7 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
                 </div>
                 <div className={`mt-1 text-xs ${isProfitable ? 'text-green-600' : 'text-red-600'}`}>
                   {isProfitable ? '+' : ''}
-                  ${Math.abs(dayProfit).toFixed(2)}
+                  {formatCurrency(dayProfit)}
                 </div>
               </>
             )}
@@ -147,36 +161,36 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
         <button
           onClick={() => onMonthChange(addMonths(currentMonth, -1))}
-          className="p-2 text-gray-600 hover:text-gray-900 flex items-center gap-2 transition-colors duration-200"
+          className="px-4 py-2 text-gray-600 hover:text-gray-900 flex items-center gap-2 transition-colors duration-200 rounded-lg hover:bg-gray-50"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          <span>Previous</span>
+          <span className="font-medium">Previous</span>
         </button>
-        <h2 className="text-2xl font-bold text-gray-800">
+        <h2 className="text-2xl font-bold text-gray-900">
           {format(currentMonth, 'MMMM yyyy')}
         </h2>
         <button
           onClick={() => onMonthChange(addMonths(currentMonth, 1))}
-          className="p-2 text-gray-600 hover:text-gray-900 flex items-center gap-2 transition-colors duration-200"
+          className="px-4 py-2 text-gray-600 hover:text-gray-900 flex items-center gap-2 transition-colors duration-200 rounded-lg hover:bg-gray-50"
         >
-          <span>Next</span>
+          <span className="font-medium">Next</span>
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-px bg-gray-200 rounded-lg overflow-hidden shadow-sm">
+      <div className="grid grid-cols-7 gap-4 p-4 bg-white rounded-lg shadow-sm border border-gray-200">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(
           (dayName) => (
             <div
               key={dayName}
-              className="bg-gray-100 py-2 text-center text-gray-600 font-semibold text-sm"
+              className="text-center text-sm font-medium text-gray-500 uppercase pb-2"
             >
               {dayName}
             </div>
@@ -188,37 +202,57 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
             key={idx}
             onClick={() => handleDateClick(day.date)}
             className={`
-              relative p-3 text-center cursor-pointer transition-all duration-200
-              hover:shadow-md hover:z-10 hover:scale-105 transform
-              ${day.isCurrentMonth
-                ? 'bg-white'
-                : 'bg-gray-50 text-gray-400'
-              }
-              ${day.isToday
-                ? 'bg-blue-50 text-blue-600 font-semibold ring-2 ring-blue-200'
-                : ''
-              }
-              ${day.hasData
-                ? day.isProfitable
-                  ? 'hover:bg-green-50'
-                  : 'hover:bg-red-50'
-                : 'hover:bg-gray-50'
-              }
+              relative p-3 cursor-pointer transition-all duration-200
+              border border-gray-200 rounded-lg
+              ${!day.isCurrentMonth ? 'opacity-50' : ''}
+              ${day.isToday ? 'ring-2 ring-blue-500' : ''}
+              ${day.hasData ? 'hover:shadow-lg' : 'hover:bg-gray-50'}
             `}
           >
-            <div className="text-sm mb-1">{format(new Date(day.date), 'd')}</div>
+            <div className="flex justify-between items-center mb-2">
+              <span className={`text-lg font-medium ${day.isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+                {format(new Date(day.date), 'd')}
+              </span>
+              {day.hasData && (
+                <span className="text-sm font-medium text-gray-500">
+                  {day.trades.length} trade{day.trades.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            
             {day.hasData && (
-              <div
-                className={`
-                  text-xs font-medium rounded-full px-2 py-1
-                  ${day.isProfitable 
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-red-100 text-red-700'
-                  }
-                `}
-              >
-                <div>{day.trades.length} trade{day.trades.length !== 1 ? 's' : ''}</div>
-                <div className="font-bold">${Math.abs(day.profit).toFixed(2)}</div>
+              <div className="space-y-1">
+                {/* Show trade counts with differentiation */}
+                <div className="flex items-center gap-1 text-xs">
+                  {day.closedTradesCount > 0 && (
+                    <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">
+                      {day.closedTradesCount} closed
+                    </span>
+                  )}
+                  {day.openTradesCount > 0 && (
+                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                      {day.openTradesCount} open
+                    </span>
+                  )}
+                </div>
+                
+                {/* Show realized P/L only for closed positions */}
+                {day.closedTradesCount > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-gray-500 uppercase">Realized P/L</div>
+                    <div className={`text-sm font-bold ${day.isProfitable ? 'text-green-600' : day.profit < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                      {day.profit > 0 ? '+' : ''}
+                      {formatCurrency(day.profit)}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Show indicator for open positions only */}
+                {day.hasOpenPositions && day.closedTradesCount === 0 && (
+                  <div className="text-xs text-blue-600 font-medium">
+                    Open positions
+                  </div>
+                )}
               </div>
             )}
           </div>

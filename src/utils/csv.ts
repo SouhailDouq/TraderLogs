@@ -11,7 +11,7 @@ export async function parseCSV(content: string): Promise<Trade[]> {
           ...trade,
           date: trade.date || '',
           symbol: trade.symbol || '',
-          type: trade.type || 'BUY',
+          action: trade.type || 'BUY',
           quantity: trade.quantity || 0,
           price: trade.price || 0,
           total: trade.total || 0,
@@ -60,14 +60,21 @@ export async function parseCSV(content: string): Promise<Trade[]> {
       }
 
       const baseTrade: Trade = {
+        id: `${date}-${line.Ticker}-${action}`,
         date,
-        notes: line.Notes || '',
         symbol: line.Ticker,
-        total,
-        type: 'BUY',
-        quantity: 0,
+        action: 'BUY',
+        shares: 0,
         price: 0,
-        profitLoss: 0
+        amount: total,
+        total,
+        profitLoss: 0,
+        journal: line.Notes ? {
+          notes: line.Notes,
+          tags: [],
+          emotion: '',
+          createdAt: new Date().toISOString()
+        } : undefined
       }
 
       if (action.includes('buy')) {
@@ -86,9 +93,10 @@ export async function parseCSV(content: string): Promise<Trade[]> {
 
         trades.push({
           ...baseTrade,
-          type: 'BUY',
-          quantity: shares,
+          action: 'BUY',
+          shares,
           price,
+          amount: total,
           profitLoss: 0
         })
       } else if (action.includes('sell')) {
@@ -117,17 +125,19 @@ export async function parseCSV(content: string): Promise<Trade[]> {
 
         trades.push({
           ...baseTrade,
-          type: 'SELL',
-          quantity: shares,
+          action: 'SELL',
+          shares,
           price: sellPrice,
+          amount: total,
           profitLoss: profit
         })
       } else if (action === 'dividend') {
         trades.push({
           ...baseTrade,
-          type: 'BUY',
-          quantity: 0,
+          action: 'BUY',
+          shares: 0,
           price: 0,
+          amount: amountInUSD,
           profitLoss: amountInUSD
         })
       }

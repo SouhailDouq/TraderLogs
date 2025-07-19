@@ -16,6 +16,16 @@ export async function GET() {
   }
 }
 
+export async function DELETE() {
+  try {
+    const count = await tradeService.deleteAllTrades()
+    return NextResponse.json({ count })
+  } catch (error) {
+    console.error('Error deleting trades:', error)
+    return NextResponse.json({ error: 'Failed to delete trades' }, { status: 500 })
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const trade = await req.json()

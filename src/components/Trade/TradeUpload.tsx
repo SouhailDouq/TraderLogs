@@ -30,6 +30,8 @@ export default function TradeUpload() {
   })
 
   const processCSV = useTradeStore(state => state.processCSV)
+  const trades = useTradeStore(state => state.trades)
+  const clearTrades = useTradeStore(state => state.clearTrades)
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault()
@@ -41,43 +43,98 @@ export default function TradeUpload() {
     }
   }
 
+  const processFile = async (file: File) => {
+    console.log('Processing file:', file.name, 'Type:', file.type)
+    
+    if (file.type !== 'text/csv') {
+      toast.error('Please upload a CSV file')
+      return
+    }
+
+    try {
+      console.log('Starting file processing...')
+      
+      // Clear existing trades first
+      clearTrades()
+      console.log('Cleared existing trades')
+
+      // Process CSV content
+      const content = await file.text()
+      console.log('File content length:', content.length)
+      console.log('File content preview:', content.substring(0, 500))
+      console.log('Full content (first 1000 chars):', content.substring(0, 1000))
+      
+      // Split content into lines to see structure
+      const lines = content.trim().split(/\r?\n/)
+      console.log('Total lines in CSV:', lines.length)
+      console.log('First 3 lines:', lines.slice(0, 3))
+      
+      try {
+        console.log('About to call processCSV...')
+        processCSV(content)
+        console.log('CSV processing completed successfully')
+      } catch (csvError) {
+        console.error('Error in processCSV:', csvError)
+        throw csvError
+      }
+
+      // Wait for next tick to ensure trades are updated in store
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // Get current trades from store
+      const currentTrades = useTradeStore.getState().trades
+      console.log('Current trades in store:', currentTrades.length)
+      
+      if (currentTrades.length === 0) {
+        toast.error('No trades were parsed from the CSV file')
+        return
+      }
+
+      // Save trades to database
+      console.log('Saving trades to database...')
+      const response = await fetch('/api/trades/batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ trades: currentTrades, source: 'CSV' }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to save trades to database')
+      }
+
+      const result = await response.json()
+      console.log('Save result:', result)
+      toast.success(`${currentTrades.length} trades imported and saved successfully`)
+    } catch (error) {
+      console.error('Error processing file:', error)
+      toast.error(`Failed to import trades: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
   const handleDrop = async (e: React.DragEvent) => {
+    console.log('Drop event triggered')
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0]
-      if (file.type !== 'text/csv') {
-        toast.error('Please upload a CSV file')
-        return
-      }
-
-      try {
-        await processCSV(file)
-        toast.success('Trades imported successfully')
-      } catch (error) {
-        toast.error('Failed to import trades')
-        console.error(error)
-      }
+      console.log('File dropped:', e.dataTransfer.files[0].name)
+      await processFile(e.dataTransfer.files[0])
+    } else {
+      console.log('No files in drop event')
     }
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('File input change event triggered')
     if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0]
-      if (file.type !== 'text/csv') {
-        toast.error('Please upload a CSV file')
-        return
-      }
-
-      try {
-        await processCSV(file)
-        toast.success('Trades imported successfully')
-      } catch (error) {
-        toast.error('Failed to import trades')
-        console.error(error)
-      }
+      console.log('File selected:', e.target.files[0].name)
+      await processFile(e.target.files[0])
+    } else {
+      console.log('No files selected')
     }
   }
 

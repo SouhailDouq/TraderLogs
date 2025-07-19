@@ -11,9 +11,11 @@ export class TradeService {
   }
 
   async getAllTrades() {
+    console.log('Fetching all trades from DB...')
     const trades = await prisma.trade.findMany({
       orderBy: { date: 'desc' }
     })
+    console.log('Fetched trades:', trades)
     
     return {
       trades,
@@ -49,13 +51,15 @@ export class TradeService {
             quantity: trade.quantity,
             price: trade.price,
             date: new Date(trade.date),
-            total: trade.total,
-            notes: trade.notes,
-            currentPrice: trade.currentPrice,
-            profitLoss: trade.profitLoss,
+            total: trade.quantity * trade.price,
+            fees: trade.fees || null,
+            notes: trade.notes || '',
+            currentPrice: trade.currentPrice || null,
+            profitLoss: trade.profitLoss || 0,
             source,
             sourceId,
-            ...(trade.fees !== undefined ? { fees: trade.fees } : {})
+            createdAt: new Date(),
+            updatedAt: new Date()
           }
         })
         saved++
@@ -124,5 +128,13 @@ export class TradeService {
       }
     })
     return count > 0
+  }
+
+  /**
+   * Delete all trades from the database
+   */
+  async deleteAllTrades(): Promise<number> {
+    const { count } = await prisma.trade.deleteMany({})
+    return count
   }
 }
