@@ -68,7 +68,7 @@ export default function TradeJournal({
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-500"
           rows={4}
           placeholder="What was your thesis? What went well/wrong?"
         />
@@ -119,7 +119,7 @@ export default function TradeJournal({
             type="text"
             value={newTag}
             onChange={(e) => setNewTag(e.target.value)}
-            className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+            className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-500"
             placeholder="Add custom tag"
           />
           <button

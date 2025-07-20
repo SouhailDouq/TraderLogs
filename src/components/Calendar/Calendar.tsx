@@ -201,58 +201,54 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
           <div
             key={idx}
             onClick={() => handleDateClick(day.date)}
+            title={day.hasData ? `${day.trades.length} trade${day.trades.length !== 1 ? 's' : ''} - ${day.closedTradesCount} closed, ${day.openTradesCount} open` : ''}
             className={`
-              relative p-3 cursor-pointer transition-all duration-200
-              border border-gray-200 rounded-lg
-              ${!day.isCurrentMonth ? 'opacity-50' : ''}
-              ${day.isToday ? 'ring-2 ring-blue-500' : ''}
-              ${day.hasData ? 'hover:shadow-lg' : 'hover:bg-gray-50'}
+              relative min-h-[80px] p-3 cursor-pointer transition-all duration-200
+              border border-gray-200 rounded-lg bg-white
+              ${!day.isCurrentMonth ? 'opacity-50 bg-gray-50' : ''}
+              ${day.isToday ? 'ring-2 ring-blue-500 bg-blue-50' : ''}
+              ${day.hasData ? 'hover:shadow-md hover:border-gray-300' : 'hover:bg-gray-50'}
             `}
           >
-            <div className="flex justify-between items-center mb-2">
-              <span className={`text-lg font-medium ${day.isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+            {/* Date */}
+            <div className="flex justify-between items-start mb-2">
+              <span className={`text-lg font-semibold ${
+                day.isToday ? 'text-blue-600' : 'text-gray-900'
+              }`}>
                 {format(new Date(day.date), 'd')}
               </span>
+              
+              {/* Simple indicators */}
               {day.hasData && (
-                <span className="text-sm font-medium text-gray-500">
-                  {day.trades.length} trade{day.trades.length !== 1 ? 's' : ''}
-                </span>
+                <div className="flex items-center gap-1">
+                  {day.closedTradesCount > 0 && (
+                    <div className="w-2 h-2 bg-gray-400 rounded-full" title={`${day.closedTradesCount} closed trades`}></div>
+                  )}
+                  {day.openTradesCount > 0 && (
+                    <div className="w-2 h-2 bg-blue-400 rounded-full" title={`${day.openTradesCount} open positions`}></div>
+                  )}
+                </div>
               )}
             </div>
             
-            {day.hasData && (
-              <div className="space-y-1">
-                {/* Show trade counts with differentiation */}
-                <div className="flex items-center gap-1 text-xs">
-                  {day.closedTradesCount > 0 && (
-                    <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">
-                      {day.closedTradesCount} closed
-                    </span>
-                  )}
-                  {day.openTradesCount > 0 && (
-                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
-                      {day.openTradesCount} open
-                    </span>
-                  )}
-                </div>
-                
-                {/* Show realized P/L only for closed positions */}
-                {day.closedTradesCount > 0 && (
-                  <div>
-                    <div className="text-xs font-medium text-gray-500 uppercase">Realized P/L</div>
-                    <div className={`text-sm font-bold ${day.isProfitable ? 'text-green-600' : day.profit < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                      {day.profit > 0 ? '+' : ''}
-                      {formatCurrency(day.profit)}
-                    </div>
-                  </div>
-                )}
-                
-                {/* Show indicator for open positions only */}
-                {day.hasOpenPositions && day.closedTradesCount === 0 && (
-                  <div className="text-xs text-blue-600 font-medium">
-                    Open positions
-                  </div>
-                )}
+            {/* Only show P/L if there are closed trades */}
+            {day.closedTradesCount > 0 && (
+              <div className={`text-sm font-semibold ${
+                day.isProfitable 
+                  ? 'text-green-600' 
+                  : day.profit < 0 
+                    ? 'text-red-600' 
+                    : 'text-gray-500'
+              }`}>
+                {day.profit > 0 ? '+' : ''}
+                {formatCurrency(day.profit)}
+              </div>
+            )}
+            
+            {/* Simple text for open-only days */}
+            {day.hasOpenPositions && day.closedTradesCount === 0 && (
+              <div className="text-xs text-blue-600 font-medium">
+                Open
               </div>
             )}
           </div>

@@ -26,6 +26,7 @@ model Trade {
   notes        String?
   currentPrice Float?
   profitLoss   Float?
+  journal      Json?    // Journal entry with notes, tags, emotion, rating, etc.
   source       String   // 'CSV' or 'API'
   sourceId     String?  // Original ID from source (e.g., Trading212 order ID)
   createdAt    DateTime @default(now())

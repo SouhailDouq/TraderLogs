@@ -35,7 +35,26 @@ export default function Home() {
         // Set trades in store
         if (data.trades && Array.isArray(data.trades)) {
           console.log('Setting trades in store:', data.trades)
-          setTrades(data.trades)
+          // Map database trades to frontend format, ensuring we use database IDs
+          const mappedTrades = data.trades.map((dbTrade: any) => ({
+            id: dbTrade.id, // Use the actual database ID
+            date: dbTrade.date,
+            symbol: dbTrade.symbol,
+            type: dbTrade.type,
+            name: dbTrade.name || '',
+            price: dbTrade.price,
+            quantity: dbTrade.quantity,
+            profitLoss: dbTrade.profitLoss || 0,
+            journal: dbTrade.journal || {
+              notes: '',
+              tags: [],
+              emotion: 'neutral',
+              rating: 3,
+              createdAt: new Date().toISOString()
+            }
+          }))
+          console.log('Mapped trades with database IDs:', mappedTrades)
+          setTrades(mappedTrades)
           
           // Set date range from trades
           if (data.trades.length > 0) {

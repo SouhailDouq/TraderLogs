@@ -137,4 +137,61 @@ export class TradeService {
     const { count } = await prisma.trade.deleteMany({})
     return count
   }
+
+  /**
+   * Get a trade by its ID
+   */
+  async getTradeById(id: string): Promise<PrismaTrade | null> {
+    return prisma.trade.findUnique({
+      where: { id }
+    })
+  }
+
+  /**
+   * Update a trade by its ID
+   */
+  async updateTrade(id: string, updateData: Partial<Trade>): Promise<PrismaTrade | null> {
+    try {
+      console.log('TradeService.updateTrade - ID:', id)
+      console.log('TradeService.updateTrade - Update data:', updateData)
+      
+      // First check if the trade exists
+      const existingTrade = await prisma.trade.findUnique({
+        where: { id }
+      })
+      console.log('TradeService.updateTrade - Existing trade:', existingTrade)
+      
+      if (!existingTrade) {
+        console.log('TradeService.updateTrade - Trade not found for ID:', id)
+        return null
+      }
+      
+      // Prepare the update data with proper typing for Prisma
+      const { journal, ...otherData } = updateData
+      const updatePayload: any = {
+        ...otherData,
+        updatedAt: new Date()
+      }
+      
+      // Handle journal field separately to ensure proper JSON serialization
+      if (journal !== undefined) {
+        updatePayload.journal = journal
+      }
+      
+      const updatedTrade = await prisma.trade.update({
+        where: { id },
+        data: updatePayload
+      })
+      console.log('TradeService.updateTrade - Successfully updated trade:', updatedTrade)
+      return updatedTrade
+    } catch (error) {
+      console.error('TradeService.updateTrade - Error:', error)
+      if (error instanceof Error && 'code' in error && (error as PrismaError).code === 'P2025') {
+        // P2025 is the error code for record not found
+        console.log('TradeService.updateTrade - P2025 error (record not found)')
+        return null
+      }
+      throw error
+    }
+  }
 }

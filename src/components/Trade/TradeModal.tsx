@@ -5,6 +5,7 @@ import { Trade, useTradeStore } from '@/utils/store'
 import TradeAnalysis from './TradeAnalysis'
 import TradeJournal from './TradeJournal'
 import { formatCurrency } from '@/utils/formatters'
+import { toast } from 'react-hot-toast'
 
 interface TradeModalProps {
   isOpen: boolean
@@ -26,37 +27,80 @@ export default function TradeModal({ isOpen, date, trades, onClose }: TradeModal
   const setTrades = useTradeStore(state => state.setTrades)
   const allTrades = useTradeStore(state => state.trades)
 
-  const handleJournalSave = (tradeId: string, journalData: {
+  const handleJournalSave = async (tradeId: string, journalData: {
     notes: string
     tags: string[]
     emotion: 'positive' | 'neutral' | 'negative'
     rating?: 1 | 2 | 3 | 4 | 5
   }) => {
-    const updatedTrades = allTrades.map(t => {
-      if (t.id === tradeId) {
-        return {
-          ...t,
-          journal: {
-            ...t.journal,
-            ...journalData,
-            rating: journalData.rating ?? t.journal?.rating ?? 3,
-            createdAt: t.journal?.createdAt ?? new Date().toISOString()
+    try {
+      // Find the trade to update
+      const tradeToUpdate = allTrades.find(t => t.id === tradeId)
+      if (!tradeToUpdate) {
+        toast.error('Trade not found')
+        return
+      }
+
+      // Update local state first
+      const updatedTrades = allTrades.map(t => {
+        if (t.id === tradeId) {
+          return {
+            ...t,
+            journal: {
+              ...t.journal,
+              ...journalData,
+              rating: journalData.rating ?? t.journal?.rating ?? 3,
+              createdAt: t.journal?.createdAt ?? new Date().toISOString()
+            }
           }
         }
+        return t
+      })
+      setTrades(updatedTrades)
+
+      // Save to database
+      const response = await fetch(`/api/trades/${tradeId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          journal: {
+            ...tradeToUpdate.journal,
+            ...journalData,
+            rating: journalData.rating ?? tradeToUpdate.journal?.rating ?? 3,
+            createdAt: tradeToUpdate.journal?.createdAt ?? new Date().toISOString()
+          }
+        }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('API Error response:', errorText)
+        throw new Error(`Failed to save journal entry: ${response.status} ${errorText}`)
       }
-      return t
-    })
-    setTrades(updatedTrades)
+
+      toast.success('Journal entry saved!')
+    } catch (error) {
+      console.error('Error saving journal:', error)
+      toast.error('Failed to save journal entry')
+    }
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">{formattedDate}</h2>
+          <h2 className="text-xl font-semibold text-gray-900">{formattedDate}</h2>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
+            className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
           >
             ×
           </button>
