@@ -21,11 +21,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Delete existing trades before saving new ones from CSV
-    if (source === 'CSV') {
-      await tradeService.deleteAllTrades()
-    }
-
     const result = await tradeService.saveTrades(trades, source)
     return NextResponse.json(result)
   } catch (error) {

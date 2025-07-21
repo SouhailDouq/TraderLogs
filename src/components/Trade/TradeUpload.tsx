@@ -54,10 +54,6 @@ export default function TradeUpload() {
     try {
       console.log('Starting file processing...')
       
-      // Clear existing trades first
-      clearTrades()
-      console.log('Cleared existing trades')
-
       // Process CSV content
       const content = await file.text()
       console.log('File content length:', content.length)
@@ -107,7 +103,50 @@ export default function TradeUpload() {
 
       const result = await response.json()
       console.log('Save result:', result)
-      toast.success(`${currentTrades.length} trades imported and saved successfully`)
+      
+      // Show detailed feedback about saved vs skipped trades
+      if (result.saved > 0 && result.skipped > 0) {
+        toast.success(`Import complete: ${result.saved} new trades saved, ${result.skipped} duplicates skipped`)
+      } else if (result.saved > 0) {
+        toast.success(`${result.saved} trades imported and saved successfully`)
+      } else if (result.skipped > 0) {
+        toast.success(`All ${result.skipped} trades were already in the database (no duplicates added)`)
+      } else {
+        toast.success('Import completed')
+      }
+      
+      // Reload all trades from database to refresh the UI with both old and new data
+      try {
+        const allTradesResponse = await fetch('/api/trades')
+        if (allTradesResponse.ok) {
+          const allTradesData = await allTradesResponse.json()
+          if (allTradesData.trades && Array.isArray(allTradesData.trades)) {
+            const mappedTrades = allTradesData.trades.map((dbTrade: any) => ({
+              id: dbTrade.id,
+              date: dbTrade.date,
+              symbol: dbTrade.symbol,
+              type: dbTrade.type,
+              name: dbTrade.name || '',
+              price: dbTrade.price,
+              quantity: dbTrade.quantity,
+              profitLoss: dbTrade.profitLoss || 0,
+              journal: dbTrade.journal || {
+                notes: '',
+                tags: [],
+                emotion: 'neutral',
+                rating: 3,
+                createdAt: new Date().toISOString()
+              }
+            }))
+            // Clear and reload all trades to show both old and new data
+            clearTrades()
+            useTradeStore.getState().setTrades(mappedTrades)
+          }
+        }
+      } catch (reloadError) {
+        console.error('Error reloading trades after import:', reloadError)
+        // Don't show error to user as the import was successful
+      }
     } catch (error) {
       console.error('Error processing file:', error)
       toast.error(`Failed to import trades: ${error instanceof Error ? error.message : 'Unknown error'}`)

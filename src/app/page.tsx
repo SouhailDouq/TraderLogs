@@ -18,6 +18,7 @@ export default function Home() {
   const clearTrades = useTradeStore(state => state.clearTrades)
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null)
+  const [tradeTimeRange, setTradeTimeRange] = useState<{ earliest: Date | null; latest: Date | null }>({ earliest: null, latest: null })
 
   useEffect(() => {
     // Load trades from database on page load
@@ -70,6 +71,20 @@ export default function Home() {
           console.error('Invalid trades data structure:', data)
           setDateRange(null)
         }
+        
+        // Fetch trade time range from the API
+        try {
+          const timeRangeResponse = await fetch('/api/trades/time-range')
+          if (timeRangeResponse.ok) {
+            const timeRangeData = await timeRangeResponse.json()
+            setTradeTimeRange({
+              earliest: timeRangeData.earliest ? new Date(timeRangeData.earliest) : null,
+              latest: timeRangeData.latest ? new Date(timeRangeData.latest) : null
+            })
+          }
+        } catch (error) {
+          console.error('Failed to fetch trade time range:', error)
+        }
       } catch (error) {
         console.error('Failed to fetch trades:', error)
         setDateRange(null)
@@ -86,10 +101,20 @@ export default function Home() {
             <h1 className="text-xl font-semibold text-gray-900">Trade Journal</h1>
             <div className="h-5 w-px bg-gray-200" />
             <div className="text-sm text-gray-500">
-              Trading date from{' '}
-              <span className="font-medium">
-                {format(new Date(), 'MMM d, yyyy')}
-              </span>
+              {tradeTimeRange.earliest && tradeTimeRange.latest ? (
+                <>
+                  Trading data from{' '}
+                  <span className="font-medium">
+                    {format(tradeTimeRange.earliest, 'MMM d, yyyy')}
+                  </span>
+                  {' '}to{' '}
+                  <span className="font-medium">
+                    {format(tradeTimeRange.latest, 'MMM d, yyyy')}
+                  </span>
+                </>
+              ) : (
+                <span className="text-gray-400">No trading data available</span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-4">
