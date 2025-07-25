@@ -241,17 +241,38 @@ const parseCSVContent = (content: string): CSVTrade[] => {
   const headers = parseCSVLine(headerLine)
   console.log('Parsed headers:', headers)
 
-  // Direct mapping for Trading212 CSV headers (exact match)
+  // Flexible mapping for various CSV formats
   const headerMap: Record<string, string> = {}
+  
+  // Define possible variations for each required field
+  const headerVariations: Record<string, string[]> = {
+    'Action': ['Action', 'Type', 'Side', 'Transaction Type', 'Order Type'],
+    'Time': ['Time', 'Date', 'DateTime', 'Timestamp', 'Date/Time', 'Trade Date'],
+    'Ticker': ['Ticker', 'Symbol', 'Stock Symbol', 'Instrument', 'Security'],
+    'No. of shares': ['No. of shares', 'Quantity', 'Shares', 'Amount', 'Qty', 'Volume', 'Units'],
+    'Price / share': ['Price / share', 'Price', 'Unit Price', 'Share Price', 'Price per Share', 'Execution Price']
+  }
+  
   headers.forEach((header: string) => {
     const trimmedHeader = header.trim()
-    // Exact matches for Trading212 format
-    if (trimmedHeader === 'Action') headerMap['Action'] = header
-    else if (trimmedHeader === 'Time') headerMap['Time'] = header
-    else if (trimmedHeader === 'Ticker') headerMap['Ticker'] = header
-    else if (trimmedHeader === 'No. of shares') headerMap['No. of shares'] = header
-    else if (trimmedHeader === 'Price / share') headerMap['Price / share'] = header
-    else if (trimmedHeader === 'Exchange rate') headerMap['Exchange rate'] = header
+    const lowerHeader = trimmedHeader.toLowerCase()
+    
+    // Check each required field for matches
+    Object.entries(headerVariations).forEach(([standardName, variations]) => {
+      if (!headerMap[standardName]) { // Only map if not already found
+        const match = variations.find(variation => 
+          variation.toLowerCase() === lowerHeader ||
+          lowerHeader.includes(variation.toLowerCase()) ||
+          variation.toLowerCase().includes(lowerHeader)
+        )
+        if (match) {
+          headerMap[standardName] = header
+        }
+      }
+    })
+    
+    // Also handle optional fields with exact matches
+    if (trimmedHeader === 'Exchange rate') headerMap['Exchange rate'] = header
     else if (trimmedHeader === 'Result') headerMap['Result'] = header
     else if (trimmedHeader === 'Name') headerMap['Name'] = header
     else if (trimmedHeader === 'Total') headerMap['Total'] = header
@@ -267,7 +288,21 @@ const parseCSVContent = (content: string): CSVTrade[] => {
   if (missingHeaders.length > 0) {
     console.error('Missing required headers:', missingHeaders)
     console.error('Available headers:', headers)
-    throw new Error(`Missing required headers: ${missingHeaders.join(', ')}. Available headers: ${headers.join(', ')}`)
+    console.error('Header mapping result:', headerMap)
+    
+    // Provide helpful suggestions
+    const suggestions = missingHeaders.map(missing => {
+      const variations = {
+        'Action': 'Try: Action, Type, Side, Transaction Type, Order Type',
+        'Time': 'Try: Time, Date, DateTime, Timestamp, Date/Time, Trade Date',
+        'Ticker': 'Try: Ticker, Symbol, Stock Symbol, Instrument, Security',
+        'No. of shares': 'Try: Quantity, Shares, Amount, Qty, Volume, Units',
+        'Price / share': 'Try: Price, Unit Price, Share Price, Price per Share, Execution Price'
+      }
+      return `${missing}: ${variations[missing as keyof typeof variations] || 'No suggestions available'}`
+    }).join('\n')
+    
+    throw new Error(`Missing required headers: [${missingHeaders.map(h => `"${h}"`).join(', ')}]\n\nAvailable headers in your CSV: [${headers.map(h => `"${h}"`).join(', ')}]\n\nSuggested column names:\n${suggestions}`)
   }
 
   const trades: CSVTrade[] = []
