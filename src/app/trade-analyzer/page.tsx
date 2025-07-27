@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { formatCurrency } from '@/utils/formatters'
 // Removed direct API import - now using backend route
 
@@ -44,7 +44,7 @@ interface StockData {
 }
 
 interface TradeSetup {
-  entrySignal: 'strong' | 'moderate' | 'weak' | 'avoid'
+  signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid'
   entryPrice: number
   stopLoss: number
   takeProfit1: number
@@ -53,6 +53,15 @@ interface TradeSetup {
   positionScore: number
   signals: string[]
   warnings: string[]
+}
+
+interface WatchlistStock {
+  symbol: string
+  signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid'
+  positionScore: number
+  entryPrice: number
+  analyzedAt: string
+  stockData: StockData
 }
 
 export default function TradeAnalyzer() {
@@ -98,6 +107,10 @@ export default function TradeAnalyzer() {
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [tickerInput, setTickerInput] = useState('')
+  
+  // Daily watchlist state
+  const [dailyWatchlist, setDailyWatchlist] = useState<WatchlistStock[]>([])
+  const [lastResetDate, setLastResetDate] = useState<string>('')
 
   const fetchStockDataFromAPI = async () => {
     if (!tickerInput.trim()) {
@@ -289,14 +302,14 @@ export default function TradeAnalyzer() {
     const riskRewardRatio = riskAmount > 0 ? rewardAmount / riskAmount : 0
 
     // Determine signal strength
-    let entrySignal: 'strong' | 'moderate' | 'weak' | 'avoid'
-    if (score >= 70) entrySignal = 'strong'
-    else if (score >= 50) entrySignal = 'moderate'
-    else if (score >= 30) entrySignal = 'weak'
-    else entrySignal = 'avoid'
+    let signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid'
+    if (score >= 70) signal = 'Strong'
+    else if (score >= 50) signal = 'Moderate'
+    else if (score >= 30) signal = 'Weak'
+    else signal = 'Avoid'
 
     return {
-      entrySignal,
+      signal,
       entryPrice,
       stopLoss,
       takeProfit1,
@@ -313,12 +326,102 @@ export default function TradeAnalyzer() {
 
   const getSignalColor = (signal: string) => {
     switch (signal) {
-      case 'strong': return 'bg-green-100 border-green-300 text-green-800'
-      case 'moderate': return 'bg-yellow-100 border-yellow-300 text-yellow-800'
-      case 'weak': return 'bg-orange-100 border-orange-300 text-orange-800'
-      case 'avoid': return 'bg-red-100 border-red-300 text-red-800'
+      case 'Strong': return 'bg-green-100 border-green-300 text-green-800'
+      case 'Moderate': return 'bg-yellow-100 border-yellow-300 text-yellow-800'
+      case 'Weak': return 'bg-orange-100 border-orange-300 text-orange-800'
+      case 'Avoid': return 'bg-red-100 border-red-300 text-red-800'
       default: return 'bg-gray-100 border-gray-300 text-gray-800'
     }
+  }
+
+  // Daily watchlist functions
+  const getCurrentDate = () => new Date().toISOString().split('T')[0]
+  
+  // Load watchlist from database
+  const loadWatchlistFromDB = async () => {
+    try {
+      const response = await fetch('/api/watchlist')
+      if (!response.ok) throw new Error('Failed to fetch watchlist')
+      
+      const data = await response.json()
+      const watchlist = data.watchlist || []
+      
+      // Sort watchlist by signal strength and score
+      const signalPriority = { 'Strong': 4, 'Moderate': 3, 'Weak': 2, 'Avoid': 1 }
+      watchlist.sort((a: WatchlistStock, b: WatchlistStock) => {
+        const aPriority = signalPriority[a.signal]
+        const bPriority = signalPriority[b.signal]
+        if (aPriority !== bPriority) return bPriority - aPriority
+        return b.positionScore - a.positionScore
+      })
+      
+      setDailyWatchlist(watchlist)
+      setLastResetDate(getCurrentDate())
+    } catch (error) {
+      console.error('Error loading watchlist from database:', error)
+      setDailyWatchlist([])
+      setLastResetDate(getCurrentDate())
+    }
+  }
+  
+  // Add stock to database
+  const addStockToDB = async (stock: WatchlistStock) => {
+    try {
+      const response = await fetch('/api/watchlist', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(stock),
+      })
+      
+      if (!response.ok) throw new Error('Failed to add to watchlist')
+      
+      // Reload watchlist from database to get updated list
+      await loadWatchlistFromDB()
+    } catch (error) {
+      console.error('Error adding to watchlist:', error)
+    }
+  }
+  
+  // Manual reset function
+  const handleManualReset = async () => {
+    try {
+      const response = await fetch('/api/watchlist', {
+        method: 'DELETE',
+      })
+      
+      if (!response.ok) throw new Error('Failed to clear watchlist')
+      
+      setDailyWatchlist([])
+    } catch (error) {
+      console.error('Error clearing watchlist:', error)
+    }
+  }
+  
+  const addToWatchlist = async (stock: WatchlistStock) => {
+    await addStockToDB(stock)
+  }
+  
+  // Initialize watchlist on component mount
+  useEffect(() => {
+    loadWatchlistFromDB()
+  }, [])
+  
+  // Handle adding current analysis to watchlist
+  const handleAddToWatchlist = async () => {
+    if (!hasData || !stockData.symbol) return
+    
+    const watchlistStock: WatchlistStock = {
+      symbol: stockData.symbol,
+      signal: setup.signal,
+      positionScore: setup.positionScore,
+      entryPrice: setup.entryPrice,
+      analyzedAt: new Date().toISOString(),
+      stockData: stockData
+    }
+    
+    await addToWatchlist(watchlistStock)
   }
 
   return (
@@ -341,6 +444,65 @@ export default function TradeAnalyzer() {
             Analyze momentum/breakout setups for your swing trading strategy
           </p>
         </div>
+
+        {/* Daily Top 3 Watchlist */}
+        {dailyWatchlist.length > 0 && (
+          <div className="mb-8 bg-white rounded-lg shadow-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <svg className="w-6 h-6 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                </svg>
+                <h2 className="text-xl font-semibold text-gray-800">Today's Watchlist</h2>
+                <span className="text-sm text-gray-500">({getCurrentDate()})</span>
+                <span className="text-sm text-gray-400">• {dailyWatchlist.length} stocks</span>
+              </div>
+              <button
+                onClick={handleManualReset}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors duration-200"
+                title="Clear today's watchlist"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Clear List
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {dailyWatchlist.map((stock, index) => (
+                <div key={stock.symbol} className={`p-4 rounded-lg border-2 ${getSignalColor(stock.signal)}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-bold text-gray-700">#{index + 1}</span>
+                      <span className="text-lg font-semibold">{stock.symbol}</span>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                      stock.signal === 'Strong' ? 'bg-green-100 text-green-800' :
+                      stock.signal === 'Moderate' ? 'bg-yellow-100 text-yellow-800' :
+                      stock.signal === 'Weak' ? 'bg-orange-100 text-orange-800' :
+                      'bg-red-100 text-red-800'
+                    }`}>
+                      {stock.signal}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-600 space-y-1">
+                    <div className="flex justify-between">
+                      <span>Score:</span>
+                      <span className="font-medium">{stock.positionScore}/100</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Entry:</span>
+                      <span className="font-medium">{formatCurrency(stock.entryPrice)}</span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Analyzed: {new Date(stock.analyzedAt).toLocaleTimeString()}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Input Section */}
@@ -646,15 +808,28 @@ export default function TradeAnalyzer() {
             {hasData ? (
               <div className="space-y-6">
                 {/* Signal Strength */}
-                <div className={`p-4 rounded-lg border-2 ${getSignalColor(setup.entrySignal)}`}>
+                <div className={`p-4 rounded-lg border-2 ${getSignalColor(setup.signal)}`}>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-lg font-semibold">Entry Signal</h3>
-                    <span className="text-2xl font-bold uppercase">{setup.entrySignal}</span>
+                    <span className="text-2xl font-bold uppercase">{setup.signal}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Setup Score</span>
                     <span className="font-bold">{setup.positionScore}/100</span>
                   </div>
+                </div>
+
+                {/* Add to Watchlist Button */}
+                <div className="flex justify-center">
+                  <button
+                    onClick={handleAddToWatchlist}
+                    className="flex items-center gap-2 px-6 py-3 bg-yellow-500 hover:bg-yellow-600 text-white font-medium rounded-lg transition-colors duration-200 shadow-md hover:shadow-lg"
+                  >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                    </svg>
+                    Add to Today's Watchlist
+                  </button>
                 </div>
 
                 {/* Trade Levels */}

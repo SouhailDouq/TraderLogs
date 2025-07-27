@@ -78,7 +78,7 @@ async function fetchFromYahooFinance(symbol: string) {
     }
 
     return processYahooFinanceData(data, symbol)
-  } catch (error: any) {
+  } catch (error) {
     if (error.name === 'AbortError') {
       console.log(`Timeout fetching ${symbol} from primary endpoint`)
     } else {
@@ -119,7 +119,7 @@ async function fetchFromAlternativeEndpoint(symbol: string) {
     }
 
     return processAlternativeYahooData(data, symbol)
-  } catch (error: any) {
+  } catch (error) {
     if (error.name === 'AbortError') {
       console.log(`Timeout fetching ${symbol} from alternative endpoint`)
     } else {
@@ -145,113 +145,103 @@ function processYahooFinanceData(data: any, symbol: string) {
   const volumes = quotes.volume.filter((v: number) => v !== null)
   const latestVolume = volumes[volumes.length - 1] || 0
     
-  // Calculate simple moving averages from historical data
-  const closes = quotes.close.filter((c: number) => c !== null)
-  const calculateSMA = (period: number) => {
-    if (closes.length < period) return currentPrice
-    const recentCloses = closes.slice(-period)
-    const sum = recentCloses.reduce((acc: number, price: number) => acc + price, 0)
-    return (sum / period).toFixed(2)
-  }
+    // Calculate simple moving averages from historical data
+    const closes = quotes.close.filter((c: number) => c !== null)
+    const calculateSMA = (period: number) => {
+      if (closes.length < period) return currentPrice
+      const recentCloses = closes.slice(-period)
+      const sum = recentCloses.reduce((acc: number, price: number) => acc + price, 0)
+      return (sum / period).toFixed(2)
+    }
 
-  // Calculate RSI (simplified)
-  const calculateRSI = () => {
-    if (closes.length < 14) return '50.0'
+    // Calculate RSI (simplified)
+    const calculateRSI = () => {
+      if (closes.length < 14) return '50.0'
+      
+      const period = 14
+      const recentCloses = closes.slice(-period - 1)
+      let gains = 0
+      let losses = 0
+      
+      for (let i = 1; i < recentCloses.length; i++) {
+        const change = recentCloses[i] - recentCloses[i - 1]
+        if (change > 0) {
+          gains += change
+        } else {
+          losses += Math.abs(change)
+        }
+      }
+      
+      const avgGain = gains / period
+      const avgLoss = losses / period
+      
+      if (avgLoss === 0) return '100.0'
+      
+      const rs = avgGain / avgLoss
+      const rsi = 100 - (100 / (1 + rs))
+      
+      return rsi.toFixed(1)
+    }
+
+    // Format market cap (if available)
+    const formatMarketCap = (shares: number, price: number): string => {
+      if (!shares || !price) return '-'
+      const marketCap = shares * price
+      if (marketCap >= 1000000000) {
+        return `${(marketCap / 1000000000).toFixed(2)}B`
+      } else if (marketCap >= 1000000) {
+        return `${(marketCap / 1000000).toFixed(0)}M`
+      }
+      return `${Math.round(marketCap / 1000)}K`
+    }
+
+    // Calculate average volume (last 20 days)
+    const avgVolume = volumes.length > 20 
+      ? volumes.slice(-20).reduce((sum: number, vol: number) => sum + vol, 0) / 20
+      : latestVolume
+
+    const relativeVolume = avgVolume > 0 ? (latestVolume / avgVolume).toFixed(2) : '1.0'
+
+    const stockData = {
+      symbol: symbol.toUpperCase(),
+      price: currentPrice,
+      change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${Number(changePercent) >= 0 ? '+' : ''}${changePercent}%)`,
+      volume: latestVolume.toLocaleString(),
+      marketCap: formatMarketCap(meta.sharesOutstanding, currentPrice),
+      pe: meta.trailingPE ? meta.trailingPE.toFixed(2) : '-',
+      beta: meta.beta ? meta.beta.toFixed(2) : '-',
+      sma20: calculateSMA(20),
+      sma50: calculateSMA(50),
+      sma200: calculateSMA(200),
+      week52High: (meta.fiftyTwoWeekHigh || currentPrice).toFixed(2),
+      week52Low: (meta.fiftyTwoWeekLow || currentPrice).toFixed(2),
+      rsi: calculateRSI(),
+      relVolume: relativeVolume
+    }
+
+    return NextResponse.json(stockData)
+
+  } catch (error) {
+    console.error('Error fetching stock data for', symbol, ':', error)
     
-    const period = 14
-    const recentCloses = closes.slice(-period - 1)
-    let gains = 0
-    let losses = 0
+    // Provide specific error messages based on error type
+    let errorMessage = 'Failed to fetch stock data'
     
-    for (let i = 1; i < recentCloses.length; i++) {
-      const change = recentCloses[i] - recentCloses[i - 1]
-      if (change > 0) gains += change
-      else losses += Math.abs(change)
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        errorMessage = `Request timeout for ${symbol}. The API is taking too long to respond.`
+      } else if (error.message.includes('fetch failed')) {
+        errorMessage = `Network error for ${symbol}. Please check your connection or try again later.`
+      } else if (error.message.includes('404')) {
+        errorMessage = `Stock symbol ${symbol} not found. Please verify the ticker symbol.`
+      } else {
+        errorMessage = `API error for ${symbol}: ${error.message}`
+      }
     }
     
-    const avgGain = gains / period
-    const avgLoss = losses / period
-    const rs = avgGain / avgLoss
-    const rsi = 100 - (100 / (1 + rs))
-    
-    return rsi.toFixed(1)
-  }
-
-  // Format market cap
-  const formatMarketCap = (shares: number, price: number) => {
-    if (!shares || !price) return '-'
-    const marketCap = shares * price
-    if (marketCap >= 1e12) return `${(marketCap / 1e12).toFixed(1)}T`
-    if (marketCap >= 1e9) return `${(marketCap / 1e9).toFixed(1)}B`
-    if (marketCap >= 1e6) return `${(marketCap / 1e6).toFixed(1)}M`
-    return `${marketCap.toFixed(0)}`
-  }
-
-  // Calculate average volume (20-day)
-  const avgVolume = volumes.length >= 20 
-    ? volumes.slice(-20).reduce((sum: number, vol: number) => sum + vol, 0) / 20
-    : latestVolume
-
-  const relativeVolume = avgVolume > 0 ? (latestVolume / avgVolume).toFixed(2) : '1.0'
-
-  return {
-    symbol: symbol.toUpperCase(),
-    price: currentPrice,
-    change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${Number(changePercent) >= 0 ? '+' : ''}${changePercent}%)`,
-    volume: latestVolume.toLocaleString(),
-    marketCap: formatMarketCap(meta.sharesOutstanding, currentPrice),
-    pe: meta.trailingPE ? meta.trailingPE.toFixed(2) : '-',
-    beta: meta.beta ? meta.beta.toFixed(2) : '-',
-    sma20: calculateSMA(20),
-    sma50: calculateSMA(50),
-    sma200: calculateSMA(200),
-    week52High: (meta.fiftyTwoWeekHigh || currentPrice).toFixed(2),
-    week52Low: (meta.fiftyTwoWeekLow || currentPrice).toFixed(2),
-    rsi: calculateRSI(),
-    relVolume: relativeVolume
-  }
-}
-
-// Process data from alternative Yahoo Finance endpoint
-function processAlternativeYahooData(data: any, symbol: string) {
-  const result = data.quoteSummary.result[0]
-  const price = result.price
-  const summaryDetail = result.summaryDetail
-  
-  // Get current price and calculate change
-  const currentPrice = price.regularMarketPrice?.raw || 0
-  const previousClose = price.regularMarketPreviousClose?.raw || currentPrice
-  const change = currentPrice - previousClose
-  const changePercent = ((change / previousClose) * 100).toFixed(2)
-  
-  // Get volume data
-  const latestVolume = price.regularMarketVolume?.raw || 0
-  const avgVolume = summaryDetail.averageVolume?.raw || latestVolume
-  const relativeVolume = avgVolume > 0 ? (latestVolume / avgVolume).toFixed(2) : '1.0'
-
-  // Format market cap
-  const formatMarketCap = (marketCap: number) => {
-    if (!marketCap) return '-'
-    if (marketCap >= 1e12) return `${(marketCap / 1e12).toFixed(1)}T`
-    if (marketCap >= 1e9) return `${(marketCap / 1e9).toFixed(1)}B`
-    if (marketCap >= 1e6) return `${(marketCap / 1e6).toFixed(1)}M`
-    return `${marketCap.toFixed(0)}`
-  }
-
-  return {
-    symbol: symbol.toUpperCase(),
-    price: currentPrice,
-    change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${Number(changePercent) >= 0 ? '+' : ''}${changePercent}%)`,
-    volume: latestVolume.toLocaleString(),
-    marketCap: formatMarketCap(price.marketCap?.raw || 0),
-    pe: summaryDetail.trailingPE?.raw ? summaryDetail.trailingPE.raw.toFixed(2) : '-',
-    beta: summaryDetail.beta?.raw ? summaryDetail.beta.raw.toFixed(2) : '-',
-    sma20: currentPrice.toFixed(2), // Fallback values since we don't have historical data
-    sma50: currentPrice.toFixed(2),
-    sma200: currentPrice.toFixed(2),
-    week52High: (summaryDetail.fiftyTwoWeekHigh?.raw || currentPrice).toFixed(2),
-    week52Low: (summaryDetail.fiftyTwoWeekLow?.raw || currentPrice).toFixed(2),
-    rsi: '50.0', // Default RSI since we don't have historical data
-    relVolume: relativeVolume
+    return NextResponse.json(
+      { error: errorMessage }, 
+      { status: 500 }
+    )
   }
 }

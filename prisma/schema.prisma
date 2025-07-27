@@ -35,3 +35,19 @@ model Trade {
   @@unique([sourceId, source])
   @@index([date])
 }
+
+model Watchlist {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  symbol        String
+  signal        String   // 'Strong', 'Moderate', 'Weak', 'Avoid'
+  positionScore Float
+  entryPrice    Float
+  analyzedAt    String
+  stockData     Json     // Stock data from API
+  date          String   // Date in YYYY-MM-DD format for daily reset
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([symbol, date])
+  @@index([date])
+}
