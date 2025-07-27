@@ -43,6 +43,16 @@ interface TradeStats {
   largestLoss: number
 }
 
+interface MonthlyPnL {
+  month: string
+  year: number
+  totalPnL: number
+  profitableTrades: number
+  losingTrades: number
+  totalTrades: number
+  winRate: number
+}
+
 export interface TradeStore {
   trades: Trade[]
   processedTrades: Record<string, Trade[]>
@@ -56,6 +66,8 @@ export interface TradeStore {
   setTradeEmotion: (tradeId: string, emotion: 'positive' | 'neutral' | 'negative') => void
   setTradeRating: (tradeId: string, rating: 1 | 2 | 3 | 4 | 5) => void
   setSelectedDate: (date: string | null) => void
+  getMonthlyPnL: (month: number, year: number) => MonthlyPnL
+  getCurrentMonthPnL: () => MonthlyPnL
 }
 
 // Function to analyze positions and mark open vs closed trades
@@ -114,6 +126,81 @@ const calculateStats = (trades: Trade[]): TradeStats => {
     profitFactor: totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? Infinity : 0,
     largestWin: profitableTrades.length > 0 ? Math.max(...profitableTrades.map(t => t.profitLoss)) : 0,
     largestLoss: losingTrades.length > 0 ? Math.min(...losingTrades.map(t => t.profitLoss)) : 0,
+  }
+}
+
+// Calculate monthly P&L for a specific month and year
+const calculateMonthlyPnL = (trades: Trade[], month: number, year: number): MonthlyPnL => {
+  console.log('=== Monthly P&L Calculation Debug ===')
+  console.log('Input trades count:', trades.length)
+  console.log('Target month:', month, 'Target year:', year)
+  
+  const monthlyTrades = trades.filter(trade => {
+    const tradeDate = new Date(trade.date)
+    const tradeMonth = tradeDate.getMonth()
+    const tradeYear = tradeDate.getFullYear()
+    return tradeMonth === month && tradeYear === year
+  })
+
+  console.log('Monthly trades count:', monthlyTrades.length)
+  
+  // Group trades by symbol to identify completed positions
+  const positionsBySymbol: Record<string, Trade[]> = {}
+  monthlyTrades.forEach(trade => {
+    if (!positionsBySymbol[trade.symbol]) {
+      positionsBySymbol[trade.symbol] = []
+    }
+    positionsBySymbol[trade.symbol].push(trade)
+  })
+  
+  // Calculate completed positions (only count positions that are closed)
+  const completedPositions: { symbol: string; totalPnL: number; isProfit: boolean }[] = []
+  
+  Object.entries(positionsBySymbol).forEach(([symbol, symbolTrades]) => {
+    // Check if this position is closed (has both buys and sells, or is marked as closed)
+    const hasClosedTrades = symbolTrades.some(t => !t.isOpen && t.profitLoss !== 0)
+    
+    if (hasClosedTrades) {
+      // Sum up the P&L for this symbol (completed position)
+      const totalSymbolPnL = symbolTrades
+        .filter(t => !t.isOpen && t.profitLoss !== 0)
+        .reduce((sum, t) => sum + t.profitLoss, 0)
+      
+      if (totalSymbolPnL !== 0) {
+        completedPositions.push({
+          symbol,
+          totalPnL: totalSymbolPnL,
+          isProfit: totalSymbolPnL > 0
+        })
+        
+        console.log(`Completed position: ${symbol} - P&L: ${totalSymbolPnL}`)
+      }
+    }
+  })
+  
+  const profitablePositions = completedPositions.filter(p => p.isProfit)
+  const losingPositions = completedPositions.filter(p => !p.isProfit)
+  const totalPnL = completedPositions.reduce((sum, p) => sum + p.totalPnL, 0)
+
+  console.log('Completed positions count:', completedPositions.length)
+  console.log('Profitable positions:', profitablePositions.length)
+  console.log('Losing positions:', losingPositions.length)
+  console.log('Total P&L:', totalPnL)
+  console.log('=== End Debug ===')
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ]
+
+  return {
+    month: monthNames[month],
+    year,
+    totalPnL,
+    profitableTrades: profitablePositions.length,
+    losingTrades: losingPositions.length,
+    totalTrades: completedPositions.length,
+    winRate: completedPositions.length > 0 ? (profitablePositions.length / completedPositions.length) * 100 : 0
   }
 }
 
@@ -736,5 +823,16 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
       console.error('Error processing CSV:', error)
       throw error
     }
+  },
+
+  getMonthlyPnL: (month: number, year: number) => {
+    const { trades } = get()
+    return calculateMonthlyPnL(trades, month, year)
+  },
+
+  getCurrentMonthPnL: () => {
+    const { trades } = get()
+    const now = new Date()
+    return calculateMonthlyPnL(trades, now.getMonth(), now.getFullYear())
   },
 }))

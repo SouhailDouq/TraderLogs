@@ -7,6 +7,7 @@ import ClientCalendar from '@/components/Calendar/Calendar'
 import ClientTradeUpload from '@/components/Trade/TradeUpload'
 import ClientTradeSummary from '@/components/Trade/TradeSummary'
 import ClientStrategyDashboard from '@/components/Strategy/StrategyDashboard'
+import MonthlyPnL from '@/components/Trade/MonthlyPnL'
 import { TradeStore } from '@/utils/store'
 
 // Use individual selectors for better performance
@@ -137,6 +138,7 @@ export default function Home() {
             </div>
           </div>
           <div className="lg:col-span-4 space-y-6">
+            <MonthlyPnL />
             <div className="bg-white rounded-lg shadow-sm p-6">
               <ClientTradeUpload />
             </div>
