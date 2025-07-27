@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { formatCurrency } from '@/utils/formatters'
+// Removed direct API import - now using backend route
 
 interface StockData {
   symbol: string
@@ -93,6 +94,86 @@ export default function TradeAnalyzer() {
     optionable: '',
     shortable: ''
   })
+
+  const [isLoading, setIsLoading] = useState(false)
+  const [apiError, setApiError] = useState<string | null>(null)
+  const [tickerInput, setTickerInput] = useState('')
+
+  const fetchStockDataFromAPI = async () => {
+    if (!tickerInput.trim()) {
+      setApiError('Please enter a ticker symbol')
+      return
+    }
+
+    setIsLoading(true)
+    setApiError(null)
+
+    try {
+      // Use our backend API route to avoid CORS issues
+      const response = await fetch(`/api/stock-data?symbol=${encodeURIComponent(tickerInput.trim().toUpperCase())}`)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(data.error)
+      }
+      
+      if (data) {
+        setStockData({
+          ...stockData,
+          symbol: data.symbol,
+          price: data.price,
+          change: data.change,
+          volume: data.volume,
+          marketCap: data.marketCap,
+          pe: data.pe,
+          beta: data.beta,
+          sma20: data.sma20,
+          sma50: data.sma50,
+          sma200: data.sma200,
+          week52High: data.week52High,
+          week52Low: data.week52Low,
+          rsi: data.rsi,
+          relVolume: data.relVolume,
+          // Keep other fields as they were
+          avgVolume: stockData.avgVolume,
+          forwardPE: stockData.forwardPE,
+          peg: stockData.peg,
+          epsThisY: stockData.epsThisY,
+          epsNextY: stockData.epsNextY,
+          salesQQ: stockData.salesQQ,
+          epsQQ: stockData.epsQQ,
+          insiderOwn: stockData.insiderOwn,
+          insiderTrans: stockData.insiderTrans,
+          instOwn: stockData.instOwn,
+          instTrans: stockData.instTrans,
+          roa: stockData.roa,
+          roe: stockData.roe,
+          roi: stockData.roi,
+          grossMargin: stockData.grossMargin,
+          operMargin: stockData.operMargin,
+          profitMargin: stockData.profitMargin,
+          avgVolume10d: stockData.avgVolume10d,
+          atr: stockData.atr,
+          volatility: stockData.volatility,
+          optionable: stockData.optionable,
+          shortable: stockData.shortable
+        })
+        setApiError(null)
+      } else {
+        setApiError('Failed to fetch stock data. Please check the ticker symbol.')
+      }
+    } catch (error) {
+      setApiError('Error fetching stock data. Please try again.')
+      console.error('API Error:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const analyzeSetup = (): TradeSetup => {
     const signals: string[] = []
@@ -267,6 +348,73 @@ export default function TradeAnalyzer() {
             <h2 className="text-xl font-semibold text-gray-800 mb-6">Stock Data Input</h2>
             
             <div className="space-y-6">
+              {/* API Ticker Lookup */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="text-lg font-medium text-blue-800 mb-4 flex items-center gap-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Quick Lookup (Auto-Fill)
+                </h3>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={tickerInput}
+                      onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
+                      onKeyPress={(e) => e.key === 'Enter' && fetchStockDataFromAPI()}
+                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      placeholder="Enter ticker symbol (e.g., AAPL, TSLA)"
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <button
+                    onClick={fetchStockDataFromAPI}
+                    disabled={isLoading || !tickerInput.trim()}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-md transition-colors duration-200 flex items-center gap-2"
+                  >
+                    {isLoading ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        Fetch Data
+                      </>
+                    )}
+                  </button>
+                </div>
+                {apiError && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
+                    <p className="text-sm text-red-700 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      {apiError}
+                    </p>
+                  </div>
+                )}
+                <div className="mt-3">
+                  <p className="text-sm text-blue-600">
+                    💡 <strong>Pro tip:</strong> Enter any US stock ticker to auto-fill the data below, or continue with manual entry from Finviz.
+                  </p>
+                </div>
+              </div>
+
+              {/* Manual Entry Divider */}
+              <div className="flex items-center">
+                <div className="flex-1 border-t border-gray-300"></div>
+                <div className="px-4 text-sm text-gray-500 bg-gray-50">OR ENTER MANUALLY</div>
+                <div className="flex-1 border-t border-gray-300"></div>
+              </div>
+
               {/* Basic Info - Finviz Style */}
               <div>
                 <h3 className="text-lg font-medium text-gray-700 mb-4">Basic Information</h3>
@@ -541,7 +689,7 @@ export default function TradeAnalyzer() {
                   'bg-red-50 border-red-200'
                 }`}>
                   <div className="flex items-center justify-between">
-                    <span className="font-medium">Risk/Reward Ratio</span>
+                    <span className="font-medium text-gray-700">Risk/Reward Ratio</span>
                     <span className={`text-xl font-bold ${
                       setup.riskRewardRatio >= 2 ? 'text-green-600' : 
                       setup.riskRewardRatio >= 1 ? 'text-yellow-600' : 

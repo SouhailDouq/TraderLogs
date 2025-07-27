@@ -28,6 +28,12 @@ export interface Trade {
   journal?: TradeJournal
   isOpen?: boolean // True if position is still open (not fully sold)
   position?: 'long' | 'short' | 'closed' // Position status
+  // Extended analysis fields
+  volume?: number
+  avgVolume?: number
+  weekHigh52?: number
+  weekPerf4?: number
+  marketCap?: number
 }
 
 interface TradeStats {
@@ -214,6 +220,13 @@ interface CSVTrade {
   total?: number
   currency?: string
   result?: number
+  // Extended analysis fields
+  volume?: number
+  avgVolume?: number
+  weekHigh52?: number
+  weekPerf4?: number
+  marketCap?: number
+  notes?: string
 }
 
 interface Trading212Row {
@@ -337,7 +350,14 @@ const parseCSVContent = (content: string): CSVTrade[] => {
     'Time': ['Time', 'Date', 'DateTime', 'Timestamp', 'Date/Time', 'Trade Date'],
     'Ticker': ['Ticker', 'Symbol', 'Stock Symbol', 'Instrument', 'Security'],
     'No. of shares': ['No. of shares', 'Quantity', 'Shares', 'Amount', 'Qty', 'Volume', 'Units'],
-    'Price / share': ['Price / share', 'Price', 'Unit Price', 'Share Price', 'Price per Share', 'Execution Price']
+    'Price / share': ['Price / share', 'Price', 'Unit Price', 'Share Price', 'Price per Share', 'Execution Price'],
+    // Extended analysis fields (optional)
+    'Volume': ['Volume', 'Daily Volume', 'Trade Volume'],
+    'Avg Volume': ['Avg Volume', 'Average Volume', 'Avg Volume (30d)', 'AvgVolume'],
+    '52 Week High': ['52 Week High', '52W High', 'WeekHigh52', 'Year High'],
+    '4 Week Performance': ['4 Week Performance', '4W Perf', 'WeekPerf4', 'Monthly Performance'],
+    'Market Cap': ['Market Cap', 'MarketCap', 'Market Capitalization', 'Mkt Cap'],
+    'Notes': ['Notes', 'Comments', 'Description', 'Memo']
   }
   
   headers.forEach((header: string) => {
@@ -531,7 +551,14 @@ const parseCSVContent = (content: string): CSVTrade[] => {
         name: row[headerMap['Name']] || '',
         shares: shares,
         price: priceInEUR,
-        result: resultInEUR
+        result: resultInEUR,
+        // Extended analysis fields (optional)
+        volume: headerMap['Volume'] ? parseFloat((row[headerMap['Volume']] || '').replace(/[,\s]/g, '')) || undefined : undefined,
+        avgVolume: headerMap['Avg Volume'] ? parseFloat((row[headerMap['Avg Volume']] || '').replace(/[,\s]/g, '')) || undefined : undefined,
+        weekHigh52: headerMap['52 Week High'] ? parseFloat((row[headerMap['52 Week High']] || '').replace(/[,\s]/g, '')) || undefined : undefined,
+        weekPerf4: headerMap['4 Week Performance'] ? parseFloat((row[headerMap['4 Week Performance']] || '').replace(/[,\s]/g, '')) || undefined : undefined,
+        marketCap: headerMap['Market Cap'] ? parseFloat((row[headerMap['Market Cap']] || '').replace(/[,\s]/g, '')) || undefined : undefined,
+        notes: headerMap['Notes'] ? row[headerMap['Notes']] || undefined : undefined
       }
 
       if (index < 3) {
@@ -800,6 +827,13 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
             price: trade.price,
             quantity: trade.shares,
             profitLoss: trade.result || 0, // Use Result field directly from CSV
+            // Extended analysis fields from CSV
+            volume: trade.volume,
+            avgVolume: trade.avgVolume,
+            weekHigh52: trade.weekHigh52,
+            weekPerf4: trade.weekPerf4,
+            marketCap: trade.marketCap,
+            notes: trade.notes, // CSV notes go to trade.notes, not journal.notes
             journal: {
               notes: '',
               tags: [],
