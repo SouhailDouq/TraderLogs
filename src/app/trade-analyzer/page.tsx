@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { formatCurrency } from '@/utils/formatters'
+import { useDarkMode } from '@/hooks/useDarkMode'
 // Removed direct API import - now using backend route
 
 interface StockData {
@@ -65,6 +66,8 @@ interface WatchlistStock {
 }
 
 export default function TradeAnalyzer() {
+  const isDarkMode = useDarkMode()
+  
   const [stockData, setStockData] = useState<StockData>({
     symbol: '',
     price: 0,
@@ -425,13 +428,19 @@ export default function TradeAnalyzer() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className={`min-h-screen transition-colors ${
+      isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
+    }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <div className="flex items-center gap-4 mb-4">
             <a 
               href="/"
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors duration-200"
+              className={`flex items-center gap-2 transition-colors duration-200 ${
+                isDarkMode
+                  ? 'text-gray-300 hover:text-gray-100'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -439,23 +448,35 @@ export default function TradeAnalyzer() {
               Back to Dashboard
             </a>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Trade Setup Analyzer</h1>
-          <p className="mt-2 text-gray-600">
+          <h1 className={`text-3xl font-bold ${
+            isDarkMode ? 'text-white' : 'text-gray-900'
+          }`}>Trade Setup Analyzer</h1>
+          <p className={`mt-2 ${
+            isDarkMode ? 'text-gray-300' : 'text-gray-600'
+          }`}>
             Analyze momentum/breakout setups for your swing trading strategy
           </p>
         </div>
 
         {/* Daily Top 3 Watchlist */}
         {dailyWatchlist.length > 0 && (
-          <div className="mb-8 bg-white rounded-lg shadow-lg p-6">
+          <div className={`mb-8 rounded-lg shadow-lg p-6 transition-colors ${
+            isDarkMode ? 'bg-gray-800' : 'bg-white'
+          }`}>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <svg className="w-6 h-6 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                 </svg>
-                <h2 className="text-xl font-semibold text-gray-800">Today's Watchlist</h2>
-                <span className="text-sm text-gray-500">({getCurrentDate()})</span>
-                <span className="text-sm text-gray-400">• {dailyWatchlist.length} stocks</span>
+                <h2 className={`text-xl font-semibold ${
+                  isDarkMode ? 'text-white' : 'text-gray-800'
+                }`}>Today's Watchlist</h2>
+                <span className={`text-sm ${
+                  isDarkMode ? 'text-gray-300' : 'text-gray-500'
+                }`}>({getCurrentDate()})</span>
+                <span className={`text-sm ${
+                  isDarkMode ? 'text-gray-400' : 'text-gray-400'
+                }`}>• {dailyWatchlist.length} stocks</span>
               </div>
               <button
                 onClick={handleManualReset}
@@ -506,8 +527,12 @@ export default function TradeAnalyzer() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Input Section */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-800 mb-6">Stock Data Input</h2>
+          <div className={`rounded-lg shadow-lg p-6 transition-colors ${
+            isDarkMode ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <h2 className={`text-xl font-semibold mb-6 ${
+              isDarkMode ? 'text-white' : 'text-gray-800'
+            }`}>Stock Data Input</h2>
             
             <div className="space-y-6">
               {/* API Ticker Lookup */}
@@ -525,7 +550,11 @@ export default function TradeAnalyzer() {
                       value={tickerInput}
                       onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
                       onKeyPress={(e) => e.key === 'Enter' && fetchStockDataFromAPI()}
-                      className="w-full px-3 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-blue-500 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-blue-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="Enter ticker symbol (e.g., AAPL, TSLA)"
                       disabled={isLoading}
                     />
@@ -579,54 +608,80 @@ export default function TradeAnalyzer() {
 
               {/* Basic Info - Finviz Style */}
               <div>
-                <h3 className="text-lg font-medium text-gray-700 mb-4">Basic Information</h3>
+                <h3 className={`text-lg font-medium mb-4 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Basic Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Ticker
                     </label>
                     <input
                       type="text"
                       value={stockData.symbol}
                       onChange={(e) => setStockData({...stockData, symbol: e.target.value.toUpperCase()})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="AAPL"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Price
                     </label>
                     <input
                       type="number"
                       value={stockData.price || ''}
                       onChange={(e) => setStockData({...stockData, price: Number(e.target.value)})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="8.50"
                       step="0.01"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Change
                     </label>
                     <input
                       type="text"
                       value={stockData.change}
                       onChange={(e) => setStockData({...stockData, change: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="+2.5%"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Market Cap
                     </label>
                     <input
                       type="text"
                       value={stockData.marketCap}
                       onChange={(e) => setStockData({...stockData, marketCap: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="500M"
                     />
                   </div>
@@ -635,41 +690,61 @@ export default function TradeAnalyzer() {
 
               {/* Volume & Technical */}
               <div>
-                <h3 className="text-lg font-medium text-gray-700 mb-4">Volume & Technical</h3>
+                <h3 className={`text-lg font-medium mb-4 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Volume & Technical</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Volume
                     </label>
                     <input
                       type="text"
                       value={stockData.volume}
                       onChange={(e) => setStockData({...stockData, volume: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="2.45M"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Rel Volume
                     </label>
                     <input
                       type="text"
                       value={stockData.relVolume}
                       onChange={(e) => setStockData({...stockData, relVolume: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="1.34"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       RSI (14)
                     </label>
                     <input
                       type="text"
                       value={stockData.rsi}
                       onChange={(e) => setStockData({...stockData, rsi: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="62.5"
                     />
                   </div>
@@ -678,41 +753,61 @@ export default function TradeAnalyzer() {
 
               {/* Moving Averages */}
               <div>
-                <h3 className="text-lg font-medium text-gray-700 mb-4">Moving Averages</h3>
+                <h3 className={`text-lg font-medium mb-4 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Moving Averages</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       SMA20
                     </label>
                     <input
                       type="text"
                       value={stockData.sma20}
                       onChange={(e) => setStockData({...stockData, sma20: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="8.20"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       SMA50
                     </label>
                     <input
                       type="text"
                       value={stockData.sma50}
                       onChange={(e) => setStockData({...stockData, sma50: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="7.80"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       SMA200
                     </label>
                     <input
                       type="text"
                       value={stockData.sma200}
                       onChange={(e) => setStockData({...stockData, sma200: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="6.50"
                     />
                   </div>
@@ -721,29 +816,43 @@ export default function TradeAnalyzer() {
 
               {/* 52-Week Range */}
               <div>
-                <h3 className="text-lg font-medium text-gray-700 mb-4">52-Week Range</h3>
+                <h3 className={`text-lg font-medium mb-4 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>52-Week Range</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       52W High
                     </label>
                     <input
                       type="text"
                       value={stockData.week52High}
                       onChange={(e) => setStockData({...stockData, week52High: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="9.20"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       52W Low
                     </label>
                     <input
                       type="text"
                       value={stockData.week52Low}
                       onChange={(e) => setStockData({...stockData, week52Low: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="3.80"
                     />
                   </div>
@@ -752,41 +861,61 @@ export default function TradeAnalyzer() {
 
               {/* Additional Finviz Fields */}
               <div>
-                <h3 className="text-lg font-medium text-gray-700 mb-4">Additional Data (Optional)</h3>
+                <h3 className={`text-lg font-medium mb-4 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Additional Data (Optional)</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       P/E
                     </label>
                     <input
                       type="text"
                       value={stockData.pe}
                       onChange={(e) => setStockData({...stockData, pe: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="15.2"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Beta
                     </label>
                     <input
                       type="text"
                       value={stockData.beta}
                       onChange={(e) => setStockData({...stockData, beta: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="1.25"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       ATR
                     </label>
                     <input
                       type="text"
                       value={stockData.atr}
                       onChange={(e) => setStockData({...stockData, atr: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="0.31"
                     />
                   </div>
@@ -802,8 +931,12 @@ export default function TradeAnalyzer() {
           </div>
 
           {/* Analysis Results */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-800 mb-6">Trade Analysis</h2>
+          <div className={`rounded-lg shadow-lg p-6 transition-colors ${
+            isDarkMode ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <h2 className={`text-xl font-semibold mb-6 ${
+              isDarkMode ? 'text-white' : 'text-gray-800'
+            }`}>Trade Analysis</h2>
             
             {hasData ? (
               <div className="space-y-6">

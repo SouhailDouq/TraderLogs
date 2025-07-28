@@ -5,6 +5,7 @@ import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, 
 import { useState } from 'react'
 import TradeModal from '@/components/Trade/TradeModal'
 import { formatCurrency } from '@/utils/formatters'
+import { useDarkMode } from '@/hooks/useDarkMode'
 
 interface CalendarDay {
   date: string
@@ -30,6 +31,7 @@ interface CalendarProps {
 }
 
 export default function Calendar({ currentMonth, onMonthChange }: CalendarProps) {
+  const isDarkMode = useDarkMode()
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const processedTrades = useTradeStore(selectProcessedTrades)
 
@@ -161,22 +163,34 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
+      <div className={`flex items-center justify-between p-4 rounded-lg shadow-sm border mb-4 transition-colors ${
+        isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+      }`}>
         <button
           onClick={() => onMonthChange(addMonths(currentMonth, -1))}
-          className="px-4 py-2 text-gray-600 hover:text-gray-900 flex items-center gap-2 transition-colors duration-200 rounded-lg hover:bg-gray-50"
+          className={`px-4 py-2 flex items-center gap-2 transition-colors duration-200 rounded-lg ${
+            isDarkMode
+              ? 'text-gray-300 hover:text-white hover:bg-gray-700'
+              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+          }`}
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
           <span className="font-medium">Previous</span>
         </button>
-        <h2 className="text-2xl font-bold text-gray-900">
+        <h2 className={`text-2xl font-bold ${
+          isDarkMode ? 'text-white' : 'text-gray-900'
+        }`}>
           {format(currentMonth, 'MMMM yyyy')}
         </h2>
         <button
           onClick={() => onMonthChange(addMonths(currentMonth, 1))}
-          className="px-4 py-2 text-gray-600 hover:text-gray-900 flex items-center gap-2 transition-colors duration-200 rounded-lg hover:bg-gray-50"
+          className={`px-4 py-2 flex items-center gap-2 transition-colors duration-200 rounded-lg ${
+            isDarkMode
+              ? 'text-gray-300 hover:text-white hover:bg-gray-700'
+              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+          }`}
         >
           <span className="font-medium">Next</span>
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -185,12 +199,16 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-4 p-4 bg-white rounded-lg shadow-sm border border-gray-200">
+      <div className={`grid grid-cols-7 gap-4 p-4 rounded-lg shadow-sm border transition-colors ${
+        isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+      }`}>
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(
           (dayName) => (
             <div
               key={dayName}
-              className="text-center text-sm font-medium text-gray-500 uppercase pb-2"
+              className={`text-center text-sm font-medium uppercase pb-2 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}
             >
               {dayName}
             </div>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useTradeStore } from '@/utils/store'
 import { format } from 'date-fns'
+import { useDarkMode } from '@/hooks/useDarkMode'
 import ClientCalendar from '@/components/Calendar/Calendar'
 import ClientTradeUpload from '@/components/Trade/TradeUpload'
 import ClientTradeSummary from '@/components/Trade/TradeSummary'
@@ -20,6 +21,7 @@ export default function Home() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null)
   const [tradeTimeRange, setTradeTimeRange] = useState<{ earliest: Date | null; latest: Date | null }>({ earliest: null, latest: null })
+  const isDarkMode = useDarkMode()
 
   useEffect(() => {
     // Load trades from database on page load
@@ -95,13 +97,23 @@ export default function Home() {
   }, [])
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <div className={`min-h-screen transition-colors ${
+      isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
+    }`}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
-            <h1 className="text-xl font-semibold text-gray-900">Trade Journal</h1>
-            <div className="h-5 w-px bg-gray-200" />
-            <div className="text-sm text-gray-500">
+            <h1 className={`text-3xl font-bold mb-2 ${
+              isDarkMode ? 'text-white' : 'text-gray-900'
+            }`}>
+              Trade Journal
+            </h1>
+            <div className={`h-5 w-px ${
+              isDarkMode ? 'bg-gray-700' : 'bg-gray-200'
+            }`} />
+            <div className={`text-sm ${
+              isDarkMode ? 'text-gray-300' : 'text-gray-600'
+            }`}>
               {tradeTimeRange.earliest && tradeTimeRange.latest ? (
                 <>
                   Trading data from{' '}
@@ -114,32 +126,20 @@ export default function Home() {
                   </span>
                 </>
               ) : (
-                <span className="text-gray-400">No trading data available</span>
+                <span className={isDarkMode ? 'text-gray-300' : 'text-gray-400'}>
+                  No trading data available
+                </span>
               )}
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <a 
-              href="/risk-management"
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors duration-200 flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-              Risk Calculator
-            </a>
-            <a 
-              href="/trade-analyzer"
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors duration-200 flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-              Trade Analyzer
-            </a>
             <button 
               onClick={() => setCurrentMonth(new Date())}
-              className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded transition-colors duration-200"
+              className={`px-3 py-1.5 text-sm font-medium rounded transition-colors duration-200 ${
+                isDarkMode
+                  ? 'text-gray-200 hover:text-white hover:bg-gray-700'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
             >
               Today
             </button>
@@ -148,24 +148,40 @@ export default function Home() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-8">
-            <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+            <div className={`rounded-lg shadow-sm border p-6 mb-6 transition-colors ${
+              isDarkMode 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-200'
+            }`}>
               <ClientCalendar currentMonth={currentMonth} onMonthChange={setCurrentMonth} />
             </div>
-            <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className={`rounded-lg shadow-sm border p-6 transition-colors ${
+              isDarkMode 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-200'
+            }`}>
               <ClientStrategyDashboard />
             </div>
           </div>
           <div className="lg:col-span-4 space-y-6">
             <MonthlyPnL />
-            <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className={`rounded-lg shadow-sm border p-6 transition-colors ${
+              isDarkMode 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-200'
+            }`}>
               <ClientTradeUpload />
             </div>
-            <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className={`rounded-lg shadow-sm border p-6 transition-colors ${
+              isDarkMode 
+                ? 'bg-gray-800 border-gray-700' 
+                : 'bg-white border-gray-200'
+            }`}>
               <ClientTradeSummary />
             </div>
           </div>
         </div>
       </div>
-    </main>
+    </div>
   )
 }

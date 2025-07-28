@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { formatCurrency } from '@/utils/formatters'
+import { useDarkMode } from '@/hooks/useDarkMode'
 
 interface RiskCalculation {
   positionSize: number
@@ -14,6 +15,8 @@ interface RiskCalculation {
 }
 
 export default function RiskManagement() {
+  const isDarkMode = useDarkMode()
+  
   const [accountSize, setAccountSize] = useState<number>(10000)
   const [accountCurrency, setAccountCurrency] = useState<'USD' | 'EUR'>('EUR')
   const [riskPercentage, setRiskPercentage] = useState<number>(2)
@@ -55,13 +58,19 @@ export default function RiskManagement() {
   const isValidCalculation = entryPrice > 0 && stopLossPrice > 0 && takeProfitPrice > 0
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className={`min-h-screen transition-colors ${
+      isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
+    }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <div className="flex items-center gap-4 mb-4">
             <a 
               href="/"
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors duration-200"
+              className={`flex items-center gap-2 transition-colors duration-200 ${
+                isDarkMode
+                  ? 'text-gray-300 hover:text-gray-100'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -69,43 +78,67 @@ export default function RiskManagement() {
               Back to Dashboard
             </a>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Risk Management Simulator</h1>
-          <p className="mt-2 text-gray-600">
+          <h1 className={`text-3xl font-bold ${
+            isDarkMode ? 'text-white' : 'text-gray-900'
+          }`}>Risk Management Simulator</h1>
+          <p className={`mt-2 ${
+            isDarkMode ? 'text-gray-300' : 'text-gray-600'
+          }`}>
             Calculate position sizing, risk/reward ratios, and optimize your trading strategy
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Input Section */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-800 mb-6">Trade Parameters</h2>
+          <div className={`rounded-lg shadow-lg p-6 transition-colors ${
+            isDarkMode ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <h2 className={`text-xl font-semibold mb-6 ${
+              isDarkMode ? 'text-white' : 'text-gray-800'
+            }`}>Trade Parameters</h2>
             
             <div className="space-y-6">
               {/* Account Settings */}
-              <div className="border-b border-gray-200 pb-6">
-                <h3 className="text-lg font-medium text-gray-700 mb-4">Account Settings</h3>
+              <div className={`border-b pb-6 ${
+                isDarkMode ? 'border-gray-600' : 'border-gray-200'
+              }`}>
+                <h3 className={`text-lg font-medium mb-4 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Account Settings</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Account Size
                     </label>
                     <div className="flex gap-2">
                       <div className="relative flex-1">
-                        <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">
+                        <span className={`absolute left-3 top-1/2 transform -translate-y-1/2 ${
+                          isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                        }`}>
                           {accountCurrency === 'EUR' ? '€' : '$'}
                         </span>
                         <input
                           type="number"
                           value={accountSize}
                           onChange={(e) => setAccountSize(Number(e.target.value))}
-                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                          className={`w-full pl-8 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                            isDarkMode
+                              ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                              : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                          }`}
                           placeholder="10000"
                         />
                       </div>
                       <select
                         value={accountCurrency}
                         onChange={(e) => setAccountCurrency(e.target.value as 'USD' | 'EUR')}
-                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                          isDarkMode
+                            ? 'border-gray-600 bg-gray-700 text-white'
+                            : 'border-gray-300 bg-white text-gray-900'
+                        }`}
                       >
                         <option value="EUR">EUR</option>
                         <option value="USD">USD</option>
@@ -113,7 +146,9 @@ export default function RiskManagement() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Risk Per Trade (%)
                     </label>
                     <div className="relative">
@@ -121,7 +156,11 @@ export default function RiskManagement() {
                         type="number"
                         value={riskPercentage}
                         onChange={(e) => setRiskPercentage(Number(e.target.value))}
-                        className="w-full pr-8 pl-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                        className={`w-full pr-8 pl-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                          isDarkMode
+                            ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                            : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                        }`}
                         placeholder="2"
                         min="0.1"
                         max="10"
@@ -138,20 +177,28 @@ export default function RiskManagement() {
                 <h3 className="text-lg font-medium text-gray-700 mb-4">Trade Details</h3>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                       Symbol
                     </label>
                     <input
                       type="text"
                       value={symbol}
                       onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                        isDarkMode
+                          ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                          : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                      }`}
                       placeholder="AAPL"
                     />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                         Entry Price
                       </label>
                       <div className="relative">
@@ -160,14 +207,20 @@ export default function RiskManagement() {
                           type="number"
                           value={entryPrice || ''}
                           onChange={(e) => setEntryPrice(Number(e.target.value))}
-                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                          className={`w-full pl-8 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                            isDarkMode
+                              ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                              : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                          }`}
                           placeholder="150.00"
                           step="0.01"
                         />
                       </div>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                         Stop Loss
                       </label>
                       <div className="relative">
@@ -183,7 +236,9 @@ export default function RiskManagement() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
+                    }`}>
                         Take Profit
                       </label>
                       <div className="relative">
@@ -205,8 +260,12 @@ export default function RiskManagement() {
           </div>
 
           {/* Results Section */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-800 mb-6">Risk Analysis</h2>
+          <div className={`rounded-lg shadow-lg p-6 transition-colors ${
+            isDarkMode ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <h2 className={`text-xl font-semibold mb-6 ${
+              isDarkMode ? 'text-white' : 'text-gray-800'
+            }`}>Risk Analysis</h2>
             
             {isValidCalculation ? (
               <div className="space-y-6">

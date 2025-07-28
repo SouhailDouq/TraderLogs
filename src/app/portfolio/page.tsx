@@ -1,10 +1,19 @@
+'use client'
+
 import { Trading212API } from '@/utils/trading212'
 import { Card } from '@/components/ui/card'
+import { useDarkMode } from '@/hooks/useDarkMode'
 
-export default async function PortfolioPage() {
+export default function PortfolioPage() {
+  const isDarkMode = useDarkMode()
+  
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Portfolio Overview</h1>
+    <div className={`p-6 space-y-6 min-h-screen transition-colors ${
+      isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
+    }`}>
+      <h1 className={`text-2xl font-bold ${
+        isDarkMode ? 'text-white' : 'text-gray-900'
+      }`}>Portfolio Overview</h1>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="p-4">

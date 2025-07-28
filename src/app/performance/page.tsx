@@ -4,13 +4,19 @@ import { Card } from '@/components/ui/card'
 import PerformanceMetrics from '@/components/Performance/PerformanceMetrics'
 import StrategyDashboard from '@/components/Strategy/StrategyDashboard'
 import { useTradeStore } from '@/utils/store'
+import { useDarkMode } from '@/hooks/useDarkMode'
 
 export default function PerformancePage() {
+  const isDarkMode = useDarkMode()
   const summary = useTradeStore(state => state.summary)
 
   return (
-    <div className="p-6 space-y-8">
-      <h1 className="text-2xl font-bold">Performance Analytics</h1>
+    <div className={`p-6 space-y-8 min-h-screen transition-colors ${
+      isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
+    }`}>
+      <h1 className={`text-2xl font-bold ${
+        isDarkMode ? 'text-white' : 'text-gray-900'
+      }`}>Performance Analytics</h1>
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
