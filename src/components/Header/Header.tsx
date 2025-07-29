@@ -85,16 +85,16 @@ export default function Header() {
           </div>
 
           {/* Workflow Navigation */}
-          <div className="hidden md:flex items-center space-x-1">
+          <div className="hidden sm:flex items-center space-x-1 overflow-x-auto">
             {workflowSteps.map((step, index) => {
               const isActive = pathname === step.path;
               const isCompleted = workflowSteps.findIndex(s => s.path === pathname) > index;
               
               return (
-                <div key={step.id} className="flex items-center">
+                <div key={step.id} className="flex items-center flex-shrink-0">
                   <button
                     onClick={() => navigateToStep(step.path)}
-                    className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    className={`flex items-center px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
                       isActive 
                         ? isDarkMode
                           ? 'bg-blue-900 text-blue-300 border border-blue-700'
@@ -109,13 +109,13 @@ export default function Header() {
                     }`}
                     title={`Step ${index + 1}: ${step.title}`}
                   >
-                    <span className="mr-2">{step.icon}</span>
-                    <span className="hidden lg:inline">{step.title}</span>
-                    <span className="lg:hidden">{index + 1}</span>
+                    <span className="mr-1 sm:mr-2">{step.icon}</span>
+                    <span className="hidden md:inline">{step.title}</span>
+                    <span className="md:hidden">{index + 1}</span>
                   </button>
                   
                   {index < workflowSteps.length - 1 && (
-                    <div className={`mx-1 h-0.5 w-3 ${
+                    <div className={`mx-0.5 sm:mx-1 h-0.5 w-2 sm:w-3 flex-shrink-0 ${
                       isCompleted ? 'bg-green-400' : 'bg-gray-300'
                     }`}></div>
                   )}

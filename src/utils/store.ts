@@ -28,6 +28,13 @@ export interface Trade {
   journal?: TradeJournal
   isOpen?: boolean // True if position is still open (not fully sold)
   position?: 'long' | 'short' | 'closed' // Position status
+  strategy?: string // Trading strategy used
+  side?: 'long' | 'short' // Trade direction
+  entryPrice?: number
+  stopLoss?: number
+  takeProfit?: number
+  time?: string
+  createdAt?: string
   // Extended analysis fields
   volume?: number
   avgVolume?: number
@@ -65,6 +72,7 @@ export interface TradeStore {
   stats: TradeStats
   selectedDate: string | null
   setTrades: (trades: Trade[]) => void
+  addTrade: (trade: Trade) => void
   clearTrades: () => void
   processCSV: (content: string) => void
   addTradeNote: (tradeId: string, note: string) => void
@@ -868,5 +876,20 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
     const { trades } = get()
     const now = new Date()
     return calculateMonthlyPnL(trades, now.getMonth(), now.getFullYear())
+  },
+
+  addTrade: (trade: Trade) => {
+    const { trades } = get()
+    const newTrades = [...trades, trade]
+    set({
+      trades: newTrades,
+      processedTrades: analyzePositions(newTrades).reduce((acc, t) => {
+        const date = t.date
+        if (!acc[date]) acc[date] = []
+        acc[date].push(t)
+        return acc
+      }, {} as Record<string, Trade[]>),
+      stats: calculateStats(newTrades)
+    })
   },
 }))
