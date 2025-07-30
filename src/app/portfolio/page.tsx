@@ -12,7 +12,7 @@ export default function MonitorPage() {
   const [refreshTime, setRefreshTime] = useState(new Date());
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [isLoading, setIsLoading] = useState(false);
-  const [hoveredPoint, setHoveredPoint] = useState<{ day: string; value: number; change: number } | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<{ day: string; value: number; change: number; date?: string; tradesCount?: number } | null>(null);
   const [hoveredSegment, setHoveredSegment] = useState<{ symbol: string; percentage: number; value: number } | null>(null);
 
   // Auto-refresh every 30 seconds (simulating real-time updates)
@@ -84,7 +84,7 @@ export default function MonitorPage() {
     });
   }, [trades, refreshTime]);
 
-  const StatCard = ({ title, value, subtitle, color = 'default', icon }) => (
+  const StatCard = ({ title, value, subtitle, color = 'default', icon }: { title: string; value: string | number; subtitle: string; color?: string; icon: string }) => (
     <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
       isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
     }`}>
@@ -231,8 +231,8 @@ export default function MonitorPage() {
                         const portfolioValue = startingValue + cumulativePnL;
                         
                         // Calculate daily change
-                        const previousValue = i === 0 ? startingValue : chartData[i-1].value;
-                        const change = i === 0 ? 0 : ((portfolioValue - previousValue) / previousValue) * 100;
+                        const previousValue: number = i === 0 ? startingValue : chartData[i-1].value;
+                        const change: number = i === 0 ? 0 : ((portfolioValue - previousValue) / previousValue) * 100;
                         
                         // Scale to chart height (normalize between 40 and 160)
                         const minValue = Math.min(startingValue, portfolioValue) * 0.9;

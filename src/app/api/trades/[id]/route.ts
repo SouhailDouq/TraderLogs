@@ -5,10 +5,10 @@ const tradeService = new TradeService()
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
     const body = await request.json()
     
     console.log('PUT /api/trades/[id] - Trade ID:', id)
@@ -39,10 +39,10 @@ export async function PUT(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params
+    const { id } = await params
     const trade = await tradeService.getTradeById(id)
     
     if (!trade) {

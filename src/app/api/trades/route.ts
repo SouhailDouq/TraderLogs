@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { TradeService } from '@/services/tradeService'
+import { Trade } from '@/utils/store'
 import { promises as fs } from 'fs'
 import path from 'path'
 
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Read existing trades
-    let data = { trades: [] }
+    let data: { trades: Trade[] } = { trades: [] }
     try {
       const content = await fs.readFile(dataFile, 'utf8')
       data = JSON.parse(content)

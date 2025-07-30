@@ -33,7 +33,7 @@ export default function Calendar() {
     
     const dateStr = format(date, 'yyyy-MM-dd')
     const trades = processedTrades[dateStr] || []
-    const totalProfit = trades.reduce((sum, trade) => sum + (trade.profit || 0), 0)
+    const totalProfit = trades.reduce((sum, trade) => sum + (trade.profitLoss || 0), 0)
 
     let classes = 'h-24 lg:h-32 border rounded-lg p-2 cursor-pointer transition-all duration-200'
     
@@ -89,7 +89,7 @@ export default function Calendar() {
         {daysInMonth.map((date) => {
           const dateStr = format(date, 'yyyy-MM-dd')
           const trades = processedTrades[dateStr] || []
-          const totalProfit = trades.reduce((sum, trade) => sum + (trade.profit || 0), 0)
+          const totalProfit = trades.reduce((sum, trade) => sum + (trade.profitLoss || 0), 0)
 
           return (
             <div
@@ -118,6 +118,7 @@ export default function Calendar() {
 
       {selectedDate && (
         <TradeModal
+          isOpen={true}
           date={selectedDate}
           trades={processedTrades[selectedDate] || []}
           onClose={() => setSelectedDate(null)}

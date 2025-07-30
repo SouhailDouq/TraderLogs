@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { Trading212API } from '@/utils/trading212'
-import { processCSV } from '@/utils/csv'
+// processCSV is now a method in the TradeStore
 import toast from 'react-hot-toast'
 import { useTradeStore } from '@/utils/store'
 

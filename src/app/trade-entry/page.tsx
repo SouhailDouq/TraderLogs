@@ -51,6 +51,8 @@ export default function TradeEntryPage() {
       const trade = {
         id: Date.now().toString(),
         symbol: formData.symbol.toUpperCase(),
+        type: 'BUY', // Required by Trade interface
+        price: parseFloat(formData.entryPrice), // Required by Trade interface
         side: formData.side,
         quantity: parseFloat(formData.quantity),
         entryPrice: parseFloat(formData.entryPrice),

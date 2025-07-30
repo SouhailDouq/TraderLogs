@@ -63,16 +63,16 @@ export async function parseCSV(content: string): Promise<Trade[]> {
         id: `${date}-${line.Ticker}-${action}`,
         date,
         symbol: line.Ticker,
-        action: 'BUY',
-        shares: 0,
+        type: 'BUY',
+        quantity: 0,
         price: 0,
-        amount: total,
         total,
         profitLoss: 0,
         journal: line.Notes ? {
           notes: line.Notes,
           tags: [],
-          emotion: '',
+          emotion: 'neutral' as const,
+          rating: 3 as const,
           createdAt: new Date().toISOString()
         } : undefined
       }
@@ -93,10 +93,10 @@ export async function parseCSV(content: string): Promise<Trade[]> {
 
         trades.push({
           ...baseTrade,
-          action: 'BUY',
-          shares,
+          type: 'BUY',
+          quantity: shares,
           price,
-          amount: total,
+
           profitLoss: 0
         })
       } else if (action.includes('sell')) {
@@ -125,19 +125,19 @@ export async function parseCSV(content: string): Promise<Trade[]> {
 
         trades.push({
           ...baseTrade,
-          action: 'SELL',
-          shares,
+          type: 'SELL',
+          quantity: shares,
           price: sellPrice,
-          amount: total,
+
           profitLoss: profit
         })
       } else if (action === 'dividend') {
         trades.push({
           ...baseTrade,
-          action: 'BUY',
-          shares: 0,
+          type: 'BUY',
+          quantity: 0,
           price: 0,
-          amount: amountInUSD,
+
           profitLoss: amountInUSD
         })
       }

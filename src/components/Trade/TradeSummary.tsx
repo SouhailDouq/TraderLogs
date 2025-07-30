@@ -4,7 +4,7 @@ import { useTradeStore } from '@/utils/store'
 import { TradeStore } from '@/utils/store'
 import { formatCurrency } from '@/utils/formatters'
 
-const selectSummary = (state: TradeStore) => state.summary
+const selectSummary = (state: TradeStore) => state.stats
 
 export default function TradeSummary() {
   const { stats } = useTradeStore()
