@@ -5,6 +5,11 @@ import { useDarkMode } from '@/hooks/useDarkMode';
 import { useTradeStore } from '@/utils/store';
 import { formatCurrency } from '@/utils/formatters';
 import { format } from 'date-fns';
+import PortfolioChart from '@/components/Charts/PortfolioChart';
+import AssetAllocationChart from '@/components/Charts/AssetAllocationChart';
+import PortfolioHeatMap from '@/components/Charts/PortfolioHeatMap';
+import BenchmarkComparison from '@/components/Charts/BenchmarkComparison';
+import { MarketDataResponse } from '@/services/marketDataService';
 
 export default function MonitorPage() {
   const isDarkMode = useDarkMode();
@@ -12,18 +17,84 @@ export default function MonitorPage() {
   const [refreshTime, setRefreshTime] = useState(new Date());
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [isLoading, setIsLoading] = useState(false);
-  const [hoveredPoint, setHoveredPoint] = useState<{ day: string; value: number; change: number; date?: string; tradesCount?: number } | null>(null);
-  const [hoveredSegment, setHoveredSegment] = useState<{ symbol: string; percentage: number; value: number } | null>(null);
+  const [marketData, setMarketData] = useState<{ [symbol: string]: MarketDataResponse }>({});
+  const [marketDataLoading, setMarketDataLoading] = useState(false);
+  const [marketDataError, setMarketDataError] = useState<string | null>(null);
+  const [selectedView, setSelectedView] = useState<'overview' | 'heatmap' | 'benchmark'>('overview');
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Auto-refresh every 30 seconds (simulating real-time updates)
+  // Fix hydration issue by ensuring component is mounted before showing time
   useEffect(() => {
-    const interval = setInterval(() => {
-      setRefreshTime(new Date());
-    }, 30000);
-    return () => clearInterval(interval);
+    setIsMounted(true);
   }, []);
 
-  // Calculate portfolio metrics from open positions
+  // Auto-refresh every 30 seconds and fetch real market data
+  useEffect(() => {
+    const fetchMarketData = async () => {
+      const openTrades = trades.filter(trade => trade.isOpen);
+      if (openTrades.length === 0) return;
+
+      setMarketDataLoading(true);
+      setMarketDataError(null);
+
+      try {
+        const uniqueSymbols = [...new Set(openTrades.map(trade => trade.symbol))];
+        const marketDataMap: { [symbol: string]: MarketDataResponse } = {};
+        
+        // Batch symbols into groups of 10 to respect API limits
+        const batchSize = 10;
+        const batches = [];
+        for (let i = 0; i < uniqueSymbols.length; i += batchSize) {
+          batches.push(uniqueSymbols.slice(i, i + batchSize));
+        }
+
+        // Fetch data for each batch
+        for (const batch of batches) {
+          const symbols = batch.join(',');
+          const response = await fetch(`/api/market-data?symbols=${symbols}`);
+          const data = await response.json();
+
+          if (data.success) {
+            data.data.forEach((item: MarketDataResponse) => {
+              marketDataMap[item.symbol] = item;
+            });
+          } else {
+            console.warn(`Failed to fetch data for batch: ${symbols}`, data.error);
+            // Continue with other batches even if one fails
+          }
+        }
+        
+        setMarketData(marketDataMap);
+        setLastUpdated(new Date());
+        
+        // Clear any previous errors if we got some data
+        if (Object.keys(marketDataMap).length > 0) {
+          setMarketDataError(null);
+        }
+      } catch (error) {
+        console.error('Error fetching market data:', error);
+        setMarketDataError(error instanceof Error ? error.message : 'Failed to fetch market data');
+      } finally {
+        setMarketDataLoading(false);
+      }
+    };
+
+    // Initial fetch
+    fetchMarketData();
+
+    // Set up intervals
+    const marketDataInterval = setInterval(fetchMarketData, 60000); // Every minute
+    const refreshInterval = setInterval(() => {
+      setRefreshTime(new Date());
+    }, 30000); // Every 30 seconds
+
+    return () => {
+      clearInterval(marketDataInterval);
+      clearInterval(refreshInterval);
+    };
+  }, [trades]);
+
+  // Calculate portfolio metrics from open positions with real market data
   const portfolioMetrics = useMemo(() => {
     const openTrades = trades.filter(trade => trade.isOpen);
     
@@ -43,16 +114,27 @@ export default function MonitorPage() {
       return sum + (trade.price * trade.quantity);
     }, 0);
 
-    // Simulate current prices (in real app, this would come from API)
+    // Use real market data when available, fallback to original trade price (no simulation)
     const totalValue = openTrades.reduce((sum, trade) => {
-      const currentPrice = trade.price * (0.95 + Math.random() * 0.1); // ±5% random variation
+      const marketPrice = marketData[trade.symbol]?.price;
+      // If no market data, use the original trade price (current value = cost basis)
+      const currentPrice = marketPrice || trade.price;
       return sum + (currentPrice * trade.quantity);
+    }, 0);
+
+    // Calculate day change from market data only
+    const dayChange = openTrades.reduce((sum, trade) => {
+      const marketInfo = marketData[trade.symbol];
+      if (marketInfo) {
+        return sum + (marketInfo.change * trade.quantity);
+      }
+      // If no market data, assume no change for the day
+      return sum;
     }, 0);
 
     const unrealizedPnL = totalValue - totalInvested;
     const realizedPnL = trades.filter(t => !t.isOpen).reduce((sum, t) => sum + (t.profitLoss || 0), 0);
     const totalPnL = unrealizedPnL + realizedPnL;
-    const dayChange = totalValue * (Math.random() * 0.04 - 0.02); // ±2% daily variation
 
     return {
       totalValue,
@@ -63,15 +145,17 @@ export default function MonitorPage() {
       unrealizedPnL,
       realizedPnL
     };
-  }, [trades, refreshTime]);
+  }, [trades, marketData, refreshTime]);
 
   const openPositions = useMemo(() => {
     return trades.filter(trade => trade.isOpen).map(trade => {
-      const currentPrice = trade.price * (0.95 + Math.random() * 0.1);
+      const marketInfo = marketData[trade.symbol];
+      // Use real market price if available, otherwise use original trade price (no gain/loss)
+      const currentPrice = marketInfo?.price || trade.price;
       const marketValue = currentPrice * trade.quantity;
       const costBasis = trade.price * trade.quantity;
       const unrealizedPnL = marketValue - costBasis;
-      const unrealizedPnLPercent = (unrealizedPnL / costBasis) * 100;
+      const unrealizedPnLPercent = costBasis > 0 ? (unrealizedPnL / costBasis) * 100 : 0;
       
       return {
         ...trade,
@@ -79,10 +163,11 @@ export default function MonitorPage() {
         marketValue,
         costBasis,
         unrealizedPnL,
-        unrealizedPnLPercent
+        unrealizedPnLPercent,
+        marketInfo
       };
     });
-  }, [trades, refreshTime]);
+  }, [trades, marketData, refreshTime]);
 
   const StatCard = ({ title, value, subtitle, color = 'default', icon }: { title: string; value: string | number; subtitle: string; color?: string; icon: string }) => (
     <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
@@ -132,10 +217,23 @@ export default function MonitorPage() {
                 Real-time monitoring of your open positions
               </p>
             </div>
-            <div className={`mt-4 sm:mt-0 text-sm transition-colors ${
-              isDarkMode ? 'text-gray-400' : 'text-gray-500'
-            }`}>
-              Last updated: {format(refreshTime, 'HH:mm:ss')}
+            <div className="flex items-center gap-4">
+              {marketDataLoading && (
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+                  <span className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Updating...</span>
+                </div>
+              )}
+              {marketDataError && (
+                <div className="flex items-center gap-2 text-red-500">
+                  <span className="text-sm">⚠️ {marketDataError}</span>
+                </div>
+              )}
+              <div className={`text-sm transition-colors ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
+                Last updated: {isMounted ? format(lastUpdated, 'HH:mm:ss') : '--:--:--'}
+              </div>
             </div>
           </div>
         </div>
@@ -171,360 +269,102 @@ export default function MonitorPage() {
           />
         </div>
 
-        {/* Portfolio Performance Chart */}
-        {openPositions.length > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8 mb-6 sm:mb-8">
-            <div className={`lg:col-span-2 rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-              isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-            }`}>
-              <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                isDarkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                📈 Portfolio Performance (7 Days)
-              </h3>
-              <div className="h-48 sm:h-64">
-                <div className="relative h-full">
-                  {/* Improved line chart with better visibility */}
-                  <svg className="w-full h-full" viewBox="0 0 420 240">
-                    <defs>
-                      <linearGradient id="portfolioGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor={portfolioMetrics.totalPnL >= 0 ? '#10b981' : '#ef4444'} stopOpacity="0.4" />
-                        <stop offset="100%" stopColor={portfolioMetrics.totalPnL >= 0 ? '#10b981' : '#ef4444'} stopOpacity="0.05" />
-                      </linearGradient>
-                    </defs>
-                    
-                    {/* Background */}
-                    <rect width="420" height="200" fill="transparent" />
-                    
-                    {/* Grid lines */}
-                    {[0, 1, 2, 3, 4].map(i => (
-                      <line key={`h-${i}`} x1="40" y1={40 + i * 30} x2="380" y2={40 + i * 30} stroke={isDarkMode ? '#4b5563' : '#d1d5db'} strokeWidth="1" strokeDasharray="2,2" />
-                    ))}
-                    {[0, 1, 2, 3, 4, 5, 6].map(i => (
-                      <line key={`v-${i}`} x1={40 + i * 50} y1="40" x2={40 + i * 50} y2="160" stroke={isDarkMode ? '#4b5563' : '#d1d5db'} strokeWidth="1" strokeDasharray="2,2" />
-                    ))}
-                    
-                    {/* Generate real portfolio performance data from actual trades */}
-                    {(() => {
-                      const chartData = [];
-                      const today = new Date();
-                      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Today'];
-                      
-                      // Calculate portfolio value for each of the last 7 days using real trade data
-                      for (let i = 0; i <= 6; i++) {
-                        const targetDate = new Date(today);
-                        targetDate.setDate(today.getDate() - (6 - i));
-                        const dateStr = targetDate.toISOString().split('T')[0];
-                        
-                        // Calculate cumulative P&L up to this date
-                        const tradesUpToDate = trades.filter(trade => {
-                          const tradeDate = new Date(trade.date);
-                          return tradeDate <= targetDate;
-                        });
-                        
-                        const cumulativePnL = tradesUpToDate.reduce((sum, trade) => {
-                          return sum + (trade.profitLoss || 0);
-                        }, 0);
-                        
-                        // Assume starting portfolio value (you can adjust this)
-                        const startingValue = 50000;
-                        const portfolioValue = startingValue + cumulativePnL;
-                        
-                        // Calculate daily change
-                        const previousValue: number = i === 0 ? startingValue : chartData[i-1].value;
-                        const change: number = i === 0 ? 0 : ((portfolioValue - previousValue) / previousValue) * 100;
-                        
-                        // Scale to chart height (normalize between 40 and 160)
-                        const minValue = Math.min(startingValue, portfolioValue) * 0.9;
-                        const maxValue = Math.max(startingValue, portfolioValue) * 1.1;
-                        const normalizedValue = (portfolioValue - minValue) / (maxValue - minValue);
-                        const y = 160 - (normalizedValue * 120);
-                        
-                        chartData.push({
-                          x: 40 + i * 50,
-                          y: Math.max(40, Math.min(160, y)),
-                          value: portfolioValue,
-                          day: days[i],
-                          change: change,
-                          date: dateStr,
-                          tradesCount: tradesUpToDate.length
-                        });
-                      }
-                      
-                      const pathData = chartData.map((point, i) => 
-                        i === 0 ? `M ${point.x} ${point.y}` : `L ${point.x} ${point.y}`
-                      ).join(' ');
-                      
-                      const areaData = `${pathData} L ${chartData[chartData.length - 1].x} 160 L ${chartData[0].x} 160 Z`;
-                      
-                      return (
-                        <>
-                          {/* Area fill */}
-                          <path
-                            d={areaData}
-                            fill="url(#portfolioGradient)"
-                          />
-                          {/* Main line */}
-                          <path
-                            d={pathData}
-                            fill="none"
-                            stroke={portfolioMetrics.totalPnL >= 0 ? '#10b981' : '#ef4444'}
-                            strokeWidth="3"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          {/* Interactive data points */}
-                          {chartData.map((point, i) => (
-                            <g key={i}>
-                              {/* Invisible hover area */}
-                              <rect
-                                x={point.x - 25}
-                                y="40"
-                                width="50"
-                                height="120"
-                                fill="transparent"
-                                style={{ cursor: 'pointer' }}
-                                onMouseEnter={() => setHoveredPoint({
-                                  day: point.day,
-                                  value: point.value,
-                                  change: point.change
-                                })}
-                                onMouseLeave={() => setHoveredPoint(null)}
-                              />
-                              {/* Data point */}
-                              <circle
-                                cx={point.x}
-                                cy={point.y}
-                                r={hoveredPoint?.day === point.day ? "6" : "4"}
-                                fill={portfolioMetrics.totalPnL >= 0 ? '#10b981' : '#ef4444'}
-                                stroke={isDarkMode ? '#1f2937' : '#ffffff'}
-                                strokeWidth="2"
-                                style={{ 
-                                  cursor: 'pointer',
-                                  transition: 'r 0.2s ease',
-                                  filter: hoveredPoint?.day === point.day ? 'drop-shadow(0 0 6px rgba(16, 185, 129, 0.6))' : 'none'
-                                }}
-                              />
-                              {/* Hover line */}
-                              {hoveredPoint?.day === point.day && (
-                                <line
-                                  x1={point.x}
-                                  y1="40"
-                                  x2={point.x}
-                                  y2="160"
-                                  stroke={portfolioMetrics.totalPnL >= 0 ? '#10b981' : '#ef4444'}
-                                  strokeWidth="1"
-                                  strokeDasharray="4,4"
-                                  opacity="0.7"
-                                />
-                              )}
-                            </g>
-                          ))}
-                        </>
-                      );
-                    })()}
-                    
-                    {/* Y-axis labels */}
-                    <text x="25" y="45" fontSize="10" fill={isDarkMode ? '#9ca3af' : '#6b7280'} textAnchor="end">High</text>
-                    <text x="25" y="105" fontSize="10" fill={isDarkMode ? '#9ca3af' : '#6b7280'} textAnchor="end">Mid</text>
-                    <text x="25" y="165" fontSize="10" fill={isDarkMode ? '#9ca3af' : '#6b7280'} textAnchor="end">Low</text>
-                  </svg>
-                  
-                  {/* Chart labels */}
-                  <div className="absolute bottom-4 left-0 right-0 flex justify-between px-10 text-xs">
-                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Today'].map((day, i) => (
-                      <span key={i} className={`font-medium ${
-                        i === 6 ? (isDarkMode ? 'text-blue-400' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')
-                      }`}>{day}</span>
-                    ))}
-                  </div>
-                  
-                  {/* Tooltip */}
-                  {hoveredPoint && (
-                    <div className={`absolute z-10 px-3 py-2 rounded-lg shadow-lg border text-sm pointer-events-none transition-all duration-200 ${
-                      isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-200 text-gray-900'
-                    }`} style={{
-                      left: `${((hoveredPoint.day === 'Today' ? 6 : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(hoveredPoint.day)) * 50 + 40) / 420 * 100}%`,
-                      top: '10px',
-                      transform: 'translateX(-50%)'
-                    }}>
-                      <div className="font-semibold text-center mb-1">{hoveredPoint.day}</div>
-                      <div className="text-center">
-                        <div className="font-medium">{formatCurrency(hoveredPoint.value)}</div>
-                        <div className={`text-xs ${
-                          hoveredPoint.change >= 0 ? 'text-green-500' : 'text-red-500'
-                        }`}>
-                          {hoveredPoint.change >= 0 ? '+' : ''}{hoveredPoint.change.toFixed(2)}%
-                        </div>
-                        {hoveredPoint.tradesCount !== undefined && (
-                          <div className={`text-xs mt-1 ${
-                            isDarkMode ? 'text-gray-400' : 'text-gray-500'
-                          }`}>
-                            {hoveredPoint.tradesCount} trades executed
-                          </div>
-                        )}
-                        <div className={`text-xs ${
-                          isDarkMode ? 'text-gray-400' : 'text-gray-500'
-                        }`}>
-                          {hoveredPoint.date}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+        {/* View Selector */}
+        <div className="mb-6">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: 'overview', label: '📊 Overview', icon: '📊' },
+              { key: 'heatmap', label: '🔥 Heat Map', icon: '🔥' },
+              { key: 'benchmark', label: '📈 Benchmark', icon: '📈' }
+            ].map((view) => (
+              <button
+                key={view.key}
+                onClick={() => setSelectedView(view.key as any)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  selectedView === view.key
+                    ? (isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white')
+                    : (isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300')
+                }`}
+              >
+                {view.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-            {/* Asset Allocation Chart */}
-            <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-              isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-            }`}>
-              <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                isDarkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                🥧 Asset Allocation
-              </h3>
-              <div className="h-48 sm:h-64 flex items-center justify-center">
-                <div className="relative">
-                  {/* Improved donut chart */}
-                  <svg width="160" height="160" viewBox="0 0 160 160">
-                    {(() => {
-                      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899', '#14b8a6'];
-                      const radius = 60;
-                      const circumference = 2 * Math.PI * radius;
-                      let cumulativePercentage = 0;
-                      
-                      return (
-                        <>
-                          {/* Background circle */}
-                          <circle
-                            cx="80"
-                            cy="80"
-                            r={radius}
-                            fill="none"
-                            stroke={isDarkMode ? '#374151' : '#e5e7eb'}
-                            strokeWidth="20"
-                          />
-                          
-                          {/* Asset allocation segments */}
-                          {openPositions.map((position, index) => {
-                            const percentage = (position.marketValue / portfolioMetrics.totalValue) * 100;
-                            const strokeDasharray = `${(percentage / 100) * circumference} ${circumference}`;
-                            const strokeDashoffset = -cumulativePercentage * circumference / 100;
-                            const isHovered = hoveredSegment?.symbol === position.symbol;
-                            
-                            cumulativePercentage += percentage;
-                            
-                            return (
-                              <g key={position.id}>
-                                {/* Main segment */}
-                                <circle
-                                  cx="80"
-                                  cy="80"
-                                  r={radius}
-                                  fill="none"
-                                  stroke={colors[index % colors.length]}
-                                  strokeWidth={isHovered ? "24" : "20"}
-                                  strokeDasharray={strokeDasharray}
-                                  strokeDashoffset={strokeDashoffset}
-                                  transform="rotate(-90 80 80)"
-                                  style={{
-                                    cursor: 'pointer',
-                                    transition: 'stroke-width 0.2s ease',
-                                    filter: isHovered ? 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.5))' : 'none',
-                                    opacity: hoveredSegment && !isHovered ? 0.6 : 1
-                                  }}
-                                  onMouseEnter={() => setHoveredSegment({
-                                    symbol: position.symbol,
-                                    percentage: percentage,
-                                    value: position.marketValue
-                                  })}
-                                  onMouseLeave={() => setHoveredSegment(null)}
-                                />
-                                {/* Hover highlight */}
-                                {isHovered && (
-                                  <circle
-                                    cx="80"
-                                    cy="80"
-                                    r={radius + 5}
-                                    fill="none"
-                                    stroke={colors[index % colors.length]}
-                                    strokeWidth="2"
-                                    strokeDasharray={strokeDasharray}
-                                    strokeDashoffset={strokeDashoffset}
-                                    transform="rotate(-90 80 80)"
-                                    opacity="0.4"
-                                  />
-                                )}
-                              </g>
-                            );
-                          })}
-                        </>
-                      );
-                    })()}
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center">
-                      {hoveredSegment ? (
-                        <>
-                          <div className={`text-sm font-bold transition-colors ${
-                            isDarkMode ? 'text-white' : 'text-gray-900'
-                          }`}>
-                            {hoveredSegment.symbol}
-                          </div>
-                          <div className={`text-xs font-medium transition-colors ${
-                            isDarkMode ? 'text-blue-400' : 'text-blue-600'
-                          }`}>
-                            {hoveredSegment.percentage.toFixed(1)}%
-                          </div>
-                          <div className={`text-xs transition-colors ${
-                            isDarkMode ? 'text-gray-400' : 'text-gray-500'
-                          }`}>
-                            {formatCurrency(hoveredSegment.value)}
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className={`text-lg font-bold transition-colors ${
-                            isDarkMode ? 'text-white' : 'text-gray-900'
-                          }`}>
-                            {openPositions.length}
-                          </div>
-                          <div className={`text-xs transition-colors ${
-                            isDarkMode ? 'text-gray-400' : 'text-gray-500'
-                          }`}>
-                            Positions
-                          </div>
-                        </>
-                      )}
-                    </div>
+        {/* Charts Section */}
+        {openPositions.length > 0 && (
+          <div className="mb-6 sm:mb-8">
+            {selectedView === 'overview' && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
+                <div className={`lg:col-span-2 rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+                  isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+                }`}>
+                  <h3 className={`text-lg font-semibold mb-4 transition-colors ${
+                    isDarkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    📈 Portfolio Performance (7 Days)
+                  </h3>
+                  <div className="h-48 sm:h-64">
+                    <PortfolioChart 
+                      trades={trades} 
+                      portfolioValue={portfolioMetrics.totalValue}
+                      className="w-full h-full"
+                    />
+                  </div>
+                </div>
+
+                <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+                  isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+                }`}>
+                  <h3 className={`text-lg font-semibold mb-4 transition-colors ${
+                    isDarkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    🥧 Asset Allocation
+                  </h3>
+                  <div className="h-48 sm:h-64 relative">
+                    <AssetAllocationChart 
+                      positions={openPositions}
+                      totalValue={portfolioMetrics.totalValue}
+                      className="w-full h-full"
+                    />
                   </div>
                 </div>
               </div>
-              {/* Legend */}
-              <div className="mt-4 space-y-2 max-h-32 overflow-y-auto">
-                {openPositions.map((position, index) => {
-                  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899', '#14b8a6'];
-                  const percentage = (position.marketValue / portfolioMetrics.totalValue) * 100;
-                  return (
-                    <div key={position.id} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center">
-                        <div
-                          className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
-                          style={{ backgroundColor: colors[index % colors.length] }}
-                        />
-                        <span className={`truncate ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                          {position.symbol}
-                        </span>
-                      </div>
-                      <span className={`ml-2 font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                        {percentage.toFixed(1)}%
-                      </span>
-                    </div>
-                  );
-                })}
+            )}
+
+            {selectedView === 'heatmap' && (
+              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              }`}>
+                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  🔥 Portfolio Risk Heat Map
+                </h3>
+                <PortfolioHeatMap 
+                  positions={openPositions}
+                  totalValue={portfolioMetrics.totalValue}
+                  className="min-h-96"
+                />
               </div>
-            </div>
+            )}
+
+            {selectedView === 'benchmark' && (
+              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              }`}>
+                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  📈 Benchmark Comparison
+                </h3>
+                <BenchmarkComparison 
+                  portfolioData={[]}
+                  className="min-h-96"
+                />
+              </div>
+            )}
           </div>
         )}
 
