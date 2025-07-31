@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react'
 import { formatCurrency } from '@/utils/formatters'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { useCurrency } from '@/hooks/useCurrency'
+import { convertCurrency, formatCurrencyWithSymbol } from '@/utils/currency'
+import CurrencySwitcher from '@/components/CurrencySwitcher'
 // Removed direct API import - now using backend route
 
 interface StockData {
@@ -67,6 +70,14 @@ interface WatchlistStock {
 
 export default function TradeAnalyzer() {
   const isDarkMode = useDarkMode()
+  const { currency, toggleCurrency } = useCurrency()
+  
+  // Helper function to format currency with conversion
+  const formatPrice = (amount: number): string => {
+    // Assuming original prices are in EUR, convert if needed
+    const convertedAmount = convertCurrency(amount, 'EUR', currency)
+    return formatCurrencyWithSymbol(convertedAmount, currency)
+  }
   
   const [stockData, setStockData] = useState<StockData>({
     symbol: '',
@@ -448,14 +459,19 @@ export default function TradeAnalyzer() {
               Back to Dashboard
             </a>
           </div>
-          <h1 className={`text-3xl font-bold ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>Trade Setup Analyzer</h1>
-          <p className={`mt-2 ${
-            isDarkMode ? 'text-gray-300' : 'text-gray-600'
-          }`}>
-            Analyze momentum/breakout setups for your swing trading strategy
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className={`text-3xl font-bold ${
+                isDarkMode ? 'text-white' : 'text-gray-900'
+              }`}>Trade Setup Analyzer</h1>
+              <p className={`mt-2 ${
+                isDarkMode ? 'text-gray-300' : 'text-gray-600'
+              }`}>
+                Analyze momentum/breakout setups for your swing trading strategy
+              </p>
+            </div>
+            <CurrencySwitcher currency={currency} onToggle={toggleCurrency} />
+          </div>
         </div>
 
         {/* Daily Top 3 Watchlist */}
@@ -513,7 +529,7 @@ export default function TradeAnalyzer() {
                     </div>
                     <div className="flex justify-between">
                       <span>Entry:</span>
-                      <span className="font-medium">{formatCurrency(stock.entryPrice)}</span>
+                      <span className="font-medium">{formatPrice(stock.entryPrice)}</span>
                     </div>
                     <div className="text-xs text-gray-500">
                       Analyzed: {new Date(stock.analyzedAt).toLocaleTimeString()}
@@ -969,23 +985,23 @@ export default function TradeAnalyzer() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-sm font-medium text-blue-600 mb-1">Entry Price</p>
-                    <p className="text-xl font-bold text-blue-800">{formatCurrency(setup.entryPrice)}</p>
+                    <p className="text-xl font-bold text-blue-800">{formatPrice(setup.entryPrice)}</p>
                   </div>
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                     <p className="text-sm font-medium text-red-600 mb-1">Stop Loss</p>
-                    <p className="text-xl font-bold text-red-800">{formatCurrency(setup.stopLoss)}</p>
+                    <p className="text-xl font-bold text-red-800">{formatPrice(setup.stopLoss)}</p>
                     <p className="text-xs text-red-600">
                       {(((setup.entryPrice - setup.stopLoss) / setup.entryPrice) * 100).toFixed(1)}% risk
                     </p>
                   </div>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                     <p className="text-sm font-medium text-green-600 mb-1">Take Profit 1</p>
-                    <p className="text-xl font-bold text-green-800">{formatCurrency(setup.takeProfit1)}</p>
+                    <p className="text-xl font-bold text-green-800">{formatPrice(setup.takeProfit1)}</p>
                     <p className="text-xs text-green-600">15% target</p>
                   </div>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                     <p className="text-sm font-medium text-green-600 mb-1">Take Profit 2</p>
-                    <p className="text-xl font-bold text-green-800">{formatCurrency(setup.takeProfit2)}</p>
+                    <p className="text-xl font-bold text-green-800">{formatPrice(setup.takeProfit2)}</p>
                     <p className="text-xs text-green-600">25% target</p>
                   </div>
                 </div>
