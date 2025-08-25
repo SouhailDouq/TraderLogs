@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { fetchStockDataFinnhub, fetchStockDataYahoo } from '@/utils/alphaVantageApi'
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -9,12 +10,21 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Try primary Yahoo Finance endpoint first
-    let stockData = await fetchFromYahooFinance(symbol)
+    // Try Finnhub API first for best data quality
+    let stockData = await fetchStockDataFinnhub(symbol)
     
     if (!stockData) {
-      // Try alternative Yahoo Finance endpoint
-      stockData = await fetchFromAlternativeEndpoint(symbol)
+      // Fallback to Yahoo Finance with real SMAs
+      stockData = await fetchStockDataYahoo(symbol)
+    }
+    
+    if (!stockData) {
+      // Try legacy Yahoo Finance endpoints as last resort
+      stockData = await fetchFromYahooFinance(symbol)
+      
+      if (!stockData) {
+        stockData = await fetchFromAlternativeEndpoint(symbol)
+      }
     }
     
     if (!stockData) {
@@ -22,7 +32,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         error: 'SYMBOL_NOT_FOUND',
         message: `Unable to fetch data for ${symbol}. This could be due to:
-• Symbol not found on Yahoo Finance
+• Symbol not found on financial APIs
 • API timeout or temporary unavailability
 • Symbol may be delisted or inactive
 

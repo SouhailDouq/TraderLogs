@@ -11,6 +11,9 @@ export const useCurrency = () => {
     const savedCurrency = localStorage.getItem('traderlogs-currency') as Currency
     if (savedCurrency && (savedCurrency === 'EUR' || savedCurrency === 'USD')) {
       setCurrency(savedCurrency)
+    } else {
+      // Set USD as default if no saved preference
+      setCurrency('USD')
     }
   }, [])
 
