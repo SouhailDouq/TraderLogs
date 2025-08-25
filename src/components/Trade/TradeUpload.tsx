@@ -3,11 +3,15 @@
 import { useState } from 'react'
 import { useTradeStore } from '@/utils/store'
 import { toast } from 'react-hot-toast'
+import LoadingOverlay from '@/components/ui/LoadingOverlay'
 
 
 
 export default function TradeUpload() {
   const [dragActive, setDragActive] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [processingStep, setProcessingStep] = useState('')
+  const [progress, setProgress] = useState(0)
 
   const processCSV = useTradeStore(state => state.processCSV)
   const trades = useTradeStore(state => state.trades)
@@ -31,6 +35,13 @@ export default function TradeUpload() {
       return
     }
 
+    setIsProcessing(true)
+    setProgress(0)
+    setProcessingStep('Reading file...')
+    
+    // Show immediate feedback
+    toast.loading('Starting CSV import...', { id: 'csv-import' })
+
     try {
       console.log('Starting file processing...')
       
@@ -39,6 +50,9 @@ export default function TradeUpload() {
       console.log('File content length:', content.length)
       console.log('File content preview:', content.substring(0, 500))
       console.log('Full content (first 1000 chars):', content.substring(0, 1000))
+      
+      setProgress(20)
+      setProcessingStep('Parsing CSV data...')
       
       // Split content into lines to see structure
       const lines = content.trim().split(/\r?\n/)
@@ -49,6 +63,8 @@ export default function TradeUpload() {
         console.log('About to call processCSV...')
         processCSV(content)
         console.log('CSV processing completed successfully')
+        setProgress(50)
+        setProcessingStep('Validating trade data...')
       } catch (csvError) {
         console.error('Error in processCSV:', csvError)
         throw csvError
@@ -67,6 +83,8 @@ export default function TradeUpload() {
       }
 
       // Save trades to database
+      setProgress(70)
+      setProcessingStep('Saving trades to database...')
       console.log('Saving trades to database...')
       const response = await fetch('/api/trades/batch', {
         method: 'POST',
@@ -83,6 +101,8 @@ export default function TradeUpload() {
 
       const result = await response.json()
       console.log('Save result:', result)
+      setProgress(90)
+      setProcessingStep('Refreshing data...')
       
       // Show detailed feedback about saved vs skipped trades
       if (result.saved > 0 && result.skipped > 0) {
@@ -127,9 +147,25 @@ export default function TradeUpload() {
         console.error('Error reloading trades after import:', reloadError)
         // Don't show error to user as the import was successful
       }
+      
+      setProgress(100)
+      setProcessingStep('Complete!')
+      
+      // Dismiss loading toast
+      toast.dismiss('csv-import')
+      
+      setTimeout(() => {
+        setIsProcessing(false)
+        setProcessingStep('')
+        setProgress(0)
+      }, 1000)
     } catch (error) {
       console.error('Error processing file:', error)
+      toast.dismiss('csv-import')
       toast.error(`Failed to import trades: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      setIsProcessing(false)
+      setProcessingStep('')
+      setProgress(0)
     }
   }
 
@@ -138,6 +174,8 @@ export default function TradeUpload() {
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
+
+    if (isProcessing) return // Prevent multiple uploads
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       console.log('File dropped:', e.dataTransfer.files[0].name)
@@ -149,6 +187,9 @@ export default function TradeUpload() {
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log('File input change event triggered')
+    
+    if (isProcessing) return // Prevent multiple uploads
+    
     if (e.target.files && e.target.files[0]) {
       console.log('File selected:', e.target.files[0].name)
       await processFile(e.target.files[0])
@@ -160,18 +201,27 @@ export default function TradeUpload() {
 
 
   return (
-    <div>
-      <h2 className="text-xl font-bold text-gray-800 mb-4">Import Trades</h2>
+    <>
+      <LoadingOverlay 
+        isVisible={isProcessing}
+        title="Importing CSV Data"
+        subtitle={processingStep}
+        progress={progress}
+      />
+      
+      <div>
+        <h2 className="text-xl font-bold text-gray-800 mb-4">Import Trades</h2>
       
       <div className="space-y-4">
         <div
           className={`border-2 border-dashed rounded-lg p-6 text-center ${
-            dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+            dragActive ? 'border-blue-500 bg-blue-50' : 
+            isProcessing ? 'border-gray-200 bg-gray-50' : 'border-gray-300'
           }`}
-          onDragEnter={handleDrag}
-          onDragLeave={handleDrag}
-          onDragOver={handleDrag}
-          onDrop={handleDrop}
+          onDragEnter={!isProcessing ? handleDrag : undefined}
+          onDragLeave={!isProcessing ? handleDrag : undefined}
+          onDragOver={!isProcessing ? handleDrag : undefined}
+          onDrop={!isProcessing ? handleDrop : undefined}
         >
           <input
             type="file"
@@ -179,18 +229,42 @@ export default function TradeUpload() {
             className="hidden"
             accept=".csv"
             onChange={handleFileChange}
+            disabled={isProcessing}
           />
-          <label
-            htmlFor="file-upload"
-            className="cursor-pointer text-sm text-gray-600"
-          >
-            <span className="block mb-2">
-              Drag and drop a CSV file or click to upload
-            </span>
-            <span className="text-blue-600 hover:text-blue-700">
-              Browse files
-            </span>
-          </label>
+          
+          {isProcessing ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-center space-x-2">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                <span className="text-sm font-medium text-gray-700">Processing CSV...</span>
+              </div>
+              
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${progress}%` }}
+                ></div>
+              </div>
+              
+              <p className="text-xs text-gray-600">{processingStep}</p>
+              
+              <p className="text-xs text-gray-500">
+                Please don't refresh the page or navigate away during import
+              </p>
+            </div>
+          ) : (
+            <label
+              htmlFor="file-upload"
+              className="cursor-pointer text-sm text-gray-600"
+            >
+              <span className="block mb-2">
+                Drag and drop a CSV file or click to upload
+              </span>
+              <span className="text-blue-600 hover:text-blue-700">
+                Browse files
+              </span>
+            </label>
+          )}
         </div>
 
         <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -211,6 +285,7 @@ export default function TradeUpload() {
           </p>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   )
 }

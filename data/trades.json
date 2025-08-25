@@ -19,6 +19,118 @@
       "total": 15500,
       "profitLoss": 500,
       "id": "1752856161511-lcai4g4f5"
+    },
+    {
+      "date": "2025-08-21",
+      "symbol": "OPEN",
+      "type": "market buy",
+      "quantity": 3.59,
+      "price": 207.85,
+      "profitLoss": 0,
+      "name": "Opendoor Technologies",
+      "total": 746.1814999999999,
+      "id": "1756068240965-vurg453n5"
+    },
+    {
+      "date": "2025-08-21",
+      "symbol": "OPEN",
+      "type": "market buy",
+      "quantity": 3.59,
+      "price": 207.85,
+      "profitLoss": 0,
+      "name": "Opendoor Technologies",
+      "total": 746.1814999999999,
+      "id": "1756069066348-xr6f6t7ry"
+    },
+    {
+      "date": "2025-08-22",
+      "symbol": "OPEN",
+      "type": "limit sell",
+      "quantity": 3.93,
+      "price": 206.64,
+      "profitLoss": 65.74,
+      "name": "Opendoor Technologies",
+      "total": 812.0952,
+      "id": "1756068248614-mtggnbflj"
+    },
+    {
+      "date": "2025-08-22",
+      "symbol": "OPEN",
+      "type": "market buy",
+      "quantity": 4.26,
+      "price": 190.01,
+      "profitLoss": 0,
+      "name": "Opendoor Technologies",
+      "total": 809.4426,
+      "id": "1756068255180-3x0ty36b2"
+    },
+    {
+      "date": "2025-08-22",
+      "symbol": "OPEN",
+      "type": "limit sell",
+      "quantity": 4.62,
+      "price": 189.97,
+      "profitLoss": 67.68,
+      "name": "Opendoor Technologies",
+      "total": 877.6614000000001,
+      "id": "1756068261328-gy0166gtb"
+    },
+    {
+      "date": "2025-08-22",
+      "symbol": "OPEN",
+      "type": "limit sell",
+      "quantity": 3.93,
+      "price": 206.64,
+      "profitLoss": 65.74,
+      "name": "Opendoor Technologies",
+      "total": 812.0952,
+      "id": "1756069134818-88t0p93n0"
+    },
+    {
+      "date": "2025-08-22",
+      "symbol": "OPEN",
+      "type": "market buy",
+      "quantity": 4.26,
+      "price": 190.01,
+      "profitLoss": 0,
+      "name": "Opendoor Technologies",
+      "total": 809.4426,
+      "id": "1756069143193-h6ndsqh0o"
+    },
+    {
+      "date": "2025-08-22",
+      "symbol": "OPEN",
+      "type": "limit sell",
+      "quantity": 4.62,
+      "price": 189.97,
+      "profitLoss": 67.68,
+      "name": "Opendoor Technologies",
+      "total": 877.6614000000001,
+      "id": "1756069159283-ha9uaj0ba"
+    },
+    {
+      "symbol": "OPEN",
+      "type": "limit sell",
+      "quantity": 222.65707295,
+      "price": 3.9394,
+      "date": "2025-08-22",
+      "total": 876.88,
+      "profitLoss": 67.68,
+      "source": "CSV",
+      "sourceId": "2025-08-22-OPEN-222.6570729500-sell",
+      "id": "1756137388943-36yv4oucf"
+    },
+    {
+      "symbol": "OPEN",
+      "type": "limit sell",
+      "quantity": 126.27484842,
+      "price": 4.9289,
+      "date": "2025-08-25",
+      "total": 622.31,
+      "profitLoss": 76.27,
+      "source": "CSV",
+      "sourceId": "2025-08-25-OPEN-126.2748484200-sell",
+      "id": "1756137399409-in1ndvzta"
     }
   ]
 }

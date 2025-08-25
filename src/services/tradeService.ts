@@ -7,7 +7,15 @@ type PrismaError = Error & { code: string }
 
 export class TradeService {
   private generateSourceId(trade: Trade): string {
-    return trade.id || `${trade.symbol}-${trade.date}-${trade.type}-${trade.quantity}`
+    // Use the trade's id if it exists (from CSV processing), otherwise generate a unique one
+    if (trade.id) {
+      return trade.id
+    }
+    
+    // Fallback: create unique sourceId with timestamp to avoid duplicates
+    const timestamp = new Date().getTime()
+    const randomSuffix = Math.random().toString(36).substr(2, 5)
+    return `${trade.symbol}-${trade.date}-${trade.type.replace(/\s+/g, '-')}-${trade.quantity}-${timestamp}-${randomSuffix}`
   }
 
   async getAllTrades() {

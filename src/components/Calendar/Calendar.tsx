@@ -45,9 +45,10 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
       const dateStr = format(day, 'yyyy-MM-dd')
       const dayTrades = processedTrades[dateStr] || []
       
-      // Calculate profit only from closed positions
-      const closedTrades = dayTrades.filter(t => !t.isOpen)
-      const openTrades = dayTrades.filter(t => t.isOpen)
+      // Calculate profit from trades with profit/loss (closed positions)
+      // Handle case where isOpen might be null from database
+      const closedTrades = dayTrades.filter(t => t.isOpen === false || (t.isOpen === null && t.profitLoss !== 0))
+      const openTrades = dayTrades.filter(t => t.isOpen === true || (t.isOpen === null && t.profitLoss === 0))
       const profit = closedTrades.reduce((sum: number, t: Trade) => sum + (t.profitLoss ?? 0), 0)
 
       days.push({

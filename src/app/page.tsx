@@ -164,7 +164,7 @@ export default function Home() {
             </div>
           </div>
           <div className="lg:col-span-4 space-y-6">
-            <MonthlyPnL />
+            <MonthlyPnL selectedMonth={currentMonth} />
             <div className={`rounded-lg shadow-sm border p-6 transition-colors ${
               isDarkMode 
                 ? 'bg-gray-800 border-gray-700' 

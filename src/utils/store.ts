@@ -86,6 +86,7 @@ export interface TradeStore {
 
 // Function to analyze positions and mark open vs closed trades
 const analyzePositions = (trades: Trade[]): Trade[] => {
+  console.log('=== Position Analysis Debug ===')
   const positions: Record<string, { bought: number; sold: number; trades: Trade[] }> = {}
   
   // Group trades by symbol
@@ -106,19 +107,39 @@ const analyzePositions = (trades: Trade[]): Trade[] => {
     }
   })
   
+  // Log position analysis for August 22 OPEN trades
+  if (positions['OPEN']) {
+    console.log('OPEN position analysis:', {
+      bought: positions['OPEN'].bought,
+      sold: positions['OPEN'].sold,
+      isPositionOpen: positions['OPEN'].bought > positions['OPEN'].sold,
+      trades: positions['OPEN'].trades.filter(t => t.date.includes('2025-08-22'))
+    })
+  }
+  
   // Mark trades as open or closed
-  return trades.map(trade => {
+  const analyzedTrades = trades.map(trade => {
     const position = positions[trade.symbol]
     const isPositionOpen = position.bought > position.sold
     const isBuy = trade.type.toLowerCase().includes('buy')
     const isSell = trade.type.toLowerCase().includes('sell')
     
-    return {
+    const analyzedTrade = {
       ...trade,
       isOpen: isPositionOpen && isBuy, // Only mark buy trades as open if position is still open
-      position: isPositionOpen ? (isBuy ? 'long' : 'short') : 'closed'
+      position: isPositionOpen ? (isBuy ? 'long' : 'short') : 'closed' as 'long' | 'short' | 'closed'
     }
+    
+    // Log August 22 OPEN trades specifically
+    if (trade.symbol === 'OPEN' && trade.date.includes('2025-08-22')) {
+      console.log(`OPEN trade on Aug 22: ${trade.type} ${trade.quantity} shares, isOpen: ${analyzedTrade.isOpen}, position: ${analyzedTrade.position}`)
+    }
+    
+    return analyzedTrade
   })
+  
+  console.log('=== End Position Analysis Debug ===')
+  return analyzedTrades
 }
 
 const calculateStats = (trades: Trade[]): TradeStats => {
@@ -167,38 +188,21 @@ const calculateMonthlyPnL = (trades: Trade[], month: number, year: number): Mont
     positionsBySymbol[trade.symbol].push(trade)
   })
   
-  // Calculate completed positions (only count positions that are closed)
-  const completedPositions: { symbol: string; totalPnL: number; isProfit: boolean }[] = []
+  // Calculate individual closed trades (not grouped by symbol)
+  const closedTrades = monthlyTrades.filter(t => !t.isOpen && t.profitLoss !== 0)
   
-  Object.entries(positionsBySymbol).forEach(([symbol, symbolTrades]) => {
-    // Check if this position is closed (has both buys and sells, or is marked as closed)
-    const hasClosedTrades = symbolTrades.some(t => !t.isOpen && t.profitLoss !== 0)
-    
-    if (hasClosedTrades) {
-      // Sum up the P&L for this symbol (completed position)
-      const totalSymbolPnL = symbolTrades
-        .filter(t => !t.isOpen && t.profitLoss !== 0)
-        .reduce((sum, t) => sum + t.profitLoss, 0)
-      
-      if (totalSymbolPnL !== 0) {
-        completedPositions.push({
-          symbol,
-          totalPnL: totalSymbolPnL,
-          isProfit: totalSymbolPnL > 0
-        })
-        
-        console.log(`Completed position: ${symbol} - P&L: ${totalSymbolPnL}`)
-      }
-    }
+  console.log('Individual closed trades:')
+  closedTrades.forEach(trade => {
+    console.log(`- ${trade.symbol} on ${trade.date}: P&L ${trade.profitLoss}`)
   })
   
-  const profitablePositions = completedPositions.filter(p => p.isProfit)
-  const losingPositions = completedPositions.filter(p => !p.isProfit)
-  const totalPnL = completedPositions.reduce((sum, p) => sum + p.totalPnL, 0)
+  const profitableTrades = closedTrades.filter(t => t.profitLoss > 0)
+  const losingTrades = closedTrades.filter(t => t.profitLoss < 0)
+  const totalPnL = closedTrades.reduce((sum, t) => sum + t.profitLoss, 0)
 
-  console.log('Completed positions count:', completedPositions.length)
-  console.log('Profitable positions:', profitablePositions.length)
-  console.log('Losing positions:', losingPositions.length)
+  console.log('Individual closed trades count:', closedTrades.length)
+  console.log('Profitable trades:', profitableTrades.length)
+  console.log('Losing trades:', losingTrades.length)
   console.log('Total P&L:', totalPnL)
   console.log('=== End Debug ===')
 
@@ -211,10 +215,10 @@ const calculateMonthlyPnL = (trades: Trade[], month: number, year: number): Mont
     month: monthNames[month],
     year,
     totalPnL,
-    profitableTrades: profitablePositions.length,
-    losingTrades: losingPositions.length,
-    totalTrades: completedPositions.length,
-    winRate: completedPositions.length > 0 ? (profitablePositions.length / completedPositions.length) * 100 : 0
+    profitableTrades: profitableTrades.length,
+    losingTrades: losingTrades.length,
+    totalTrades: closedTrades.length,
+    winRate: closedTrades.length > 0 ? (profitableTrades.length / closedTrades.length) * 100 : 0
   }
 }
 
@@ -820,14 +824,17 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
       console.log('Parsed trades:', parsedTrades)
       const trades: Trade[] = []
 
-      parsedTrades.forEach((trade) => {
+      parsedTrades.forEach((trade, index) => {
         try {
           console.log('Processing trade:', JSON.stringify(trade, null, 2))
           validateTradeData(trade)
 
+          // Create unique sourceId using date, ticker, shares, action, and index to handle multiple trades
+          const uniqueId = `${trade.date}-${trade.ticker}-${trade.shares}-${trade.action.replace(/\s+/g, '-')}-${index}`
+          
           // Create a trade for every action (both buy and sell)
           const newTrade: Trade = {
-            id: `${trade.date}-${trade.ticker}-${trade.shares}`,
+            id: uniqueId,
             date: trade.date,
             symbol: trade.ticker,
             type: trade.action,
