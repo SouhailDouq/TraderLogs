@@ -5,17 +5,31 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
   const symbol = searchParams.get('symbol')
 
+  console.log('API route called for symbol:', symbol)
+
   if (!symbol) {
     return NextResponse.json({ error: 'Symbol is required' }, { status: 400 })
   }
 
   try {
+    console.log('Trying Finnhub API for', symbol)
     // Try Finnhub API first for best data quality
     let stockData = await fetchStockDataFinnhub(symbol)
+    console.log('Finnhub result:', stockData ? 'Success' : 'Failed')
+    
+    if (stockData) {
+      console.log('Returning Finnhub data with source:', stockData.dataQuality?.source)
+      console.log('Data quality warnings:', stockData.dataQuality?.warnings)
+    }
     
     if (!stockData) {
+      console.log('Finnhub failed, trying Yahoo Finance')
       // Fallback to Yahoo Finance with real SMAs
       stockData = await fetchStockDataYahoo(symbol)
+      
+      if (stockData) {
+        console.log('Yahoo Finance succeeded with source:', stockData.dataQuality?.source)
+      }
     }
     
     if (!stockData) {

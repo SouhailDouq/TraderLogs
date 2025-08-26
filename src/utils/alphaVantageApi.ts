@@ -119,6 +119,8 @@ export async function fetchStockData(symbol: string): Promise<AlphaVantageStockD
 export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantageStockData | null> {
   const FINNHUB_API_KEY = process.env.NEXT_PUBLIC_FINNHUB_API_KEY || 'demo'
   
+  console.log('Finnhub API call for', symbol, 'with key:', FINNHUB_API_KEY ? 'Present' : 'Missing')
+  
   try {
     // Fetch multiple endpoints in parallel for comprehensive data
     const [quoteResponse, profileResponse, metricsResponse] = await Promise.all([
@@ -138,6 +140,7 @@ export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantag
 
     // Check for API errors
     if (!quoteData.c || quoteData.error) {
+      console.error('Finnhub API error for', symbol, ':', quoteData)
       throw new Error('Invalid symbol or API error')
     }
 
@@ -196,7 +199,8 @@ export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantag
     }
 
   } catch (error) {
-    console.error('Error fetching Finnhub data:', error)
+    console.error('Error fetching Finnhub data for', symbol, ':', error)
+    console.log('Finnhub API key being used:', FINNHUB_API_KEY ? 'Present' : 'Missing')
     // Fallback to Yahoo Finance if Finnhub fails
     return fetchStockDataYahoo(symbol)
   }

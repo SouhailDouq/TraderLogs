@@ -344,7 +344,7 @@ export default function TradeAnalyzer() {
   const hasData = stockData.symbol && stockData.price > 0
   
   // Check data quality for warnings
-  const hasDataQualityIssues = stockData.symbol && (!stockData.dataQuality?.isRealData || stockData.dataQuality?.warnings.length > 0)
+  const hasDataQualityIssues = stockData.symbol && stockData.dataQuality && (!stockData.dataQuality?.isRealData || stockData.dataQuality?.warnings.length > 0)
 
   const getSignalColor = (signal: string) => {
     switch (signal) {
@@ -560,10 +560,29 @@ export default function TradeAnalyzer() {
                 <h3 className="text-sm font-medium text-orange-800 mb-2">⚠️ Data Quality Warning</h3>
                 <div className="text-sm text-orange-700 space-y-1">
                   <p><strong>Source:</strong> {stockData.dataQuality?.source}</p>
-                  {stockData.dataQuality?.warnings.map((warning, index) => (
-                    <p key={index}>• {warning}</p>
-                  ))}
-                  <p className="mt-2 font-medium">
+                  
+                  {/* Data Quality Level Indicator */}
+                  <div className="mt-2 p-2 bg-orange-100 rounded border-l-4 border-orange-400">
+                    <p className="text-xs font-medium text-orange-800 mb-1">Data Quality Level:</p>
+                    {stockData.dataQuality?.source.includes('Finnhub') && stockData.dataQuality?.isRealData ? (
+                      <p className="text-xs text-green-700">✅ <strong>Finnhub + Real SMAs</strong> → Highest quality (No warning normally)</p>
+                    ) : stockData.dataQuality?.source.includes('Yahoo') && stockData.dataQuality?.isRealData ? (
+                      <p className="text-xs text-yellow-700">⚠️ <strong>Yahoo Finance + Real SMAs</strong> → Good quality (Limited fundamentals)</p>
+                    ) : stockData.dataQuality?.source.includes('Yahoo') && !stockData.dataQuality?.isRealData ? (
+                      <p className="text-xs text-orange-700">⚠️ <strong>Yahoo Finance + Estimated SMAs</strong> → Poor quality (Fake technical data)</p>
+                    ) : (
+                      <p className="text-xs text-red-700">🚨 <strong>All APIs Failed</strong> → Lowest quality (All data estimated)</p>
+                    )}
+                  </div>
+
+                  <div className="mt-2">
+                    <p className="text-xs font-medium text-orange-800 mb-1">Specific Issues:</p>
+                    {stockData.dataQuality?.warnings.map((warning, index) => (
+                      <p key={index} className="text-xs text-orange-700">• {warning}</p>
+                    ))}
+                  </div>
+                  
+                  <p className="mt-3 font-medium text-orange-800">
                     🚨 <strong>Use caution when trading based on this analysis</strong>
                   </p>
                 </div>
