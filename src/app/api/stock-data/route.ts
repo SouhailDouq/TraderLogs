@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchStockDataFinnhub, fetchStockDataYahoo } from '@/utils/alphaVantageApi'
+import { fetchStockDataFinnhub, fetchStockDataYahoo, fetchMarketContext } from '@/utils/alphaVantageApi'
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -56,7 +56,13 @@ You can still analyze this stock by entering data manually.`,
       }, { status: 404 })
     }
     
-    return NextResponse.json(stockData)
+    // Fetch market context for enhanced analysis
+    const marketContext = await fetchMarketContext()
+    
+    return NextResponse.json({
+      ...stockData,
+      marketContext
+    })
   } catch (error: any) {
     console.error(`Error fetching stock data for ${symbol}:`, error)
     return NextResponse.json(

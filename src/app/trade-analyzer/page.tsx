@@ -45,11 +45,32 @@ interface StockData {
   volatility: string
   optionable: string
   shortable: string
+  macd?: string
+  macdSignal?: string
+  macdHistogram?: string
+  marketContext?: {
+    vix: number
+    spyTrend: 'bullish' | 'bearish' | 'neutral'
+    spyPrice: number
+    spyChange: number
+    marketCondition: 'trending' | 'volatile' | 'sideways'
+    sectorRotation: {
+      technology: number
+      financials: number
+      energy: number
+    }
+  }
   dataQuality?: {
     isRealData: boolean
     source: string
     warnings: string[]
+    reliability: 'high' | 'medium' | 'low'
   }
+  // Real-time intraday data
+  intradayChange?: number
+  intradayVolume?: number
+  volumeSpike?: boolean
+  priceAction?: 'bullish' | 'bearish' | 'neutral'
 }
 
 interface TradeSetup {
@@ -171,6 +192,16 @@ export default function TradeAnalyzer() {
           week52Low: data.week52Low,
           rsi: data.rsi,
           relVolume: data.relVolume,
+          macd: data.macd,
+          macdSignal: data.macdSignal,
+          macdHistogram: data.macdHistogram,
+          // Real-time intraday data
+          intradayChange: data.intradayChange,
+          intradayVolume: data.intradayVolume,
+          volumeSpike: data.volumeSpike,
+          priceAction: data.priceAction,
+          marketContext: data.marketContext,
+          dataQuality: data.dataQuality,
           // Keep other fields as they were
           avgVolume: stockData.avgVolume,
           forwardPE: stockData.forwardPE,
@@ -231,6 +262,97 @@ export default function TradeAnalyzer() {
     const week52High = parseNumber(stockData.week52High)
     const relativeVolume = parseNumber(stockData.relVolume)
     const rsi = parseNumber(stockData.rsi)
+    
+    // Market context analysis
+    const marketContext = stockData.marketContext
+    let marketMultiplier = 1.0 // Base multiplier for market conditions
+    
+    if (marketContext) {
+      // VIX analysis - high volatility reduces reliability
+      if (marketContext.vix && marketContext.vix > 25) {
+        warnings.push(`High market volatility (VIX: ${marketContext.vix.toFixed(1)}) - increased risk`)
+        marketMultiplier *= 0.8
+      } else if (marketContext.vix && marketContext.vix < 15) {
+        signals.push(`Low volatility environment (VIX: ${marketContext.vix.toFixed(1)}) - favorable conditions`)
+        marketMultiplier *= 1.1
+      }
+      
+      // SPY trend analysis
+      if (marketContext.spyTrend === 'bearish') {
+        warnings.push(`Market in bearish trend (SPY: ${marketContext.spyChange ? marketContext.spyChange.toFixed(2) : 'N/A'}%) - breakouts may fail`)
+        marketMultiplier *= 0.7
+      } else if (marketContext.spyTrend === 'bullish') {
+        signals.push(`Market in bullish trend (SPY: +${marketContext.spyChange ? marketContext.spyChange.toFixed(2) : 'N/A'}%) - favorable for breakouts`)
+        marketMultiplier *= 1.2
+      }
+      
+      // Market condition analysis
+      if (marketContext.marketCondition === 'volatile') {
+        warnings.push('Volatile market conditions - use smaller position sizes')
+      } else if (marketContext.marketCondition === 'trending') {
+        signals.push('Trending market conditions - favorable for momentum plays')
+        score += 10
+      }
+    } else {
+      warnings.push('Market context unavailable - use extra caution')
+      marketMultiplier *= 0.9
+    }
+    
+    // CRITICAL: Real-time price validation - reject high scores on declining stocks
+    const intradayChange = stockData.intradayChange || 0
+    const priceAction = stockData.priceAction || 'neutral'
+    const volumeSpike = stockData.volumeSpike || false
+    
+    // Debug logging
+    console.log('DEBUG - OPEN Analysis:')
+    console.log('Raw stockData:', stockData)
+    console.log('intradayChange from stockData:', stockData.intradayChange)
+    console.log('intradayChange variable:', intradayChange)
+    console.log('priceAction:', priceAction)
+    console.log('volumeSpike:', volumeSpike)
+    
+    // Major decline override - cap scores for stocks down significantly
+    if (intradayChange < -5) {
+      warnings.push(`Stock down ${Math.abs(intradayChange).toFixed(1)}% today - high risk despite technical signals`)
+      marketMultiplier *= 0.3 // Severely reduce score
+      warnings.push('Score heavily penalized due to significant intraday decline')
+    } else if (intradayChange < -3) {
+      warnings.push(`Stock down ${Math.abs(intradayChange).toFixed(1)}% today - caution advised`)
+      marketMultiplier *= 0.5 // Reduce score by half
+    } else if (intradayChange < -1.5) {
+      warnings.push(`Stock down ${Math.abs(intradayChange).toFixed(1)}% today - weak intraday momentum`)
+      marketMultiplier *= 0.7
+    }
+    
+    // Volume spike analysis for selling pressure
+    if (volumeSpike && intradayChange < -2) {
+      warnings.push('High volume selling detected - potential breakdown in progress')
+      marketMultiplier *= 0.4 // Further penalty for high-volume selling
+    } else if (volumeSpike && intradayChange > 2) {
+      signals.push('High volume buying detected - strong momentum confirmation')
+      score += 15
+    }
+    
+    // Price action momentum check
+    if (priceAction === 'bearish') {
+      warnings.push('Bearish intraday price action - technical signals may be outdated')
+      score -= 20
+    } else if (priceAction === 'bullish') {
+      signals.push('Bullish intraday price action - momentum confirmation')
+      score += 10
+    }
+    
+    // Data quality assessment
+    const dataQuality = stockData.dataQuality
+    if (dataQuality) {
+      if (dataQuality.reliability === 'low') {
+        warnings.push('Low data reliability - verify key metrics manually')
+        marketMultiplier *= 0.8
+      } else if (dataQuality.reliability === 'high') {
+        signals.push('High quality real-time data available')
+        score += 5
+      }
+    }
 
     // Price above moving averages (trend confirmation)
     if (currentPrice > sma20 && sma20 > 0) {
@@ -254,42 +376,81 @@ export default function TradeAnalyzer() {
       warnings.push('Below 200-day SMA (bearish long-term trend)')
     }
 
-    // Volume analysis (using relative volume from Finviz)
-    if (relativeVolume > 2) {
-      signals.push('High relative volume (2x+ average) - strong interest')
-      score += 20
-    } else if (relativeVolume > 1.5) {
-      signals.push('Above average relative volume - good interest')
-      score += 10
-    } else if (relativeVolume < 0.5 && relativeVolume > 0) {
-      warnings.push('Low relative volume - lack of interest')
-      score -= 10
-    }
-
-    // Near 52-week high (momentum)
-    const highProximity = week52High > 0 ? (currentPrice / week52High) * 100 : 0
-    if (highProximity > 95) {
-      signals.push('At/near 52-week high - strong momentum')
+    // Enhanced volume analysis with data quality consideration
+    const volumeReliable = dataQuality?.reliability !== 'low'
+    if (relativeVolume > 3 && volumeReliable) {
+      signals.push('Exceptional relative volume (3x+ average) - very strong interest')
       score += 25
-    } else if (highProximity > 85) {
-      signals.push('Near 52-week high - good momentum')
-      score += 15
-    } else if (highProximity < 50) {
-      warnings.push('Far from 52-week high - weak momentum')
-      score -= 5
+    } else if (relativeVolume > 2) {
+      signals.push(`High relative volume (${relativeVolume.toFixed(1)}x average) - strong interest`)
+      score += volumeReliable ? 20 : 15
+    } else if (relativeVolume > 1.5) {
+      signals.push(`Above average relative volume (${relativeVolume.toFixed(1)}x) - good interest`)
+      score += volumeReliable ? 10 : 7
+    } else if (relativeVolume < 0.8 && relativeVolume > 0) {
+      warnings.push(`Low relative volume (${relativeVolume.toFixed(1)}x) - lack of interest`)
+      score -= 10
+    } else if (!volumeReliable) {
+      warnings.push('Volume data estimated - verify on Finviz manually')
     }
 
-    // RSI analysis
+    // Enhanced 52-week high analysis with market context
+    const highProximity = week52High > 0 ? (currentPrice / week52High) * 100 : 0
+    if (highProximity > 98) {
+      // Very close to 52-week high - check market conditions
+      if (marketContext?.marketCondition === 'volatile') {
+        warnings.push('At 52-week high in volatile market - potential reversal risk')
+        score += 10
+      } else {
+        signals.push('Breaking new 52-week high - exceptional momentum')
+        score += 30
+      }
+    } else if (highProximity > 90) {
+      signals.push(`Near 52-week high (${highProximity.toFixed(1)}%) - strong momentum`)
+      score += 20
+    } else if (highProximity > 75) {
+      signals.push(`Good proximity to 52-week high (${highProximity.toFixed(1)}%) - decent momentum`)
+      score += 10
+    } else if (highProximity < 50) {
+      warnings.push(`Far from 52-week high (${highProximity.toFixed(1)}%) - weak momentum`)
+      score -= 8
+    }
+
+    // Enhanced RSI analysis with MACD confirmation
     if (rsi > 0) {
       if (rsi < 30) {
-        warnings.push('RSI oversold - potential reversal risk')
-        score -= 5
+        warnings.push(`RSI oversold (${rsi.toFixed(1)}) - potential reversal risk`)
+        score -= 8
+      } else if (rsi > 80) {
+        warnings.push(`RSI extremely overbought (${rsi.toFixed(1)}) - high pullback risk`)
+        score -= 15
       } else if (rsi > 70) {
-        warnings.push('RSI overbought - potential pullback risk')
+        warnings.push(`RSI overbought (${rsi.toFixed(1)}) - potential pullback risk`)
         score -= 10
-      } else if (rsi >= 50 && rsi <= 70) {
-        signals.push('RSI in bullish range (50-70)')
-        score += 10
+      } else if (rsi >= 55 && rsi <= 70) {
+        signals.push(`RSI in bullish range (${rsi.toFixed(1)}) - good momentum`)
+        score += 12
+      } else if (rsi >= 45 && rsi < 55) {
+        signals.push(`RSI neutral (${rsi.toFixed(1)}) - no momentum bias`)
+        score += 5
+      }
+    }
+    
+    // MACD analysis for additional confirmation
+    if (stockData.macd && stockData.macdSignal && stockData.macdHistogram) {
+      const macd = parseFloat(stockData.macd)
+      const macdSignal = parseFloat(stockData.macdSignal)
+      const macdHist = parseFloat(stockData.macdHistogram)
+      
+      if (macd > macdSignal && macdHist > 0) {
+        signals.push('MACD bullish crossover - momentum confirmation')
+        score += 15
+      } else if (macd < macdSignal && macdHist < 0) {
+        warnings.push('MACD bearish - momentum divergence')
+        score -= 12
+      } else if (Math.abs(macdHist) < 0.001) {
+        signals.push('MACD near crossover - watch for momentum shift')
+        score += 5
       }
     }
 
@@ -311,21 +472,70 @@ export default function TradeAnalyzer() {
       score += 5
     }
 
-    // Calculate entry and exit levels
+    // Apply market context multiplier to final score and cap at 100
+    const rawScore = score
+    score = Math.round(score * marketMultiplier)
+    
+    // Cap score at 100 maximum
+    if (score > 100) {
+      score = 100
+    }
+    
+    if (marketMultiplier !== 1.0) {
+      if (marketMultiplier > 1.0) {
+        signals.push(`Score boosted by favorable market conditions (${(marketMultiplier * 100).toFixed(0)}%) - Raw: ${rawScore}, Final: ${score}`)
+      } else {
+        warnings.push(`Score reduced by unfavorable market conditions (${(marketMultiplier * 100).toFixed(0)}%) - Raw: ${rawScore}, Final: ${score}`)
+      }
+    }
+    
+    // Enhanced entry and exit levels with volatility adjustment
     const entryPrice = currentPrice
-    const stopLoss = Math.max(sma20 * 0.95, currentPrice * 0.92) // 5% below SMA20 or 8% below current
-    const takeProfit1 = currentPrice * 1.15 // 15% target
-    const takeProfit2 = currentPrice * 1.25 // 25% target
+    const volatilityMultiplier = marketContext?.vix && typeof marketContext.vix === 'number' ? Math.max(0.8, Math.min(1.3, marketContext.vix / 20)) : 1.0
+    
+    // Dynamic stop loss based on market volatility and technical levels
+    const technicalStop = Math.max(sma20 * 0.95, currentPrice * 0.92)
+    const volatilityStop = currentPrice * (1 - (0.08 * volatilityMultiplier))
+    const stopLoss = Math.max(technicalStop, volatilityStop)
+    
+    // Dynamic profit targets based on market conditions
+    const baseTarget1 = marketContext?.marketCondition === 'trending' ? 1.18 : 1.15
+    const baseTarget2 = marketContext?.marketCondition === 'trending' ? 1.30 : 1.25
+    
+    const takeProfit1 = currentPrice * baseTarget1
+    const takeProfit2 = currentPrice * baseTarget2
     const riskAmount = entryPrice - stopLoss
     const rewardAmount = takeProfit1 - entryPrice
     const riskRewardRatio = riskAmount > 0 ? rewardAmount / riskAmount : 0
 
-    // Determine signal strength
+    // Enhanced signal strength determination with market context
     let signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid'
-    if (score >= 70) signal = 'Strong'
-    else if (score >= 50) signal = 'Moderate'
-    else if (score >= 30) signal = 'Weak'
-    else signal = 'Avoid'
+    
+    // Adjust thresholds based on market conditions (but keep reasonable ranges)
+    const strongThreshold = marketContext?.marketCondition === 'volatile' ? 75 : 70
+    const moderateThreshold = marketContext?.marketCondition === 'volatile' ? 55 : 50
+    const weakThreshold = marketContext?.marketCondition === 'volatile' ? 35 : 30
+    
+    // For very high scores (85+), require extra confirmation in volatile markets
+    if (score >= 85 && marketContext?.marketCondition === 'volatile') {
+      signal = 'Moderate' // Downgrade from Strong in volatile conditions
+      warnings.push('High score in volatile market - downgraded to Moderate signal')
+    } else if (score >= strongThreshold) {
+      signal = 'Strong'
+    } else if (score >= moderateThreshold) {
+      signal = 'Moderate'
+    } else if (score >= weakThreshold) {
+      signal = 'Weak'
+    } else {
+      signal = 'Avoid'
+    }
+    
+    // Additional risk warnings for high volatility
+    if (marketContext?.vix && typeof marketContext.vix === 'number' && marketContext.vix > 30) {
+      warnings.push('Extreme market volatility - consider reducing position size by 50%')
+    } else if (marketContext?.vix && typeof marketContext.vix === 'number' && marketContext.vix > 25) {
+      warnings.push('High market volatility - consider reducing position size by 25%')
+    }
 
     return {
       signal,
@@ -549,6 +759,105 @@ export default function TradeAnalyzer() {
           </div>
         )}
 
+        {/* Market Context Display */}
+        {stockData.marketContext && (
+          <div className={`mb-6 rounded-lg shadow-lg p-6 transition-colors ${
+            isDarkMode ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <div className="flex items-center gap-3 mb-4">
+              <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+              <h2 className={`text-xl font-semibold ${
+                isDarkMode ? 'text-white' : 'text-gray-800'
+              }`}>Market Context</h2>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* VIX */}
+              <div className={`p-4 rounded-lg border ${
+                stockData.marketContext.vix && stockData.marketContext.vix > 25 ? 'bg-red-50 border-red-200' :
+                stockData.marketContext.vix && stockData.marketContext.vix < 15 ? 'bg-green-50 border-green-200' :
+                'bg-yellow-50 border-yellow-200'
+              }`}>
+                <p className="text-sm font-medium text-gray-600 mb-1">VIX (Fear Index)</p>
+                <p className={`text-2xl font-bold ${
+                  stockData.marketContext.vix && stockData.marketContext.vix > 25 ? 'text-red-600' :
+                  stockData.marketContext.vix && stockData.marketContext.vix < 15 ? 'text-green-600' :
+                  'text-yellow-600'
+                }`}>
+                  {stockData.marketContext.vix ? stockData.marketContext.vix.toFixed(1) : 'N/A'}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {stockData.marketContext.marketCondition ? stockData.marketContext.marketCondition.charAt(0).toUpperCase() + stockData.marketContext.marketCondition.slice(1) : 'Unknown'}
+                </p>
+              </div>
+              
+              {/* SPY Trend */}
+              <div className={`p-4 rounded-lg border ${
+                stockData.marketContext.spyTrend === 'bullish' ? 'bg-green-50 border-green-200' :
+                stockData.marketContext.spyTrend === 'bearish' ? 'bg-red-50 border-red-200' :
+                'bg-gray-50 border-gray-200'
+              }`}>
+                <p className="text-sm font-medium text-gray-600 mb-1">SPY Trend</p>
+                <p className={`text-lg font-bold ${
+                  stockData.marketContext.spyTrend === 'bullish' ? 'text-green-600' :
+                  stockData.marketContext.spyTrend === 'bearish' ? 'text-red-600' :
+                  'text-gray-600'
+                }`}>
+                  {stockData.marketContext.spyTrend ? stockData.marketContext.spyTrend.toUpperCase() : 'N/A'}
+                </p>
+                <p className={`text-sm ${
+                  stockData.marketContext.spyChange && stockData.marketContext.spyChange >= 0 ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {stockData.marketContext.spyChange ? (stockData.marketContext.spyChange >= 0 ? '+' : '') + stockData.marketContext.spyChange.toFixed(2) + '%' : 'N/A'}
+                </p>
+              </div>
+              
+              {/* Technology Sector */}
+              <div className={`p-4 rounded-lg border ${
+                stockData.marketContext.sectorRotation?.technology && stockData.marketContext.sectorRotation.technology > 2 ? 'bg-green-50 border-green-200' :
+                stockData.marketContext.sectorRotation?.technology && stockData.marketContext.sectorRotation.technology < -2 ? 'bg-red-50 border-red-200' :
+                'bg-gray-50 border-gray-200'
+              }`}>
+                <p className="text-sm font-medium text-gray-600 mb-1">Tech Sector (XLK)</p>
+                <p className={`text-lg font-bold ${
+                  stockData.marketContext.sectorRotation?.technology && stockData.marketContext.sectorRotation.technology >= 0 ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {stockData.marketContext.sectorRotation?.technology ? 
+                    (stockData.marketContext.sectorRotation.technology >= 0 ? '+' : '') + stockData.marketContext.sectorRotation.technology.toFixed(1) + '%' : 
+                    'N/A'
+                  }
+                </p>
+                <p className="text-xs text-gray-500">5-day change</p>
+              </div>
+              
+              {/* Market Condition Summary */}
+              <div className={`p-4 rounded-lg border ${
+                stockData.marketContext.spyTrend === 'bullish' && stockData.marketContext.vix && stockData.marketContext.vix < 20 ? 'bg-green-50 border-green-200' :
+                stockData.marketContext.spyTrend === 'bearish' || (stockData.marketContext.vix && stockData.marketContext.vix > 25) ? 'bg-red-50 border-red-200' :
+                'bg-yellow-50 border-yellow-200'
+              }`}>
+                <p className="text-sm font-medium text-gray-600 mb-1">Overall Condition</p>
+                <p className={`text-lg font-bold ${
+                  stockData.marketContext.spyTrend === 'bullish' && stockData.marketContext.vix && stockData.marketContext.vix < 20 ? 'text-green-600' :
+                  stockData.marketContext.spyTrend === 'bearish' || (stockData.marketContext.vix && stockData.marketContext.vix > 25) ? 'text-red-600' :
+                  'text-yellow-600'
+                }`}>
+                  {stockData.marketContext.spyTrend === 'bullish' && stockData.marketContext.vix && stockData.marketContext.vix < 20 ? 'FAVORABLE' :
+                   stockData.marketContext.spyTrend === 'bearish' || (stockData.marketContext.vix && stockData.marketContext.vix > 25) ? 'CAUTIOUS' :
+                   'NEUTRAL'}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {stockData.marketContext.spyTrend === 'bullish' && stockData.marketContext.vix && stockData.marketContext.vix < 20 ? 'Good for breakouts' :
+                   stockData.marketContext.spyTrend === 'bearish' || (stockData.marketContext.vix && stockData.marketContext.vix > 25) ? 'High risk environment' :
+                   'Mixed signals'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Data Quality Warning */}
         {hasDataQualityIssues && (
           <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
@@ -560,18 +869,17 @@ export default function TradeAnalyzer() {
                 <h3 className="text-sm font-medium text-orange-800 mb-2">⚠️ Data Quality Warning</h3>
                 <div className="text-sm text-orange-700 space-y-1">
                   <p><strong>Source:</strong> {stockData.dataQuality?.source}</p>
+                  <p><strong>Reliability:</strong> {stockData.dataQuality?.reliability?.toUpperCase()}</p>
                   
                   {/* Data Quality Level Indicator */}
                   <div className="mt-2 p-2 bg-orange-100 rounded border-l-4 border-orange-400">
                     <p className="text-xs font-medium text-orange-800 mb-1">Data Quality Level:</p>
-                    {stockData.dataQuality?.source.includes('Finnhub') && stockData.dataQuality?.isRealData ? (
-                      <p className="text-xs text-green-700">✅ <strong>Finnhub + Real SMAs</strong> → Highest quality (No warning normally)</p>
-                    ) : stockData.dataQuality?.source.includes('Yahoo') && stockData.dataQuality?.isRealData ? (
-                      <p className="text-xs text-yellow-700">⚠️ <strong>Yahoo Finance + Real SMAs</strong> → Good quality (Limited fundamentals)</p>
-                    ) : stockData.dataQuality?.source.includes('Yahoo') && !stockData.dataQuality?.isRealData ? (
-                      <p className="text-xs text-orange-700">⚠️ <strong>Yahoo Finance + Estimated SMAs</strong> → Poor quality (Fake technical data)</p>
+                    {stockData.dataQuality?.reliability === 'high' ? (
+                      <p className="text-xs text-green-700">✅ <strong>High Quality</strong> → Real-time data with MACD confirmation</p>
+                    ) : stockData.dataQuality?.reliability === 'medium' ? (
+                      <p className="text-xs text-yellow-700">⚠️ <strong>Medium Quality</strong> → Real technical data, limited fundamentals</p>
                     ) : (
-                      <p className="text-xs text-red-700">🚨 <strong>All APIs Failed</strong> → Lowest quality (All data estimated)</p>
+                      <p className="text-xs text-red-700">🚨 <strong>Low Quality</strong> → Estimated data, use caution</p>
                     )}
                   </div>
 

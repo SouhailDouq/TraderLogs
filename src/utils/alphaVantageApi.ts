@@ -14,10 +14,32 @@ export interface AlphaVantageStockData {
   week52Low: string
   rsi: string
   relVolume: string
+  macd?: string
+  macdSignal?: string
+  macdHistogram?: string
+  // Real-time intraday data
+  intradayChange?: number
+  intradayVolume?: number
+  volumeSpike?: boolean
+  priceAction?: 'bullish' | 'bearish' | 'neutral'
   dataQuality?: {
     isRealData: boolean
     source: string
     warnings: string[]
+    reliability: 'high' | 'medium' | 'low'
+  }
+}
+
+export interface MarketContext {
+  vix: number
+  spyTrend: 'bullish' | 'bearish' | 'neutral'
+  spyPrice: number
+  spyChange: number
+  marketCondition: 'trending' | 'volatile' | 'sideways'
+  sectorRotation: {
+    technology: number
+    financials: number
+    energy: number
   }
 }
 
@@ -87,6 +109,8 @@ export async function fetchStockData(symbol: string): Promise<AlphaVantageStockD
       warnings.push('SMAs and RSI are calculated approximations')
     }
 
+    const reliability = isRealData && smaData ? 'medium' : 'low'
+    
     return {
       symbol: symbol.toUpperCase(),
       price: currentPrice,
@@ -105,7 +129,8 @@ export async function fetchStockData(symbol: string): Promise<AlphaVantageStockD
       dataQuality: {
         isRealData,
         source: 'Alpha Vantage + Yahoo Finance',
-        warnings
+        warnings,
+        reliability
       }
     }
 
@@ -166,12 +191,26 @@ export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantag
     // Get real technical indicators - calculate SMAs from historical data
     const smaData = await calculateRealSMAs(symbol, currentPrice)
     
+    // Get intraday data for real-time analysis
+    const intradayData = await getIntradayData(symbol, currentPrice, changePercent, relativeVolume)
+    
     const warnings: string[] = []
     const isRealData = !!smaData
     
     if (!smaData) {
       warnings.push('Technical indicators are estimated - historical data calculation failed')
       warnings.push('SMAs and RSI may not be accurate for trading decisions')
+    }
+    
+    // Calculate MACD if we have historical data
+    const macdData = smaData ? await calculateMACD(symbol) : null
+    
+    // Determine data reliability
+    const reliability = isRealData && smaData && macdData ? 'high' : 
+                       isRealData && smaData ? 'medium' : 'low'
+    
+    if (reliability === 'low') {
+      warnings.push('Low reliability data - use caution for trading decisions')
     }
     
     return {
@@ -191,10 +230,19 @@ export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantag
       // Real RSI or calculated estimate
       rsi: smaData?.rsi || '50',
       relVolume: relativeVolume.toFixed(2),
+      macd: macdData?.macd || undefined,
+      macdSignal: macdData?.signal || undefined,
+      macdHistogram: macdData?.histogram || undefined,
+      // Real-time intraday data
+      intradayChange: intradayData.intradayChange,
+      intradayVolume: intradayData.intradayVolume,
+      volumeSpike: intradayData.volumeSpike,
+      priceAction: intradayData.priceAction,
       dataQuality: {
         isRealData,
         source: 'Finnhub + Yahoo Finance',
-        warnings
+        warnings,
+        reliability
       }
     }
 
@@ -203,6 +251,164 @@ export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantag
     console.log('Finnhub API key being used:', FINNHUB_API_KEY ? 'Present' : 'Missing')
     // Fallback to Yahoo Finance if Finnhub fails
     return fetchStockDataYahoo(symbol)
+  }
+}
+
+// Get intraday data for real-time analysis
+async function getIntradayData(symbol: string, currentPrice: number, changePercent: number, relativeVolume: number): Promise<{
+  intradayChange: number
+  intradayVolume: number
+  volumeSpike: boolean
+  priceAction: 'bullish' | 'bearish' | 'neutral'
+}> {
+  try {
+    // Determine price action based on intraday change
+    let priceAction: 'bullish' | 'bearish' | 'neutral'
+    if (changePercent > 2) {
+      priceAction = 'bullish'
+    } else if (changePercent < -2) {
+      priceAction = 'bearish'
+    } else {
+      priceAction = 'neutral'
+    }
+
+    // Detect volume spikes (>2x average volume)
+    const volumeSpike = relativeVolume > 2.0
+
+    return {
+      intradayChange: changePercent,
+      intradayVolume: relativeVolume,
+      volumeSpike,
+      priceAction
+    }
+  } catch (error) {
+    console.error('Error getting intraday data:', error)
+    return {
+      intradayChange: changePercent,
+      intradayVolume: relativeVolume,
+      volumeSpike: false,
+      priceAction: 'neutral'
+    }
+  }
+}
+
+// Calculate MACD from historical data
+async function calculateMACD(symbol: string): Promise<{macd: string, signal: string, histogram: string} | null> {
+  try {
+    // Get 60 days of historical data for MACD calculation
+    const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=60d&interval=1d`)
+    const data = await response.json()
+    
+    if (data.chart.error) {
+      return null
+    }
+
+    const prices = data.chart.result[0].indicators.quote[0].close.filter((p: number) => p !== null)
+    
+    if (prices.length < 26) {
+      return null
+    }
+
+    // Calculate EMAs for MACD (12, 26, 9)
+    const calculateEMA = (data: number[], period: number): number[] => {
+      const ema = []
+      const multiplier = 2 / (period + 1)
+      ema[0] = data[0]
+      
+      for (let i = 1; i < data.length; i++) {
+        ema[i] = (data[i] * multiplier) + (ema[i - 1] * (1 - multiplier))
+      }
+      return ema
+    }
+
+    const ema12 = calculateEMA(prices, 12)
+    const ema26 = calculateEMA(prices, 26)
+    
+    // Calculate MACD line
+    const macdLine = ema12.map((val, i) => val - ema26[i])
+    
+    // Calculate Signal line (9-period EMA of MACD)
+    const signalLine = calculateEMA(macdLine, 9)
+    
+    // Calculate Histogram
+    const histogram = macdLine.map((val, i) => val - signalLine[i])
+    
+    const latest = macdLine.length - 1
+    
+    return {
+      macd: macdLine[latest].toFixed(4),
+      signal: signalLine[latest].toFixed(4),
+      histogram: histogram[latest].toFixed(4)
+    }
+  } catch (error) {
+    console.error('Error calculating MACD:', error)
+    return null
+  }
+}
+
+// Fetch market context data (VIX, SPY trend, sector rotation)
+export async function fetchMarketContext(): Promise<MarketContext | null> {
+  try {
+    // Fetch VIX, SPY, and sector ETFs in parallel
+    const [vixResponse, spyResponse, xlkResponse, xlfResponse, xleResponse] = await Promise.all([
+      fetch('https://query1.finance.yahoo.com/v8/finance/chart/^VIX?range=5d&interval=1d'),
+      fetch('https://query1.finance.yahoo.com/v8/finance/chart/SPY?range=20d&interval=1d'),
+      fetch('https://query1.finance.yahoo.com/v8/finance/chart/XLK?range=5d&interval=1d'), // Technology
+      fetch('https://query1.finance.yahoo.com/v8/finance/chart/XLF?range=5d&interval=1d'), // Financials
+      fetch('https://query1.finance.yahoo.com/v8/finance/chart/XLE?range=5d&interval=1d')  // Energy
+    ])
+
+    const [vixData, spyData, xlkData, xlfData, xleData] = await Promise.all([
+      vixResponse.json(),
+      spyResponse.json(),
+      xlkResponse.json(),
+      xlfResponse.json(),
+      xleResponse.json()
+    ])
+
+    // Extract VIX (volatility)
+    const vixPrices = vixData.chart.result[0].indicators.quote[0].close.filter((p: number) => p !== null)
+    const currentVIX = vixPrices[vixPrices.length - 1]
+
+    // Extract SPY data for trend analysis
+    const spyPrices = spyData.chart.result[0].indicators.quote[0].close.filter((p: number) => p !== null)
+    const spyMeta = spyData.chart.result[0].meta
+    const currentSPY = spyMeta.regularMarketPrice
+    const spyChange = ((currentSPY - spyMeta.previousClose) / spyMeta.previousClose) * 100
+
+    // Determine SPY trend (compare current price to 10-day average)
+    const spy10DayAvg = spyPrices.slice(-10).reduce((sum: number, p: number) => sum + p, 0) / 10
+    const spyTrend = currentSPY > spy10DayAvg * 1.02 ? 'bullish' : 
+                     currentSPY < spy10DayAvg * 0.98 ? 'bearish' : 'neutral'
+
+    // Determine market condition based on VIX
+    const marketCondition = currentVIX > 25 ? 'volatile' : 
+                           currentVIX < 15 ? 'trending' : 'sideways'
+
+    // Calculate sector performance (5-day change)
+    const calculateSectorChange = (data: any) => {
+      const prices = data.chart.result[0].indicators.quote[0].close.filter((p: number) => p !== null)
+      if (prices.length < 5) return 0
+      const current = prices[prices.length - 1]
+      const fiveDaysAgo = prices[prices.length - 5]
+      return ((current - fiveDaysAgo) / fiveDaysAgo) * 100
+    }
+
+    return {
+      vix: currentVIX,
+      spyTrend,
+      spyPrice: currentSPY,
+      spyChange,
+      marketCondition,
+      sectorRotation: {
+        technology: calculateSectorChange(xlkData),
+        financials: calculateSectorChange(xlfData),
+        energy: calculateSectorChange(xleData)
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching market context:', error)
+    return null
   }
 }
 
@@ -297,6 +503,8 @@ export async function fetchStockDataYahoo(symbol: string): Promise<AlphaVantageS
     warnings.push('Relative volume is estimated')
     isRealData = false // Yahoo-only approach has limitations
 
+    const reliability = isRealData && smaData ? 'medium' : 'low'
+    
     return {
       symbol: symbol.toUpperCase(),
       price: currentPrice,
@@ -315,7 +523,8 @@ export async function fetchStockDataYahoo(symbol: string): Promise<AlphaVantageS
       dataQuality: {
         isRealData,
         source: 'Yahoo Finance (Limited)',
-        warnings
+        warnings,
+        reliability
       }
     }
 
