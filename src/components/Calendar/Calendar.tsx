@@ -223,16 +223,19 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
             title={day.hasData ? `${day.trades.length} trade${day.trades.length !== 1 ? 's' : ''} - ${day.closedTradesCount} closed, ${day.openTradesCount} open` : ''}
             className={`
               relative min-h-[80px] p-3 cursor-pointer transition-all duration-200
-              border border-gray-200 rounded-lg bg-white
-              ${!day.isCurrentMonth ? 'opacity-50 bg-gray-50' : ''}
-              ${day.isToday ? 'ring-2 ring-blue-500 bg-blue-50' : ''}
-              ${day.hasData ? 'hover:shadow-md hover:border-gray-300' : 'hover:bg-gray-50'}
+              border rounded-lg
+              ${isDarkMode 
+                ? `border-gray-600 ${!day.isCurrentMonth ? 'opacity-50 bg-gray-800' : 'bg-gray-700'} ${day.isToday ? 'ring-2 ring-blue-400 bg-blue-900/30' : ''} ${day.hasData ? 'hover:shadow-md hover:border-gray-500' : 'hover:bg-gray-600'}`
+                : `border-gray-200 ${!day.isCurrentMonth ? 'opacity-50 bg-gray-50' : 'bg-white'} ${day.isToday ? 'ring-2 ring-blue-500 bg-blue-50' : ''} ${day.hasData ? 'hover:shadow-md hover:border-gray-300' : 'hover:bg-gray-50'}`
+              }
             `}
           >
             {/* Date */}
             <div className="flex justify-between items-start mb-2">
               <span className={`text-lg font-semibold ${
-                day.isToday ? 'text-blue-600' : 'text-gray-900'
+                day.isToday 
+                  ? 'text-blue-600' 
+                  : isDarkMode ? 'text-white' : 'text-gray-900'
               }`}>
                 {format(new Date(day.date), 'd')}
               </span>
@@ -266,7 +269,9 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
             
             {/* Simple text for open-only days */}
             {day.hasOpenPositions && day.closedTradesCount === 0 && (
-              <div className="text-xs text-blue-600 font-medium">
+              <div className={`text-xs font-medium ${
+                isDarkMode ? 'text-blue-400' : 'text-blue-600'
+              }`}>
                 Open
               </div>
             )}

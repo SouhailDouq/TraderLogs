@@ -13,7 +13,7 @@ export default function PerformancePage() {
   const [selectedPeriod, setSelectedPeriod] = useState('all');
   const [selectedMetric, setSelectedMetric] = useState('pnl');
 
-  // Calculate comprehensive performance metrics
+  // Calculate comprehensive performance metrics with momentum analysis
   const performanceData = useMemo(() => {
     const allTrades = Object.values(processedTrades).flat().filter(trade => !trade.isOpen);
     
@@ -32,7 +32,16 @@ export default function PerformancePage() {
         monthlyData: [],
         strategyBreakdown: {},
         bestTrade: null,
-        worstTrade: null
+        worstTrade: null,
+        momentumMetrics: {
+          target3Hits: 0,
+          target8Hits: 0,
+          target15Hits: 0,
+          avgHoldTime: 0,
+          premarketTrades: 0,
+          premarketWinRate: 0,
+          avgMomentumGain: 0
+        }
       };
     }
 
@@ -84,6 +93,56 @@ export default function PerformancePage() {
       (trade.profitLoss || 0) < (worst.profitLoss || 0) ? trade : worst
     ) : null;
 
+    // Calculate momentum-specific metrics
+    const momentumTrades = allTrades.filter(t => 
+      t.strategy && (t.strategy.toLowerCase().includes('momentum') || 
+                     t.strategy.toLowerCase().includes('breakout') ||
+                     t.strategy.toLowerCase().includes('premarket'))
+    );
+    
+    const target3Hits = allTrades.filter(t => {
+      const returnPercent = ((t.profitLoss || 0) / ((t.price || 0) * (t.quantity || 0))) * 100;
+      return returnPercent >= 3;
+    }).length;
+    
+    const target8Hits = allTrades.filter(t => {
+      const returnPercent = ((t.profitLoss || 0) / ((t.price || 0) * (t.quantity || 0))) * 100;
+      return returnPercent >= 8;
+    }).length;
+    
+    const target15Hits = allTrades.filter(t => {
+      const returnPercent = ((t.profitLoss || 0) / ((t.price || 0) * (t.quantity || 0))) * 100;
+      return returnPercent >= 15;
+    }).length;
+
+    // Premarket trades analysis (trades executed between 4:00-9:30 AM EST)
+    const premarketTrades = allTrades.filter(t => {
+      if (!t.time) return false;
+      const [hours, minutes] = t.time.split(':').map(Number);
+      const timeInMinutes = hours * 60 + minutes;
+      return timeInMinutes >= 240 && timeInMinutes < 570; // 4:00 AM - 9:30 AM EST
+    });
+    
+    const premarketWins = premarketTrades.filter(t => (t.profitLoss || 0) > 0);
+    const premarketWinRate = premarketTrades.length > 0 ? (premarketWins.length / premarketTrades.length) * 100 : 0;
+
+    // Average momentum gain for winning trades
+    const avgMomentumGain = winningTrades.length > 0 ? 
+      winningTrades.reduce((sum, t) => {
+        const returnPercent = ((t.profitLoss || 0) / ((t.price || 0) * (t.quantity || 0))) * 100;
+        return sum + returnPercent;
+      }, 0) / winningTrades.length : 0;
+
+    const momentumMetrics = {
+      target3Hits,
+      target8Hits,
+      target15Hits,
+      avgHoldTime: 0, // Could be calculated if we had exit timestamps
+      premarketTrades: premarketTrades.length,
+      premarketWinRate,
+      avgMomentumGain
+    };
+
     return {
       totalTrades: allTrades.length,
       winningTrades: winningTrades.length,
@@ -96,7 +155,8 @@ export default function PerformancePage() {
       monthlyData,
       strategyBreakdown,
       bestTrade,
-      worstTrade
+      worstTrade,
+      momentumMetrics
     };
   }, [processedTrades]);
 
@@ -135,13 +195,92 @@ export default function PerformancePage() {
           <h1 className={`text-2xl sm:text-3xl font-bold transition-colors ${
             isDarkMode ? 'text-white' : 'text-gray-900'
           }`}>
-            📈 Performance Review
+            📈 Momentum Performance Analytics
           </h1>
           <p className={`mt-2 text-sm sm:text-base transition-colors ${
             isDarkMode ? 'text-gray-300' : 'text-gray-600'
           }`}>
-            Comprehensive analysis of your trading performance
+            Advanced momentum trading performance with target achievement tracking
           </p>
+        </div>
+
+        {/* Momentum Target Achievement */}
+        <div className="mb-6 sm:mb-8">
+          <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+            isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+          }`}>
+            <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
+              isDarkMode ? 'text-white' : 'text-gray-900'
+            }`}>
+              🎯 Momentum Target Achievement
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="text-center">
+                <div className={`text-2xl font-bold mb-1 ${
+                  performanceData.momentumMetrics.target3Hits > 0 ? 'text-green-600' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                }`}>
+                  {performanceData.momentumMetrics.target3Hits}
+                </div>
+                <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  3% Target Hits
+                </div>
+                <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Conservative gains
+                </div>
+              </div>
+              <div className="text-center">
+                <div className={`text-2xl font-bold mb-1 ${
+                  performanceData.momentumMetrics.target8Hits > 0 ? 'text-blue-600' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                }`}>
+                  {performanceData.momentumMetrics.target8Hits}
+                </div>
+                <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  8% Target Hits
+                </div>
+                <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Moderate momentum
+                </div>
+              </div>
+              <div className="text-center">
+                <div className={`text-2xl font-bold mb-1 ${
+                  performanceData.momentumMetrics.target15Hits > 0 ? 'text-purple-600' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                }`}>
+                  {performanceData.momentumMetrics.target15Hits}
+                </div>
+                <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  15% Target Hits
+                </div>
+                <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Aggressive breakouts
+                </div>
+              </div>
+            </div>
+            
+            {/* Target Achievement Rate */}
+            <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600">
+              <div className="flex justify-between items-center mb-2">
+                <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  Target Achievement Rate
+                </span>
+                <span className={`text-sm font-bold ${
+                  performanceData.totalTrades > 0 && performanceData.momentumMetrics.target3Hits > 0 ? 'text-green-600' : 
+                  isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                }`}>
+                  {performanceData.totalTrades > 0 ? 
+                    ((performanceData.momentumMetrics.target3Hits / performanceData.totalTrades) * 100).toFixed(1) : '0'}%
+                </span>
+              </div>
+              <div className={`w-full bg-gray-200 rounded-full h-2 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                <div 
+                  className="bg-green-600 h-2 rounded-full transition-all duration-300"
+                  style={{
+                    width: `${performanceData.totalTrades > 0 ? 
+                      (performanceData.momentumMetrics.target3Hits / performanceData.totalTrades) * 100 : 0}%`
+                  }}
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Key Performance Metrics */}
@@ -164,24 +303,88 @@ export default function PerformancePage() {
             color={performanceData.totalPnL >= 0 ? 'green' : 'red'}
           />
           <StatCard
-            title="Profit Factor"
-            value={performanceData.profitFactor === Infinity ? '∞' : performanceData.profitFactor.toFixed(2)}
-            subtitle="Gross profit / Gross loss"
-            color={performanceData.profitFactor >= 1.5 ? 'green' : performanceData.profitFactor >= 1 ? 'default' : 'red'}
+            title="Avg Momentum Gain"
+            value={`${performanceData.momentumMetrics.avgMomentumGain.toFixed(1)}%`}
+            subtitle="Average winning trade return"
+            color={performanceData.momentumMetrics.avgMomentumGain >= 8 ? 'green' : performanceData.momentumMetrics.avgMomentumGain >= 3 ? 'default' : 'red'}
           />
         </div>
 
         {/* Advanced Metrics */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 mb-6 sm:mb-8">
+          {/* Premarket Performance */}
           <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
             isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
           }`}>
             <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
               isDarkMode ? 'text-white' : 'text-gray-900'
             }`}>
-              Trade Analysis
+              🌅 Premarket Performance
             </h2>
             <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className={`text-sm transition-colors ${
+                  isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                }`}>Premarket Trades:</span>
+                <span className={`font-medium transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  {performanceData.momentumMetrics.premarketTrades}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className={`text-sm transition-colors ${
+                  isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                }`}>Premarket Win Rate:</span>
+                <span className={`font-medium ${
+                  performanceData.momentumMetrics.premarketWinRate >= 60 ? 'text-green-600' : 
+                  performanceData.momentumMetrics.premarketWinRate >= 40 ? 'text-yellow-600' : 'text-red-600'
+                }`}>
+                  {performanceData.momentumMetrics.premarketWinRate.toFixed(1)}%
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className={`text-sm transition-colors ${
+                  isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                }`}>Strategy Focus:</span>
+                <span className={`font-medium transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  9 AM France Time
+                </span>
+              </div>
+              <div className={`mt-4 p-3 rounded-lg ${
+                isDarkMode ? 'bg-orange-900/20 border border-orange-700' : 'bg-orange-50 border border-orange-200'
+              }`}>
+                <p className={`text-xs ${
+                  isDarkMode ? 'text-orange-300' : 'text-orange-700'
+                }`}>
+                  💡 <strong>Optimal Window:</strong> 4:00-9:30 AM EST (10:00-15:30 France time)
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+            isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+          }`}>
+            <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
+              isDarkMode ? 'text-white' : 'text-gray-900'
+            }`}>
+              📊 Risk/Reward Analysis
+            </h2>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className={`text-sm transition-colors ${
+                  isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                }`}>Profit Factor:</span>
+                <span className={`font-medium ${
+                  performanceData.profitFactor >= 2 ? 'text-green-600' : 
+                  performanceData.profitFactor >= 1 ? 'text-yellow-600' : 'text-red-600'
+                }`}>
+                  {performanceData.profitFactor === Infinity ? '∞' : performanceData.profitFactor.toFixed(2)}
+                </span>
+              </div>
               <div className="flex justify-between items-center">
                 <span className={`text-sm transition-colors ${
                   isDarkMode ? 'text-gray-300' : 'text-gray-600'
@@ -201,55 +404,20 @@ export default function PerformancePage() {
               <div className="flex justify-between items-center">
                 <span className={`text-sm transition-colors ${
                   isDarkMode ? 'text-gray-300' : 'text-gray-600'
-                }`}>Risk/Reward Ratio:</span>
-                <span className={`font-medium transition-colors ${
-                  isDarkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  1:{performanceData.avgLoss > 0 ? (performanceData.avgWin / performanceData.avgLoss).toFixed(2) : '0'}
+                }`}>Best Momentum Trade:</span>
+                <span className={`font-medium text-green-600`}>
+                  {performanceData.bestTrade ? formatCurrency(performanceData.bestTrade.profitLoss || 0) : 'No trades'}
                 </span>
               </div>
-            </div>
-          </div>
-
-          <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-            isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-          }`}>
-            <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              Best & Worst Trades
-            </h2>
-            <div className="space-y-4">
-              {performanceData.bestTrade && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-green-800">
-                      Best: {performanceData.bestTrade.symbol}
-                    </span>
-                    <span className="font-bold text-green-600">
-                      {formatCurrency(performanceData.bestTrade.profitLoss || 0)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-green-700 mt-1">
-                    {performanceData.bestTrade.date} • {performanceData.bestTrade.strategy || 'No strategy'}
-                  </p>
-                </div>
-              )}
-              {performanceData.worstTrade && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-red-800">
-                      Worst: {performanceData.worstTrade.symbol}
-                    </span>
-                    <span className="font-bold text-red-600">
-                      {formatCurrency(performanceData.worstTrade.profitLoss || 0)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-red-700 mt-1">
-                    {performanceData.worstTrade.date} • {performanceData.worstTrade.strategy || 'No strategy'}
-                  </p>
-                </div>
-              )}
+              <div className={`mt-4 p-3 rounded-lg ${
+                isDarkMode ? 'bg-blue-900/20 border border-blue-700' : 'bg-blue-50 border border-blue-200'
+              }`}>
+                <p className={`text-xs ${
+                  isDarkMode ? 'text-blue-300' : 'text-blue-700'
+                }`}>
+                  🎯 <strong>Trading 212 Strategy:</strong> Hold until green, no stop losses
+                </p>
+              </div>
             </div>
           </div>
         </div>

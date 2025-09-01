@@ -98,12 +98,16 @@ class MarketDataService {
     const url = `${this.API_BASE}/price?symbol=${symbol}&apikey=${this.TWELVE_DATA_KEY}`;
     
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      console.warn(`Twelve Data: HTTP ${response.status} for ${symbol}, skipping...`);
+      return null;
+    }
     
     const data = await response.json();
     
     if (data.status === 'error') {
-      throw new Error(data.message || 'API Error');
+      console.warn(`Twelve Data: ${data.message || 'API Error'} for ${symbol}, skipping...`);
+      return null;
     }
 
     const price = parseFloat(data.price);
@@ -142,8 +146,9 @@ class MarketDataService {
     }
 
     const quote = data['Global Quote'];
-    if (!quote) {
-      throw new Error('No quote data available');
+    if (!quote || Object.keys(quote).length === 0) {
+      console.warn(`Alpha Vantage: No quote data for ${symbol}, skipping...`);
+      return null;
     }
 
     const price = parseFloat(quote['05. price']);

@@ -174,7 +174,9 @@ export default function RiskManagement() {
 
               {/* Trade Details */}
               <div>
-                <h3 className="text-lg font-medium text-gray-700 mb-4">Trade Details</h3>
+                <h3 className={`text-lg font-medium mb-4 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Trade Details</h3>
                 <div className="space-y-4">
                   <div>
                     <label className={`block text-sm font-medium mb-2 ${
@@ -229,7 +231,11 @@ export default function RiskManagement() {
                           type="number"
                           value={stopLossPrice || ''}
                           onChange={(e) => setStopLossPrice(Number(e.target.value))}
-                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 text-gray-900"
+                          className={`w-full pl-8 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors ${
+                            isDarkMode
+                              ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                              : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                          }`}
                           placeholder="145.00"
                           step="0.01"
                         />
@@ -247,7 +253,11 @@ export default function RiskManagement() {
                           type="number"
                           value={takeProfitPrice || ''}
                           onChange={(e) => setTakeProfitPrice(Number(e.target.value))}
-                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-900"
+                          className={`w-full pl-8 pr-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors ${
+                            isDarkMode
+                              ? 'border-gray-600 bg-gray-700 text-white placeholder-gray-400'
+                              : 'border-gray-300 bg-white text-gray-900 placeholder-gray-500'
+                          }`}
                           placeholder="160.00"
                           step="0.01"
                         />
@@ -271,52 +281,82 @@ export default function RiskManagement() {
               <div className="space-y-6">
                 {/* Key Metrics */}
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="text-sm font-medium text-blue-600 mb-1">Position Size</p>
-                    <p className="text-2xl font-bold text-blue-800">{formatAccountCurrency(calculation.positionSize)}</p>
-                    <p className="text-sm text-blue-600">{calculation.sharesQuantity} shares</p>
+                  <div className={`rounded-lg p-4 border ${
+                    isDarkMode 
+                      ? 'bg-blue-900 border-blue-700' 
+                      : 'bg-blue-50 border-blue-200'
+                  }`}>
+                    <p className={`text-sm font-medium mb-1 ${
+                      isDarkMode ? 'text-blue-300' : 'text-blue-600'
+                    }`}>Position Size</p>
+                    <p className={`text-2xl font-bold ${
+                      isDarkMode ? 'text-blue-100' : 'text-blue-800'
+                    }`}>{formatAccountCurrency(calculation.positionSize)}</p>
+                    <p className={`text-sm ${
+                      isDarkMode ? 'text-blue-300' : 'text-blue-600'
+                    }`}>{calculation.sharesQuantity} shares</p>
                   </div>
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <p className="text-sm font-medium text-red-600 mb-1">Risk Amount</p>
-                    <p className="text-2xl font-bold text-red-800">{formatAccountCurrency(calculation.riskAmount)}</p>
-                    <p className="text-sm text-red-600">{riskPercentage}% of account</p>
+                  <div className={`rounded-lg p-4 border ${
+                    isDarkMode 
+                      ? 'bg-red-900 border-red-700' 
+                      : 'bg-red-50 border-red-200'
+                  }`}>
+                    <p className={`text-sm font-medium mb-1 ${
+                      isDarkMode ? 'text-red-300' : 'text-red-600'
+                    }`}>Risk Amount</p>
+                    <p className={`text-2xl font-bold ${
+                      isDarkMode ? 'text-red-100' : 'text-red-800'
+                    }`}>{formatAccountCurrency(calculation.riskAmount)}</p>
+                    <p className={`text-sm ${
+                      isDarkMode ? 'text-red-300' : 'text-red-600'
+                    }`}>{riskPercentage}% of account</p>
                   </div>
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                    <p className="text-sm font-medium text-green-600 mb-1">Potential Profit</p>
-                    <p className="text-2xl font-bold text-green-800">{formatAccountCurrency(calculation.potentialProfit)}</p>
-                    <p className="text-sm text-green-600">If target hit</p>
+                  <div className={`rounded-lg p-4 border ${
+                    isDarkMode 
+                      ? 'bg-green-900 border-green-700' 
+                      : 'bg-green-50 border-green-200'
+                  }`}>
+                    <p className={`text-sm font-medium mb-1 ${
+                      isDarkMode ? 'text-green-300' : 'text-green-600'
+                    }`}>Potential Profit</p>
+                    <p className={`text-2xl font-bold ${
+                      isDarkMode ? 'text-green-100' : 'text-green-800'
+                    }`}>{formatAccountCurrency(calculation.potentialProfit)}</p>
+                    <p className={`text-sm ${
+                      isDarkMode ? 'text-green-300' : 'text-green-600'
+                    }`}>If target hit</p>
                   </div>
                   <div className={`border rounded-lg p-4 ${
                     calculation.riskRewardRatio >= 2 
-                      ? 'bg-green-50 border-green-200' 
+                      ? isDarkMode ? 'bg-green-900 border-green-700' : 'bg-green-50 border-green-200'
                       : calculation.riskRewardRatio >= 1 
-                        ? 'bg-yellow-50 border-yellow-200'
-                        : 'bg-red-50 border-red-200'
+                        ? isDarkMode ? 'bg-yellow-900 border-yellow-700' : 'bg-yellow-50 border-yellow-200'
+                        : isDarkMode ? 'bg-red-900 border-red-700' : 'bg-red-50 border-red-200'
                   }`}>
                     <p className={`text-sm font-medium mb-1 ${
                       calculation.riskRewardRatio >= 2 
-                        ? 'text-green-600' 
+                        ? isDarkMode ? 'text-green-300' : 'text-green-600'
                         : calculation.riskRewardRatio >= 1 
-                          ? 'text-yellow-600'
-                          : 'text-red-600'
+                          ? isDarkMode ? 'text-yellow-300' : 'text-yellow-600'
+                          : isDarkMode ? 'text-red-300' : 'text-red-600'
                     }`}>
                       Risk/Reward Ratio
                     </p>
                     <p className={`text-2xl font-bold ${
                       calculation.riskRewardRatio >= 2 
-                        ? 'text-green-800' 
+                        ? isDarkMode ? 'text-green-100' : 'text-green-800'
                         : calculation.riskRewardRatio >= 1 
-                          ? 'text-yellow-800'
-                          : 'text-red-800'
+                          ? isDarkMode ? 'text-yellow-100' : 'text-yellow-800'
+                          : isDarkMode ? 'text-red-100' : 'text-red-800'
                     }`}>
                       {calculation.riskRewardRatio.toFixed(2)}:1
                     </p>
                     <p className={`text-sm ${
                       calculation.riskRewardRatio >= 2 
-                        ? 'text-green-600' 
+                        ? isDarkMode ? 'text-green-300' : 'text-green-600'
                         : calculation.riskRewardRatio >= 1 
-                          ? 'text-yellow-600'
-                          : 'text-red-600'
+                          ? isDarkMode ? 'text-yellow-300' : 'text-yellow-600'
+                          : isDarkMode ? 'text-red-300' : 'text-red-600'
                     }`}>
                       {calculation.riskRewardRatio >= 2 ? 'Excellent' : calculation.riskRewardRatio >= 1 ? 'Good' : 'Poor'}
                     </p>
@@ -324,41 +364,51 @@ export default function RiskManagement() {
                 </div>
 
                 {/* Trade Summary */}
-                <div className="border-t border-gray-200 pt-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-4">Trade Summary</h3>
-                  <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                <div className={`border-t pt-6 ${
+                  isDarkMode ? 'border-gray-600' : 'border-gray-200'
+                }`}>
+                  <h3 className={`text-lg font-medium mb-4 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                  }`}>Trade Summary</h3>
+                  <div className={`rounded-lg p-4 space-y-2 ${
+                    isDarkMode ? 'bg-gray-700' : 'bg-gray-50'
+                  }`}>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Symbol:</span>
-                      <span className="font-medium">{symbol || 'N/A'}</span>
+                      <span className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>Symbol:</span>
+                      <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{symbol || 'N/A'}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Entry Price:</span>
-                      <span className="font-medium">{formatCurrency(entryPrice)}</span>
+                      <span className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>Entry Price:</span>
+                      <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{formatCurrency(entryPrice)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Stop Loss:</span>
-                      <span className="font-medium text-red-600">{formatCurrency(stopLossPrice)}</span>
+                      <span className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>Stop Loss:</span>
+                      <span className="font-medium text-red-500">{formatCurrency(stopLossPrice)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Take Profit:</span>
-                      <span className="font-medium text-green-600">{formatCurrency(takeProfitPrice)}</span>
+                      <span className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>Take Profit:</span>
+                      <span className="font-medium text-green-500">{formatCurrency(takeProfitPrice)}</span>
                     </div>
-                    <div className="border-t border-gray-300 pt-2 mt-2">
+                    <div className={`border-t pt-2 mt-2 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Recommended Shares:</span>
-                        <span className="font-bold">{calculation.sharesQuantity}</span>
+                        <span className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>Recommended Shares:</span>
+                        <span className={`font-bold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>{calculation.sharesQuantity}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Total Investment:</span>
-                        <span className="font-bold">{formatAccountCurrency(calculation.positionSize)}</span>
+                        <span className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>Total Investment:</span>
+                        <span className={`font-bold ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>{formatAccountCurrency(calculation.positionSize)}</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Risk Guidelines */}
-                <div className="border-t border-gray-200 pt-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-4">Risk Guidelines</h3>
+                <div className={`border-t pt-6 ${
+                  isDarkMode ? 'border-gray-600' : 'border-gray-200'
+                }`}>
+                  <h3 className={`text-lg font-medium mb-4 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                  }`}>Risk Guidelines</h3>
                   <div className="space-y-3">
                     <div className={`flex items-center space-x-2 ${
                       calculation.riskRewardRatio >= 2 ? 'text-green-600' : 'text-red-600'

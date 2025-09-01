@@ -22,10 +22,33 @@ export default function MonitorPage() {
   const [marketDataError, setMarketDataError] = useState<string | null>(null);
   const [selectedView, setSelectedView] = useState<'overview' | 'heatmap' | 'benchmark'>('overview');
   const [isMounted, setIsMounted] = useState(false);
+  const [momentumAlerts, setMomentumAlerts] = useState<any[]>([]);
+  const [marketStatus, setMarketStatus] = useState<'premarket' | 'open' | 'closed'>('closed');
 
   // Fix hydration issue by ensuring component is mounted before showing time
   useEffect(() => {
     setIsMounted(true);
+    
+    // Check market status
+    const checkMarketStatus = () => {
+      const now = new Date();
+      const estTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
+      const hour = estTime.getHours();
+      const minutes = estTime.getMinutes();
+      const currentTime = hour * 60 + minutes;
+      
+      if (currentTime >= 240 && currentTime < 570) { // 4:00 AM - 9:30 AM EST
+        setMarketStatus('premarket');
+      } else if (currentTime >= 570 && currentTime < 960) { // 9:30 AM - 4:00 PM EST
+        setMarketStatus('open');
+      } else {
+        setMarketStatus('closed');
+      }
+    };
+    
+    checkMarketStatus();
+    const statusInterval = setInterval(checkMarketStatus, 60000);
+    return () => clearInterval(statusInterval);
   }, []);
 
   // Auto-refresh every 30 seconds and fetch real market data
@@ -67,6 +90,9 @@ export default function MonitorPage() {
         setMarketData(marketDataMap);
         setLastUpdated(new Date());
         
+        // Generate momentum alerts
+        generateMomentumAlerts(marketDataMap, openTrades);
+        
         // Clear any previous errors if we got some data
         if (Object.keys(marketDataMap).length > 0) {
           setMarketDataError(null);
@@ -94,9 +120,102 @@ export default function MonitorPage() {
     };
   }, [trades]);
 
+  // Generate momentum alerts based on market data
+  const generateMomentumAlerts = (marketDataMap: { [symbol: string]: MarketDataResponse }, openTrades: any[]) => {
+    const alerts: any[] = [];
+    
+    openTrades.forEach(trade => {
+      const marketInfo = marketDataMap[trade.symbol];
+      if (!marketInfo) return;
+      
+      const currentPrice = marketInfo.price;
+      const entryPrice = trade.price;
+      const changePercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+      
+      // Momentum target alerts (3%, 8%, 15%)
+      if (changePercent >= 15) {
+        alerts.push({
+          type: 'target_hit',
+          level: 'aggressive',
+          symbol: trade.symbol,
+          message: `🎯 ${trade.symbol} hit 15% target! Consider taking profits.`,
+          changePercent: changePercent.toFixed(2),
+          priority: 'high'
+        });
+      } else if (changePercent >= 8) {
+        alerts.push({
+          type: 'target_hit',
+          level: 'moderate',
+          symbol: trade.symbol,
+          message: `📈 ${trade.symbol} hit 8% target! Momentum building.`,
+          changePercent: changePercent.toFixed(2),
+          priority: 'medium'
+        });
+      } else if (changePercent >= 3) {
+        alerts.push({
+          type: 'target_hit',
+          level: 'conservative',
+          symbol: trade.symbol,
+          message: `✅ ${trade.symbol} hit 3% target! Early momentum confirmed.`,
+          changePercent: changePercent.toFixed(2),
+          priority: 'low'
+        });
+      }
+      
+      // Risk alerts
+      if (changePercent <= -10) {
+        alerts.push({
+          type: 'risk_alert',
+          symbol: trade.symbol,
+          message: `⚠️ ${trade.symbol} down ${Math.abs(changePercent).toFixed(2)}%! Consider exit strategy.`,
+          changePercent: changePercent.toFixed(2),
+          priority: 'high'
+        });
+      } else if (changePercent <= -5) {
+        alerts.push({
+          type: 'risk_alert',
+          symbol: trade.symbol,
+          message: `📉 ${trade.symbol} down ${Math.abs(changePercent).toFixed(2)}%. Monitor closely.`,
+          changePercent: changePercent.toFixed(2),
+          priority: 'medium'
+        });
+      }
+      
+      // Volume spike alerts (using relative volume if available)
+      if (marketInfo.volume && marketInfo.volume > 1000000) { // High volume threshold
+        alerts.push({
+          type: 'volume_spike',
+          symbol: trade.symbol,
+          message: `🔥 ${trade.symbol} high volume detected! ${(marketInfo.volume / 1000000).toFixed(1)}M shares.`,
+          priority: 'medium'
+        });
+      }
+    });
+    
+    setMomentumAlerts(alerts);
+  };
+
   // Calculate portfolio metrics from open positions with real market data
   const portfolioMetrics = useMemo(() => {
     const openTrades = trades.filter(trade => trade.isOpen);
+    
+    console.log('Portfolio Debug - Open trades:', openTrades.length);
+    console.log('Portfolio Debug - All trades:', trades.length);
+    
+    // Debug open positions by symbol
+    const openPositionsBySymbol = openTrades.reduce((acc, trade) => {
+      if (!acc[trade.symbol]) acc[trade.symbol] = [];
+      acc[trade.symbol].push({ quantity: trade.quantity, price: trade.price, date: trade.date });
+      return acc;
+    }, {} as Record<string, any[]>);
+    
+    console.log('Open positions by symbol:', Object.keys(openPositionsBySymbol).map(symbol => ({
+      symbol,
+      trades: openPositionsBySymbol[symbol].length,
+      totalShares: openPositionsBySymbol[symbol].reduce((sum, t) => sum + t.quantity, 0),
+      avgPrice: openPositionsBySymbol[symbol].reduce((sum, t) => sum + (t.price * t.quantity), 0) / 
+                openPositionsBySymbol[symbol].reduce((sum, t) => sum + t.quantity, 0)
+    })));
     
     if (openTrades.length === 0) {
       return {
@@ -209,13 +328,21 @@ export default function MonitorPage() {
               <h1 className={`text-2xl sm:text-3xl font-bold transition-colors ${
                 isDarkMode ? 'text-white' : 'text-gray-900'
               }`}>
-                👁️ Portfolio Monitor
+                👁️ Momentum Portfolio Monitor
               </h1>
               <p className={`mt-2 text-sm sm:text-base transition-colors ${
                 isDarkMode ? 'text-gray-300' : 'text-gray-600'
               }`}>
-                Real-time monitoring of your open positions
+                Real-time momentum tracking with alerts and targets
               </p>
+              <div className={`mt-2 px-3 py-1 rounded-full text-xs font-medium inline-block ${
+                marketStatus === 'premarket' ? 'bg-orange-100 text-orange-800' :
+                marketStatus === 'open' ? 'bg-green-100 text-green-800' :
+                'bg-gray-100 text-gray-800'
+              }`}>
+                {marketStatus === 'premarket' ? '🌅 Premarket Active' :
+                 marketStatus === 'open' ? '🔔 Market Open' : '🌙 Market Closed'}
+              </div>
             </div>
             <div className="flex items-center gap-4">
               {marketDataLoading && (
@@ -238,34 +365,79 @@ export default function MonitorPage() {
           </div>
         </div>
 
+        {/* Momentum Alerts */}
+        {momentumAlerts.length > 0 && (
+          <div className="mb-6 sm:mb-8">
+            <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+              isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+            }`}>
+              <h2 className={`text-lg font-semibold mb-4 transition-colors ${
+                isDarkMode ? 'text-white' : 'text-gray-900'
+              }`}>
+                🚨 Live Momentum Alerts
+              </h2>
+              <div className="grid gap-3">
+                {momentumAlerts.slice(0, 5).map((alert, index) => (
+                  <div
+                    key={index}
+                    className={`p-3 rounded-lg border-l-4 ${
+                      alert.priority === 'high' ? 'border-red-500 bg-red-50' :
+                      alert.priority === 'medium' ? 'border-yellow-500 bg-yellow-50' :
+                      'border-green-500 bg-green-50'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <p className={`text-sm font-medium ${
+                        alert.priority === 'high' ? 'text-red-800' :
+                        alert.priority === 'medium' ? 'text-yellow-800' :
+                        'text-green-800'
+                      }`}>
+                        {alert.message}
+                      </p>
+                      {alert.changePercent && (
+                        <span className={`text-xs font-bold ${
+                          parseFloat(alert.changePercent) >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {parseFloat(alert.changePercent) >= 0 ? '+' : ''}{alert.changePercent}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Portfolio Overview Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
           <StatCard
             title="Portfolio Value"
-            value={formatCurrency(portfolioMetrics.totalValue)}
-            subtitle={`${portfolioMetrics.dayChange >= 0 ? '+' : ''}${formatCurrency(portfolioMetrics.dayChange)} today`}
-            color={portfolioMetrics.dayChange >= 0 ? 'green' : 'red'}
-            icon="💰"
+            value={portfolioMetrics.openPositions > 0 ? formatCurrency(portfolioMetrics.totalValue) : "No Open Positions"}
+            subtitle={`${portfolioMetrics.openPositions} open positions`}
+            color={portfolioMetrics.totalValue > 0 ? 'green' : 'default'}
+            icon="💼"
           />
           <StatCard
             title="Total P&L"
             value={formatCurrency(portfolioMetrics.totalPnL)}
-            subtitle={`${((portfolioMetrics.totalPnL / Math.max(portfolioMetrics.totalInvested, 1)) * 100).toFixed(2)}% return`}
+            subtitle="Realized + Unrealized"
             color={portfolioMetrics.totalPnL >= 0 ? 'green' : 'red'}
             icon="📈"
           />
           <StatCard
+            title="Day Change"
+            value={portfolioMetrics.openPositions > 0 ? formatCurrency(portfolioMetrics.dayChange) : "Market Closed"}
+            subtitle="Today's movement"
+            color={portfolioMetrics.dayChange >= 0 ? 'green' : 'red'}
+            icon="📊"
+          />
+          <StatCard
             title="Unrealized P&L"
-            value={formatCurrency(portfolioMetrics.unrealizedPnL)}
+            value={portfolioMetrics.openPositions > 0 ? formatCurrency(portfolioMetrics.unrealizedPnL) : "All Positions Closed"}
             subtitle="Open positions"
             color={portfolioMetrics.unrealizedPnL >= 0 ? 'green' : 'red'}
             icon="⏳"
-          />
-          <StatCard
-            title="Open Positions"
-            value={portfolioMetrics.openPositions}
-            subtitle={`${formatCurrency(portfolioMetrics.totalInvested)} invested`}
-            icon="📊"
           />
         </div>
 
@@ -446,7 +618,16 @@ export default function MonitorPage() {
                         <td className={`py-3 px-2 text-right text-sm transition-colors ${
                           isDarkMode ? 'text-gray-300' : 'text-gray-600'
                         }`}>
-                          {formatCurrency(position.currentPrice)}
+                          <div>
+                            <div>{formatCurrency(position.currentPrice)}</div>
+                            {position.marketInfo && (
+                              <div className={`text-xs ${
+                                position.marketInfo.change >= 0 ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                                {position.marketInfo.change >= 0 ? '+' : ''}{position.marketInfo.changePercent?.toFixed(2)}%
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className={`py-3 px-2 text-right font-medium transition-colors ${
                           isDarkMode ? 'text-white' : 'text-gray-900'
@@ -472,35 +653,108 @@ export default function MonitorPage() {
           </div>
         </div>
 
-        {/* Risk Management Alerts */}
+        {/* Enhanced Risk Management & Momentum Tracking */}
         {openPositions.length > 0 && (
           <div className="mt-6 sm:mt-8">
-            <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-              isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-            }`}>
-              <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                isDarkMode ? 'text-white' : 'text-gray-900'
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Risk Alerts */}
+              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
               }`}>
-                🚨 Risk Alerts
-              </h3>
-              <div className="space-y-3">
-                {openPositions.filter(p => p.unrealizedPnLPercent < -10).length > 0 ? (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                    <p className="text-sm text-red-800">
-                      ⚠️ {openPositions.filter(p => p.unrealizedPnLPercent < -10).length} position(s) down more than 10%
-                    </p>
-                  </div>
-                ) : (
-                  <div className={`p-3 rounded-lg ${
-                    isDarkMode ? 'bg-green-900/20 border border-green-800' : 'bg-green-50 border border-green-200'
-                  }`}>
-                    <p className={`text-sm ${
-                      isDarkMode ? 'text-green-300' : 'text-green-800'
+                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  🚨 Risk Management
+                </h3>
+                <div className="space-y-3">
+                  {openPositions.filter(p => p.unrealizedPnLPercent < -10).length > 0 ? (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-sm text-red-800">
+                        ⚠️ {openPositions.filter(p => p.unrealizedPnLPercent < -10).length} position(s) down more than 10%
+                      </p>
+                      <div className="mt-2 text-xs text-red-600">
+                        Consider exit strategy or position sizing review
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={`p-3 rounded-lg ${
+                      isDarkMode ? 'bg-green-900/20 border border-green-800' : 'bg-green-50 border border-green-200'
                     }`}>
-                      ✅ All positions within acceptable risk levels
+                      <p className={`text-sm ${
+                        isDarkMode ? 'text-green-300' : 'text-green-800'
+                      }`}>
+                        ✅ All positions within acceptable risk levels
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Trading 212 Reminder */}
+                  <div className={`p-3 rounded-lg border ${
+                    isDarkMode ? 'bg-blue-900/20 border-blue-800' : 'bg-blue-50 border-blue-200'
+                  }`}>
+                    <p className={`text-xs ${
+                      isDarkMode ? 'text-blue-300' : 'text-blue-800'
+                    }`}>
+                      💡 <strong>Trading 212 Strategy:</strong> Hold until green - No stop-loss orders placed
                     </p>
                   </div>
-                )}
+                </div>
+              </div>
+
+              {/* Momentum Targets */}
+              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
+                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              }`}>
+                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  🎯 Momentum Targets
+                </h3>
+                <div className="space-y-3">
+                  {openPositions.map(position => {
+                    const targets = [
+                      { percent: 3, label: 'Conservative', reached: position.unrealizedPnLPercent >= 3 },
+                      { percent: 8, label: 'Moderate', reached: position.unrealizedPnLPercent >= 8 },
+                      { percent: 15, label: 'Aggressive', reached: position.unrealizedPnLPercent >= 15 }
+                    ];
+                    
+                    return (
+                      <div key={position.id} className={`p-2 rounded border ${
+                        isDarkMode ? 'border-gray-600 bg-gray-700' : 'border-gray-200 bg-gray-50'
+                      }`}>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className={`text-sm font-medium ${
+                            isDarkMode ? 'text-white' : 'text-gray-900'
+                          }`}>
+                            {position.symbol}
+                          </span>
+                          <span className={`text-xs font-bold ${
+                            position.unrealizedPnLPercent >= 0 ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {position.unrealizedPnLPercent >= 0 ? '+' : ''}{position.unrealizedPnLPercent.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="flex gap-1">
+                          {targets.map(target => (
+                            <div
+                              key={target.percent}
+                              className={`flex-1 h-2 rounded-sm ${
+                                target.reached ? 'bg-green-500' : 
+                                isDarkMode ? 'bg-gray-600' : 'bg-gray-300'
+                              }`}
+                              title={`${target.label}: ${target.percent}%`}
+                            />
+                          ))}
+                        </div>
+                        <div className="flex justify-between text-xs mt-1">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>3%</span>
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>8%</span>
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>15%</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>

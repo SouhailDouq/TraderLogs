@@ -124,9 +124,31 @@ const analyzePositions = (trades: Trade[]): Trade[] => {
     const isBuy = trade.type.toLowerCase().includes('buy')
     const isSell = trade.type.toLowerCase().includes('sell')
     
+    // Only mark the most recent buy trades as open for each symbol
+    // This prevents counting all historical buys as open positions
+    const recentBuyTrades = position.trades
+      .filter(t => t.type.toLowerCase().includes('buy'))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    
+    let remainingShares = Math.max(0, position.bought - position.sold)
+    let isThisTradeOpen = false
+    
+    if (isBuy && isPositionOpen && remainingShares > 0) {
+      // Find if this trade contributes to the open position
+      for (const buyTrade of recentBuyTrades) {
+        if (remainingShares <= 0) break
+        if (buyTrade.id === trade.id) {
+          isThisTradeOpen = true
+          remainingShares -= trade.quantity
+          break
+        }
+        remainingShares -= buyTrade.quantity
+      }
+    }
+    
     const analyzedTrade = {
       ...trade,
-      isOpen: isPositionOpen && isBuy, // Only mark buy trades as open if position is still open
+      isOpen: isThisTradeOpen,
       position: isPositionOpen ? (isBuy ? 'long' : 'short') : 'closed' as 'long' | 'short' | 'closed'
     }
     
