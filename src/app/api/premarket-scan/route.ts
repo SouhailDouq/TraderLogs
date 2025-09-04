@@ -22,134 +22,84 @@ interface PremarketStock {
   lastUpdated: string
 }
 
-// Fetch live premarket movers using free APIs
+// Get quality premarket stocks (not penny stocks/warrants)
 async function fetchPremarketMovers(): Promise<string[]> {
   try {
-    // Check if it's a trading day first
-    const now = new Date()
-    const dayOfWeek = now.getDay() // 0 = Sunday, 6 = Saturday
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      console.log('Weekend detected - no live market data available')
-      return []
-    }
-
     const symbols = new Set<string>()
 
-    // Method 1: Get symbols from market news (if Finnhub available)
-    const apiKey = process.env.FINNHUB_API_KEY
-    if (apiKey) {
-      try {
-        const newsResponse = await fetch(`https://finnhub.io/api/v1/news?category=general&token=${apiKey}`)
-        const newsData = await newsResponse.json()
-        
-        if (Array.isArray(newsData)) {
-          newsData.slice(0, 15).forEach((article: any) => {
-            const text = `${article.headline} ${article.summary}`.toUpperCase()
-            const matches = text.match(/\b[A-Z]{2,5}\b/g)
-            if (matches) {
-              matches.forEach(symbol => {
-                if (symbol.length >= 2 && symbol.length <= 5 && 
-                    !['THE', 'AND', 'FOR', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN', 'HER', 'WAS', 'ONE', 'OUR', 'HAD', 'BUT', 'HAS', 'HIS', 'TWO', 'WHO', 'ITS', 'NOW', 'DID', 'YES', 'GET', 'MAY', 'HIM', 'OLD', 'SEE', 'WAY', 'NEW', 'USE', 'MAN', 'DAY', 'TOO', 'ANY', 'SHE', 'HOW', 'SAY', 'ITS', 'OWN', 'OUT', 'OFF', 'TRY', 'LET', 'PUT', 'END', 'WHY', 'RUN', 'GOT', 'ETC', 'CEO', 'CFO', 'CTO', 'USA', 'NYC', 'SEC', 'FDA', 'IPO', 'ETF', 'API', 'USD'].includes(symbol)) {
-                  symbols.add(symbol)
-                }
-              })
-            }
-          })
-        }
-        console.log('Added news-based symbols:', Array.from(symbols))
-      } catch (error) {
-        console.error('Error fetching news symbols:', error)
-      }
-    }
-
-    // Method 2: Try to fetch real premarket movers from financial APIs
+    // Method 1: Get real-time premarket data using proper API
     try {
-      // Try Yahoo Finance screener for active premarket stocks
-      const screenerResponse = await fetch('https://query1.finance.yahoo.com/v1/finance/screener', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          size: 50,
-          offset: 0,
-          sortField: 'percentchange',
-          sortType: 'DESC',
-          quoteType: 'EQUITY',
-          topOperator: 'AND',
-          query: {
-            operator: 'AND',
-            operands: [
-              {
-                operator: 'LT',
-                operands: ['intradayprice', 10]
-              },
-              {
-                operator: 'GT', 
-                operands: ['volume', 100000]
-              },
-              {
-                operator: 'GT',
-                operands: ['percentchange', 3]
+      const finnhubKey = process.env.FINNHUB_API_KEY
+      if (finnhubKey) {
+        // Use Finnhub's market screener with volume and price filters
+        const screenerUrl = `https://finnhub.io/api/v1/stock/screener?metric=volume&min=1000000&token=${finnhubKey}`
+        const screenerResponse = await fetch(screenerUrl)
+        
+        if (screenerResponse.ok) {
+          const screenerData = await screenerResponse.json()
+          console.log('Finnhub volume screener response received')
+          
+          if (screenerData.result) {
+            screenerData.result.slice(0, 100).forEach((stock: any) => {
+              // Filter for quality stocks only
+              if (stock.symbol && 
+                  stock.symbol.length <= 5 && 
+                  !stock.symbol.endsWith('W') && // No warrants
+                  !stock.symbol.includes('^') && // No special symbols
+                  !stock.symbol.includes('.')) { // No class shares
+                symbols.add(stock.symbol)
               }
-            ]
+            })
+            console.log('Added Finnhub volume-filtered symbols:', symbols.size)
           }
-        })
-      })
-      
-      if (screenerResponse.ok) {
-        const screenerData = await screenerResponse.json()
-        if (screenerData.finance?.result?.[0]?.quotes) {
-          screenerData.finance.result[0].quotes.forEach((quote: any) => {
-            if (quote.symbol && quote.regularMarketPrice < 10) {
-              symbols.add(quote.symbol)
-            }
-          })
-          console.log('Added screener results:', symbols.size, 'symbols')
         }
       }
     } catch (error) {
-      console.log('Yahoo screener failed, trying alternative sources...')
+      console.log('Finnhub volume screener error:', error)
     }
 
-    // Method 3: Get trending/active stocks from market data APIs
+    // Method 3: Finnhub Market Screener (proper premarket API)
     try {
-      // Try to get most active stocks from Alpha Vantage
-      const alphaVantageKey = process.env.ALPHA_VANTAGE_API_KEY
-      if (alphaVantageKey && symbols.size < 20) {
-        const activeResponse = await fetch(
-          `https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=${alphaVantageKey}`
+      const finnhubKey = process.env.FINNHUB_API_KEY
+      if (finnhubKey) {
+        // Get market screener results with premarket filters
+        const screenerResponse = await fetch(
+          `https://finnhub.io/api/v1/scan/support-resistance?resolution=D&token=${finnhubKey}`
         )
         
-        if (activeResponse.ok) {
-          const activeData = await activeResponse.json()
+        if (screenerResponse.ok) {
+          const screenerData = await screenerResponse.json()
+          console.log('Finnhub screener response received')
           
-          // Add top gainers under $10
-          if (activeData.top_gainers) {
-            activeData.top_gainers.slice(0, 10).forEach((stock: any) => {
-              const price = parseFloat(stock.price)
-              const changePercent = parseFloat(stock.change_percentage?.replace('%', '') || '0')
-              if (price < 10 && changePercent > 3) {
-                symbols.add(stock.ticker)
+          if (screenerData.result) {
+            screenerData.result.forEach((stock: any) => {
+              if (stock.symbol) {
+                symbols.add(stock.symbol)
               }
             })
+            console.log('Added Finnhub screener symbols:', Array.from(symbols).length)
           }
-          
-          // Add most actively traded under $10
-          if (activeData.most_actively_traded) {
-            activeData.most_actively_traded.slice(0, 10).forEach((stock: any) => {
-              const price = parseFloat(stock.price)
-              if (price < 10) {
-                symbols.add(stock.ticker)
+        }
+        
+        // Also try Finnhub's stock screener
+        const stockScreenerResponse = await fetch(
+          `https://finnhub.io/api/v1/scan/pattern?resolution=D&token=${finnhubKey}`
+        )
+        
+        if (stockScreenerResponse.ok) {
+          const stockData = await stockScreenerResponse.json()
+          if (stockData.result) {
+            stockData.result.forEach((stock: any) => {
+              if (stock.symbol) {
+                symbols.add(stock.symbol)
               }
             })
+            console.log('Added Finnhub pattern symbols:', Array.from(symbols).length)
           }
-          
-          console.log('Added Alpha Vantage active stocks, total symbols:', symbols.size)
         }
       }
     } catch (error) {
-      console.log('Alpha Vantage active stocks failed:', error instanceof Error ? error.message : 'Unknown error')
+      console.log('Finnhub screener failed:', error)
     }
 
     // Method 4: If we have very few symbols, try one more dynamic approach

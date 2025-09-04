@@ -4,6 +4,7 @@ import { useTradeStore, Trade, TradeStore } from '@/utils/store'
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameMonth, isToday, addDays, addMonths } from 'date-fns'
 import { useState } from 'react'
 import TradeModal from '@/components/Trade/TradeModal'
+import StockSearchModal from '@/components/StockSearchModal'
 import { formatCurrency } from '@/utils/formatters'
 import { useDarkMode } from '@/hooks/useDarkMode'
 
@@ -33,6 +34,10 @@ interface CalendarProps {
 export default function Calendar({ currentMonth, onMonthChange }: CalendarProps) {
   const isDarkMode = useDarkMode()
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResult, setSearchResult] = useState<any>(null)
+  const [showSearchModal, setShowSearchModal] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
   const processedTrades = useTradeStore(selectProcessedTrades)
 
   const getDays = (): CalendarDay[] => {
@@ -77,6 +82,32 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
 
   const closeModal = () => {
     setSelectedDate(null)
+  }
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!searchQuery.trim()) return
+
+    setSearchLoading(true)
+    try {
+      const response = await fetch(`/api/trades/search?symbol=${encodeURIComponent(searchQuery.trim())}`)
+      if (response.ok) {
+        const data = await response.json()
+        setSearchResult(data)
+        setShowSearchModal(true)
+      } else {
+        console.error('Search failed')
+      }
+    } catch (error) {
+      console.error('Search error:', error)
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  const closeSearchModal = () => {
+    setShowSearchModal(false)
+    setSearchResult(null)
   }
 
   const renderCells = () => {
@@ -164,40 +195,91 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
 
   return (
     <div className="space-y-6">
-      <div className={`flex items-center justify-between p-4 rounded-lg shadow-sm border mb-4 transition-colors ${
+      <div className={`p-4 rounded-lg shadow-sm border mb-4 transition-colors ${
         isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
       }`}>
-        <button
-          onClick={() => onMonthChange(addMonths(currentMonth, -1))}
-          className={`px-4 py-2 flex items-center gap-2 transition-colors duration-200 rounded-lg ${
-            isDarkMode
-              ? 'text-gray-300 hover:text-white hover:bg-gray-700'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-          }`}
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          <span className="font-medium">Previous</span>
-        </button>
-        <h2 className={`text-2xl font-bold ${
-          isDarkMode ? 'text-white' : 'text-gray-900'
-        }`}>
-          {format(currentMonth, 'MMMM yyyy')}
-        </h2>
-        <button
-          onClick={() => onMonthChange(addMonths(currentMonth, 1))}
-          className={`px-4 py-2 flex items-center gap-2 transition-colors duration-200 rounded-lg ${
-            isDarkMode
-              ? 'text-gray-300 hover:text-white hover:bg-gray-700'
-              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-          }`}
-        >
-          <span className="font-medium">Next</span>
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
+        {/* Header with navigation and title */}
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => onMonthChange(addMonths(currentMonth, -1))}
+            className={`px-4 py-2 flex items-center gap-2 transition-colors duration-200 rounded-lg ${
+              isDarkMode
+                ? 'text-gray-300 hover:text-white hover:bg-gray-700'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            <span className="font-medium">Previous</span>
+          </button>
+          <h2 className={`text-2xl font-bold ${
+            isDarkMode ? 'text-white' : 'text-gray-900'
+          }`}>
+            {format(currentMonth, 'MMMM yyyy')}
+          </h2>
+          <button
+            onClick={() => onMonthChange(addMonths(currentMonth, 1))}
+            className={`px-4 py-2 flex items-center gap-2 transition-colors duration-200 rounded-lg ${
+              isDarkMode
+                ? 'text-gray-300 hover:text-white hover:bg-gray-700'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            }`}
+          >
+            <span className="font-medium">Next</span>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Stock Search Bar */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900">
+              <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              Search Stock History:
+            </span>
+          </div>
+          <form onSubmit={handleSearch} className="flex-1 max-w-md">
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Enter stock symbol (e.g., BTM, AAPL, TSLA)"
+                className={`w-full px-4 py-2 pr-12 rounded-lg border transition-colors ${
+                  isDarkMode
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:border-blue-500'
+                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500 focus:border-blue-500'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+              />
+              <button
+                type="submit"
+                disabled={searchLoading || !searchQuery.trim()}
+                className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded transition-colors ${
+                  searchLoading || !searchQuery.trim()
+                    ? 'text-gray-400 cursor-not-allowed'
+                    : isDarkMode
+                      ? 'text-gray-300 hover:text-white hover:bg-gray-600'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                }`}
+              >
+                {searchLoading ? (
+                  <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
 
       <div className={`grid grid-cols-7 gap-4 p-4 rounded-lg shadow-sm border transition-colors ${
@@ -287,6 +369,13 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
           date={format(selectedDate, 'yyyy-MM-dd')}
         />
       )}
+
+      <StockSearchModal
+        isOpen={showSearchModal}
+        onClose={closeSearchModal}
+        searchResult={searchResult}
+        loading={searchLoading}
+      />
     </div>
   )
 }
