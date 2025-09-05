@@ -34,11 +34,13 @@ export class TradeService {
   }
 
   async saveTrades(trades: Trade[], source: 'CSV' | 'API', userId: string): Promise<{ saved: number; skipped: number }> {
+    console.log(`🔄 TradeService.saveTrades called with ${trades.length} trades for userId: ${userId}`)
     let saved = 0
     let skipped = 0
 
     for (const trade of trades) {
       const sourceId = this.generateSourceId(trade)
+      console.log(`🔍 Processing trade: ${trade.symbol} (${trade.type}) - sourceId: ${sourceId}`)
       try {
         // Check if trade already exists for this user
         const existingTrade = await prisma.trade.findFirst({
@@ -50,12 +52,14 @@ export class TradeService {
         })
 
         if (existingTrade) {
+          console.log(`⏭️ Trade already exists, skipping: ${trade.symbol}`)
           skipped++
           continue
         }
 
         // Create new trade
-        await prisma.trade.create({
+        console.log(`💾 Creating new trade in database: ${trade.symbol}`)
+        const createdTrade = await prisma.trade.create({
           data: {
             userId,
             symbol: trade.symbol,
@@ -74,6 +78,7 @@ export class TradeService {
             updatedAt: new Date()
           }
         })
+        console.log(`✅ Trade created successfully: ${createdTrade.id}`)
         saved++
       } catch (error) {
         if (error instanceof Error && 'code' in error && (error as PrismaError).code === 'P2002') {
@@ -86,6 +91,7 @@ export class TradeService {
       }
     }
 
+    console.log(`📊 Final result: ${saved} saved, ${skipped} skipped`)
     return { saved, skipped }
   }
 
