@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/outline';
+import { UserMenu } from '@/components/UserMenu';
 
 const workflowSteps = [
   { id: 'calendar', title: 'Calendar', path: '/', icon: '📅' },
@@ -19,12 +20,12 @@ export default function Header() {
   const router = useRouter();
   const [isDarkMode, setIsDarkMode] = useState(false);
 
-  // Initialize theme from localStorage or system preference
+  // Initialize theme from localStorage or default to light mode
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     
-    const shouldBeDark = savedTheme === 'dark' || (!savedTheme && systemPrefersDark);
+    // Default to light mode unless explicitly set to dark
+    const shouldBeDark = savedTheme === 'dark';
     
     setIsDarkMode(shouldBeDark);
     applyTheme(shouldBeDark);
@@ -43,8 +44,8 @@ export default function Header() {
       root.style.setProperty('--background', '#ffffff');
       root.style.setProperty('--foreground', '#171717');
       root.classList.remove('dark');
-      document.body.style.backgroundColor = '#f9fafb';
-      document.body.style.color = '#111827';
+      document.body.style.backgroundColor = '#ffffff';
+      document.body.style.color = '#171717';
     }
   };
 
@@ -125,7 +126,7 @@ export default function Header() {
             })}
           </div>
 
-          {/* Right side - Theme toggle and Mobile Menu */}
+          {/* Right side - Theme toggle, User Menu and Mobile Menu */}
           <div className="flex items-center space-x-3">
             {/* Theme Toggle */}
             <button
@@ -143,6 +144,9 @@ export default function Header() {
                 <MoonIcon className="h-5 w-5" />
               )}
             </button>
+
+            {/* User Menu */}
+            <UserMenu />
 
             {/* Mobile Menu - Simple dropdown for mobile */}
             <div className="md:hidden">

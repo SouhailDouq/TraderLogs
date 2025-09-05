@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchStockDataFinnhub } from '@/utils/alphaVantageApi'
+import { eodhd, calculateScore, getSignal, formatMarketCap, EODHDRealTimeData } from '@/utils/eodhd'
+import { apiCache } from '@/utils/apiCache'
+import { rateLimiter } from '@/utils/rateLimiter'
 
 interface ScanFilters {
   minChange: number
   maxChange: number
   minVolume: number
   maxPrice: number
+  minPrice?: number
+  minRelativeVolume: number
   minScore: number
+  minMarketCap?: number
+  maxMarketCap?: number
+  maxFloat?: number
 }
 
 interface PremarketStock {
@@ -18,295 +25,214 @@ interface PremarketStock {
   relativeVolume: number
   score: number
   signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid'
+  strategy?: 'momentum' | 'breakout'
   marketCap: string
   lastUpdated: string
 }
 
-// Get quality premarket stocks (not penny stocks/warrants)
-async function fetchPremarketMovers(): Promise<string[]> {
+// Get momentum stocks using EODHD API screener with caching and rate limiting
+async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<EODHDRealTimeData[]> {
   try {
-    const symbols = new Set<string>()
-
-    // Method 1: Get real-time premarket data using proper API
-    try {
-      const finnhubKey = process.env.FINNHUB_API_KEY
-      if (finnhubKey) {
-        // Use Finnhub's market screener with volume and price filters
-        const screenerUrl = `https://finnhub.io/api/v1/stock/screener?metric=volume&min=1000000&token=${finnhubKey}`
-        const screenerResponse = await fetch(screenerUrl)
-        
-        if (screenerResponse.ok) {
-          const screenerData = await screenerResponse.json()
-          console.log('Finnhub volume screener response received')
-          
-          if (screenerData.result) {
-            screenerData.result.slice(0, 100).forEach((stock: any) => {
-              // Filter for quality stocks only
-              if (stock.symbol && 
-                  stock.symbol.length <= 5 && 
-                  !stock.symbol.endsWith('W') && // No warrants
-                  !stock.symbol.includes('^') && // No special symbols
-                  !stock.symbol.includes('.')) { // No class shares
-                symbols.add(stock.symbol)
-              }
-            })
-            console.log('Added Finnhub volume-filtered symbols:', symbols.size)
-          }
-        }
-      }
-    } catch (error) {
-      console.log('Finnhub volume screener error:', error)
-    }
-
-    // Method 3: Finnhub Market Screener (proper premarket API)
-    try {
-      const finnhubKey = process.env.FINNHUB_API_KEY
-      if (finnhubKey) {
-        // Get market screener results with premarket filters
-        const screenerResponse = await fetch(
-          `https://finnhub.io/api/v1/scan/support-resistance?resolution=D&token=${finnhubKey}`
-        )
-        
-        if (screenerResponse.ok) {
-          const screenerData = await screenerResponse.json()
-          console.log('Finnhub screener response received')
-          
-          if (screenerData.result) {
-            screenerData.result.forEach((stock: any) => {
-              if (stock.symbol) {
-                symbols.add(stock.symbol)
-              }
-            })
-            console.log('Added Finnhub screener symbols:', Array.from(symbols).length)
-          }
-        }
-        
-        // Also try Finnhub's stock screener
-        const stockScreenerResponse = await fetch(
-          `https://finnhub.io/api/v1/scan/pattern?resolution=D&token=${finnhubKey}`
-        )
-        
-        if (stockScreenerResponse.ok) {
-          const stockData = await stockScreenerResponse.json()
-          if (stockData.result) {
-            stockData.result.forEach((stock: any) => {
-              if (stock.symbol) {
-                symbols.add(stock.symbol)
-              }
-            })
-            console.log('Added Finnhub pattern symbols:', Array.from(symbols).length)
-          }
-        }
-      }
-    } catch (error) {
-      console.log('Finnhub screener failed:', error)
-    }
-
-    // Method 4: If we have very few symbols, try one more dynamic approach
-    if (symbols.size < 5) {
-      console.log('Warning: Very few dynamic symbols found, attempting additional discovery methods')
-      
-      try {
-        // Try to get trending stocks from a different endpoint
-        const trendingResponse = await fetch('https://financialmodelingprep.com/api/v3/stock_market/actives?apikey=demo')
-        if (trendingResponse.ok) {
-          const trendingData = await trendingResponse.json()
-          if (Array.isArray(trendingData)) {
-            trendingData.slice(0, 10).forEach((stock: any) => {
-              if (stock.symbol && stock.price && stock.price < 10) {
-                symbols.add(stock.symbol)
-              }
-            })
-            console.log('Added trending stocks, total symbols:', symbols.size)
-          }
-        }
-      } catch (error) {
-        console.log('Trending stocks fetch failed, proceeding with available symbols')
-      }
-      
-      // If still very few symbols, log warning but don't add hardcoded fallbacks
-      if (symbols.size < 3) {
-        console.log('Warning: Only found', symbols.size, 'dynamic symbols. Consider checking API connectivity.')
-      }
-    }
-
-    const result = Array.from(symbols).slice(0, 20)
-    console.log(`Fetched ${result.length} potential candidates for live filtering:`, result)
+    // Create cache key based on strategy and filters
+    const cacheKey = `premarket_${strategy}_${JSON.stringify(filters)}`
     
-    return result
-
+    // Check cache first
+    const cached = apiCache.get<EODHDRealTimeData[]>(cacheKey)
+    if (cached) {
+      console.log(`Using cached ${strategy} data (${cached.length} stocks)`)
+      return cached
+    }
+    
+    // Check rate limit before making API call
+    if (!rateLimiter.canMakeCall()) {
+      const stats = rateLimiter.getStats()
+      throw new Error(`API rate limit exceeded. Daily calls: ${stats.dailyCalls}/${stats.dailyLimit}. Try again later.`)
+    }
+    
+    console.log('Using EODHD API for momentum stock discovery...')
+    
+    // Record the API call
+    rateLimiter.recordCall()
+    
+    // Get stocks from EODHD screener based on strategy
+    console.log(`Fetching ${strategy} stocks from EODHD...`)
+    const candidateStocks = await eodhd.searchStocks({
+      minVolume: filters.minVolume,
+      maxPrice: filters.maxPrice,
+      minChange: filters.minChange,
+      maxChange: filters.maxChange,
+      minMarketCap: filters.minMarketCap || (strategy === 'momentum' ? 50000000 : 100000000),
+      maxMarketCap: filters.maxMarketCap || (strategy === 'momentum' ? 2000000000 : 10000000000)
+    })
+    
+    console.log(`EODHD screener found ${candidateStocks.length} momentum candidates`)
+    
+    // Cache the results
+    apiCache.set(cacheKey, candidateStocks, 'PREMARKET_SCAN')
+    
+    return candidateStocks
+    
   } catch (error) {
-    console.error('Error fetching premarket movers:', error)
-    return [] // Return empty array - no hardcoded fallbacks
+    console.error('Error in EODHD momentum discovery:', error)
+    return []
   }
 }
 
-// Fetch premarket data from Yahoo Finance (free alternative with extended hours)
-async function fetchYahooPremarketData(symbol: string) {
+// Get enhanced stock data using EODHD API
+async function getEnhancedStockData(symbol: string) {
   try {
-    // Check if it's a trading day (Monday-Friday)
-    const now = new Date()
-    const dayOfWeek = now.getDay() // 0 = Sunday, 6 = Saturday
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      console.log(`${symbol}: Weekend detected, no premarket trading`)
+    console.log(`Fetching EODHD data for ${symbol}...`)
+    
+    // Get real-time quote and technical data in parallel
+    const [realTimeData, fundamentals, technicals] = await Promise.all([
+      eodhd.getRealTimeQuote(symbol),
+      eodhd.getFundamentals(symbol).catch(() => null),
+      eodhd.getTechnicals(symbol).catch(() => null)
+    ])
+    
+    if (!realTimeData) {
+      console.log(`No real-time data available for ${symbol}`)
       return null
     }
-
-    const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1m&includePrePost=true&range=1d`)
-    const data = await response.json()
     
-    if (data.chart?.result?.[0]) {
-      const result = data.chart.result[0]
-      const meta = result.meta
-      const timestamps = result.timestamp
-      const prices = result.indicators.quote[0]
-      
-      // Current time in ET (convert from local time)
-      const nowET = new Date()
-      const currentPrice = meta.regularMarketPrice || meta.previousClose
-      const previousClose = meta.previousClose
-      
-      // Check if we're in premarket hours (4 AM - 9:30 AM ET)
-      const etHour = nowET.getHours() - 6 // Rough ET conversion (adjust for your timezone)
-      const isPremarket = etHour >= 4 && etHour < 9.5
-      
-      let premarketPrice = currentPrice
-      let premarketVolume = 0
-      let changePercent = 0
-      
-      if (timestamps && prices.close && timestamps.length > 0) {
-        // Get the latest available price
-        const latestIndex = timestamps.length - 1
-        premarketPrice = prices.close[latestIndex] || currentPrice
-        premarketVolume = prices.volume?.[latestIndex] || 0
-        
-        // Calculate change from previous close
-        changePercent = ((premarketPrice - previousClose) / previousClose) * 100
-      } else {
-        // Fallback: use current vs previous close
-        changePercent = ((currentPrice - previousClose) / previousClose) * 100
-      }
-      
-      const avgVolume = meta.averageDailyVolume10Day || meta.averageVolume || 1000000
-      const relativeVolume = premarketVolume / (avgVolume * 0.1) // 10% of daily volume in premarket
-      
-      return {
-        symbol,
-        price: premarketPrice,
-        previousClose: previousClose,
-        change: premarketPrice - previousClose,
-        changePercent: parseFloat(changePercent.toFixed(2)),
-        volume: premarketVolume,
-        relVolume: parseFloat(relativeVolume.toFixed(2)),
-        // Additional data for scoring
-        sma20: currentPrice * 0.98, // Rough estimate
-        sma50: currentPrice * 0.95, // Rough estimate  
-        sma200: currentPrice * 0.90, // Rough estimate
-        marketCap: meta.marketCap || 'Unknown',
-        isPremarket: isPremarket
-      }
+    // Calculate relative volume (current vs average)
+    const avgVolume = fundamentals?.Highlights?.SharesOutstanding ? 
+      (fundamentals.Highlights.SharesOutstanding * 0.02) : // Estimate 2% daily turnover
+      1000000 // Default fallback
+    
+    const relativeVolume = realTimeData.volume / avgVolume
+    
+    return {
+      symbol: realTimeData.code.replace('.US', ''),
+      price: realTimeData.close,
+      previousClose: realTimeData.previousClose,
+      change: realTimeData.change,
+      changePercent: realTimeData.change_p,
+      volume: realTimeData.volume,
+      relativeVolume: parseFloat(relativeVolume.toFixed(2)),
+      marketCap: fundamentals?.Highlights?.MarketCapitalization || 0,
+      technicals: technicals?.[0] || null,
+      timestamp: realTimeData.timestamp
     }
     
-    return null
   } catch (error) {
-    console.error(`Error fetching Yahoo premarket data for ${symbol}:`, error)
+    console.error(`Error fetching EODHD data for ${symbol}:`, error)
     return null
   }
 }
 
-// Get stocks using Finnhub API that match your Finviz momentum criteria
-async function getMomentumStocks(filters: any): Promise<string[]> {
+// Get momentum stocks using EODHD API that match Finviz criteria
+async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<EODHDRealTimeData[]> {
   try {
-    console.log('Fetching live premarket movers...')
+    console.log('Fetching live momentum movers from EODHD...')
     
-    // First, get live premarket movers from Finnhub
-    const premarketMovers = await fetchPremarketMovers()
-    console.log(`Found ${premarketMovers.length} premarket movers:`, premarketMovers)
+    // Get momentum candidates from EODHD screener
+    const premarketMovers = await fetchPremarketMovers(strategy, filters)
+    console.log(`EODHD found ${premarketMovers.length} momentum candidates`)
     
-    // Only use live data - no hardcoded fallbacks
     if (premarketMovers.length === 0) {
-      console.log('No live premarket movers found - returning empty results')
+      console.log('No momentum movers found - returning empty results')
       return []
     }
     
-    const candidateStocks = premarketMovers
+    const qualifiedStocks: { stock: EODHDRealTimeData; score: number }[] = []
     
-    const qualifiedStocks: { symbol: string; score: number }[] = []
-    
-    // Check each stock using Yahoo Finance premarket data (no rate limits!)
-    for (const symbol of candidateStocks.slice(0, 20)) {
+    // Process each candidate stock
+    for (const stock of premarketMovers.slice(0, 20)) {
       try {
-        console.log(`Fetching Yahoo premarket data for ${symbol}`)
+        const symbol = stock.code.replace('.US', '')
+        console.log(`Processing ${symbol}: $${stock.close}, vol: ${stock.volume}, change: ${stock.change_p}%`)
         
-        const stockData = await fetchYahooPremarketData(symbol)
-        if (!stockData) continue
+        // Apply strategy-specific filters:
         
-        const { price, changePercent, volume, relVolume } = stockData
-        
-        // Apply your Finviz momentum criteria:
-        console.log(`${symbol}: $${price}, vol: ${volume}, relVol: ${relVolume}, change: ${changePercent}%`)
-        
-        // 1. Price under $10
-        if (price > 10) {
-          console.log(`${symbol} filtered: price $${price} > $10`)
+        // 1. Price range check
+        if (stock.close > filters.maxPrice) {
+          console.log(`${symbol} filtered: price $${stock.close} > $${filters.maxPrice}`)
           continue
         }
         
-        // 2. Volume > 1M (match Finviz criteria)
-        if (volume < filters.minVolume || 1000000) {
-          console.log(`${symbol} filtered: premarket volume ${volume} < ${filters.minVolume || 1000000}`)
+        // Check minimum price for breakout strategy
+        if (filters.minPrice && stock.close < filters.minPrice) {
+          console.log(`${symbol} filtered: price $${stock.close} < $${filters.minPrice}`)
           continue
         }
         
-        // 3. Relative volume > 1.5x (match Finviz criteria)
-        if (relVolume < (filters.minRelativeVolume || 1.5)) {
-          console.log(`${symbol} filtered: relVol ${relVolume} < ${filters.minRelativeVolume || 1.5}x`)
+        // 2. Volume check
+        if (stock.volume < filters.minVolume) {
+          console.log(`${symbol} filtered: volume ${stock.volume} < ${filters.minVolume}`)
           continue
         }
         
-        // 4. Positive momentum (at least 2% up in premarket)
-        if (changePercent < 2) {
-          console.log(`${symbol} filtered: change ${changePercent}% < 2%`)
+        // 3. Change percentage in range
+        if (stock.change_p < filters.minChange || stock.change_p > filters.maxChange) {
+          console.log(`${symbol} filtered: change ${stock.change_p}% outside range ${filters.minChange}-${filters.maxChange}%`)
           continue
         }
         
-        // Check technical indicators (estimated from Yahoo data)
-        const { sma20, sma50, sma200 } = stockData
+        // 4. Relative volume check (5x for breakout strategy)
+        if (stock.volume && stock.volume > 0) {
+          // Estimate 30-day average volume (using current volume / relative volume if available)
+          const estimatedAvgVolume = stock.volume / (filters.minRelativeVolume || 1.5)
+          const relativeVolumeRatio = stock.volume / estimatedAvgVolume
+          
+          if (relativeVolumeRatio < filters.minRelativeVolume) {
+            console.log(`${symbol} filtered: relative volume ${relativeVolumeRatio.toFixed(1)}x < ${filters.minRelativeVolume}x`)
+            continue
+          }
+        }
         
-        // Prefer stocks above moving averages
-        let technicalScore = 0
-        if (price > sma20 && sma20 > 0) technicalScore += 3
-        if (price > sma50 && sma50 > 0) technicalScore += 2
-        if (price > sma200 && sma200 > 0) technicalScore += 1
+        // Get additional data for breakout strategy
+        let fundamentals = null
+        let technicals = null
         
-        // Momentum score based on premarket change and volume
-        let momentumScore = 0
-        if (changePercent > 5) momentumScore += 3
-        if (changePercent > 10) momentumScore += 2
-        if (changePercent > 15) momentumScore += 1
-        if (relVolume > 2) momentumScore += 2
-        if (relVolume > 3) momentumScore += 1
+        if (strategy === 'breakout') {
+          try {
+            // Get fundamental data for float information
+            fundamentals = await eodhd.getFundamentals(symbol)
+            
+            // Check float size for breakout strategy
+            if (filters.maxFloat && fundamentals?.General?.SharesFloat) {
+              const floatShares = fundamentals.General.SharesFloat
+              if (floatShares > filters.maxFloat) {
+                console.log(`${symbol} filtered: float ${(floatShares/1000000).toFixed(1)}M > ${filters.maxFloat/1000000}M`)
+                continue
+              }
+            }
+          } catch (error) {
+            console.log(`Could not fetch fundamentals for ${symbol}, continuing without float check`)
+          }
+        }
         
-        const totalScore = technicalScore + momentumScore + Math.min(changePercent, 15)
+        // Get technical indicators for scoring (optional)
+        const techData = await eodhd.getTechnicals(symbol)
+        technicals = techData?.[0] || null
         
-        qualifiedStocks.push({ symbol, score: totalScore })
-        console.log(`${symbol} qualified with score: ${totalScore}`)
+        // Calculate strategy-specific score
+        const score = calculateScore(stock, technicals || undefined, strategy)
+        const signal = getSignal(score, strategy)
+        
+        if (score >= filters.minScore) {
+          qualifiedStocks.push({ stock, score })
+          console.log(`${symbol} qualified with score: ${score}`)
+        } else {
+          console.log(`${symbol} filtered: score ${score} < ${filters.minScore}`)
+        }
         
       } catch (error) {
-        console.error(`Error processing ${symbol}:`, error)
+        console.error(`Error processing stock:`, error)
       }
     }
     
-    // Sort by momentum score and take top 3
+    // Sort by score and return top candidates
     qualifiedStocks.sort((a, b) => b.score - a.score)
-    const topStocks = qualifiedStocks.slice(0, 3).map(stock => stock.symbol)
+    const topStocks = qualifiedStocks.slice(0, 10).map(item => item.stock)
     
-    console.log(`Top 3 momentum stocks matching criteria:`, topStocks)
-    return topStocks // Return empty array if no stocks qualify
+    console.log(`Top ${topStocks.length} momentum stocks qualified`)
+    return topStocks
     
   } catch (error) {
-    console.error('Error using Finnhub API:', error)
-    return [] // Return empty array on error - no fallbacks
+    console.error('Error using EODHD API:', error)
+    return []
   }
 }
 
@@ -314,62 +240,63 @@ async function getMomentumStocks(filters: any): Promise<string[]> {
 
 export async function POST(request: NextRequest) {
   try {
-    const filters: ScanFilters = await request.json()
+    const body = await request.json()
+    console.log('Premarket scan request:', body)
+    
+    // Extract strategy and filters from request
+    const strategy = body.strategy || 'momentum'
+    const filters: ScanFilters = {
+      minChange: body.minChange || 3,
+      maxChange: body.maxChange || 15,
+      minVolume: body.minVolume || 1000000,
+      maxPrice: body.maxPrice || 10,
+      minRelativeVolume: body.minRelativeVolume || 1.5,
+      minScore: body.minScore || 60,
+      minMarketCap: body.minMarketCap,
+      maxMarketCap: body.maxMarketCap
+    }
     
     console.log('Starting premarket scan with filters:', filters)
     
-    // Get momentum stock universe
-    const stockUniverse = await getMomentumStocks(filters)
-    console.log(`Scanning ${stockUniverse.length} momentum stocks`)
+    // Get momentum stocks from EODHD
+    const momentumStocks = await getMomentumStocks(strategy, filters)
+    console.log(`Processing ${momentumStocks.length} momentum stocks from EODHD`)
     
     const results: PremarketStock[] = []
     
-    // Process each stock sequentially (only 3 stocks max from Finviz)
-    for (const symbol of stockUniverse) {
+    // Process each qualified stock
+    for (const stock of momentumStocks) {
       try {
-        const stockData = await fetchStockDataFinnhub(symbol)
-        if (!stockData) continue
+        const symbol = stock.code.replace('.US', '')
         
-        // Parse change data
-        const changeMatch = stockData.change.match(/([-+]?\d+\.?\d*)\s*\(([-+]?\d+\.?\d*)%\)/)
-        if (!changeMatch) continue
+        // Get enhanced data including technicals
+        const enhancedData = await getEnhancedStockData(symbol)
+        if (!enhancedData) continue
         
-        const changePercent = parseFloat(changeMatch[2])
-        const change = parseFloat(changeMatch[1])
-        const volume = parseInt(stockData.volume.toString().replace(/,/g, '')) || 0
-        const relativeVolume = parseFloat(stockData.relVolume) || 1
+        // Calculate final score with technicals
+        const score = calculateScore(stock, enhancedData.technicals || undefined, strategy)
+        const signal = getSignal(score, strategy)
         
-        // Apply filters
-        if (changePercent < filters.minChange || changePercent > filters.maxChange) continue
-        if (volume < filters.minVolume) continue
-        if (stockData.price > filters.maxPrice) continue
-        
-        // Calculate score using simplified version of TraderLogs algorithm
-        const score = calculatePremarketScore(stockData, changePercent, relativeVolume)
-        if (score < filters.minScore) continue
-        
-        // Determine signal strength
-        let signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid'
-        if (score >= 80) signal = 'Strong'
-        else if (score >= 65) signal = 'Moderate'
-        else if (score >= 50) signal = 'Weak'
-        else signal = 'Avoid'
+        // Format market cap
+        const marketCapFormatted = enhancedData.marketCap > 0 ? 
+          formatMarketCap(enhancedData.marketCap) : 'Unknown'
         
         results.push({
-          symbol: stockData.symbol,
-          price: stockData.price,
-          change,
-          changePercent,
-          volume,
-          relativeVolume,
+          symbol: stock.code.replace('.US', ''),
+          price: stock.close,
+          change: stock.change,
+          changePercent: stock.change_p,
+          volume: stock.volume,
+          relativeVolume: enhancedData.relativeVolume,
           score,
           signal,
-          marketCap: stockData.marketCap,
+          strategy,
+          marketCap: marketCapFormatted,
           lastUpdated: new Date().toISOString()
         })
         
       } catch (error) {
-        console.error(`Error processing ${symbol}:`, error)
+        console.error(`Error processing stock:`, error)
       }
     }
     
@@ -381,9 +308,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       stocks: results,
       scanTime: new Date().toISOString(),
-      totalScanned: stockUniverse.length,
+      totalScanned: momentumStocks.length,
       found: results.length,
-      source: 'Finnhub API Momentum Criteria Filter'
+      source: 'EODHD API Real-Time Data'
     })
     
   } catch (error) {

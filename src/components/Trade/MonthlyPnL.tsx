@@ -122,14 +122,18 @@ export default function MonthlyPnL({ selectedMonth }: MonthlyPnLProps) {
 
       {/* Additional Info */}
       {monthlyData.totalTrades === 0 && (
-        <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+        <div className={`mt-4 p-4 rounded-lg border ${
+          isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
+        }`}>
           <div className="flex items-center">
-            <svg className="w-5 h-5 text-yellow-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            <svg className={`w-5 h-5 mr-2 ${
+              isDarkMode ? 'text-gray-400' : 'text-gray-500'
+            }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
             <p className={`${
-              isDarkMode ? 'text-yellow-200' : 'text-yellow-800'
-            }`}>No trades recorded for this month yet.</p>
+              isDarkMode ? 'text-gray-300' : 'text-gray-600'
+            }`}>No trades recorded for this month.</p>
           </div>
         </div>
       )}

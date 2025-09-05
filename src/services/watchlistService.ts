@@ -17,12 +17,13 @@ export class WatchlistService {
   }
 
   // Get today's watchlist
-  async getTodaysWatchlist(): Promise<WatchlistStock[]> {
+  async getTodaysWatchlist(userId?: string): Promise<WatchlistStock[]> {
     const today = this.getCurrentDate()
+    const where = userId ? { date: today, userId } : { date: today }
     
     try {
       const watchlist = await prisma.watchlist.findMany({
-        where: { date: today },
+        where,
         orderBy: [
           { positionScore: 'desc' }
         ]
@@ -54,7 +55,7 @@ export class WatchlistService {
   }
 
   // Add stock to watchlist (replaces if exists)
-  async addStock(stock: WatchlistStock): Promise<void> {
+  async addStock(stock: WatchlistStock, userId: string): Promise<void> {
     const today = this.getCurrentDate()
     
     try {
@@ -62,13 +63,15 @@ export class WatchlistService {
       await prisma.watchlist.deleteMany({
         where: {
           symbol: stock.symbol,
-          date: today
+          date: today,
+          userId
         }
       })
       
       // Add new entry
       await prisma.watchlist.create({
         data: {
+          userId,
           symbol: stock.symbol,
           signal: stock.signal,
           positionScore: stock.positionScore,
@@ -85,12 +88,13 @@ export class WatchlistService {
   }
 
   // Clear today's watchlist
-  async clearTodaysWatchlist(): Promise<number> {
+  async clearTodaysWatchlist(userId?: string): Promise<number> {
     const today = this.getCurrentDate()
+    const where = userId ? { date: today, userId } : { date: today }
     
     try {
       const result = await prisma.watchlist.deleteMany({
-        where: { date: today }
+        where
       })
       
       return result.count

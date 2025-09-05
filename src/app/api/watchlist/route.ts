@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { WatchlistService } from '@/services/watchlistService'
+import { getAuthenticatedUser, createUnauthorizedResponse } from '@/lib/auth-utils'
 
 const watchlistService = new WatchlistService()
 
 // GET - Fetch today's watchlist
 export async function GET() {
   try {
-    const watchlist = await watchlistService.getTodaysWatchlist()
+    const user = await getAuthenticatedUser()
+    if (!user) {
+      return createUnauthorizedResponse()
+    }
+
+    const watchlist = await watchlistService.getTodaysWatchlist(user.id)
     return NextResponse.json({ watchlist })
   } catch (error) {
     console.error('Error fetching watchlist:', error)
@@ -20,6 +26,11 @@ export async function GET() {
 // POST - Add stock to watchlist
 export async function POST(request: NextRequest) {
   try {
+    const user = await getAuthenticatedUser()
+    if (!user) {
+      return createUnauthorizedResponse()
+    }
+
     const body = await request.json()
     const { symbol, signal, positionScore, entryPrice, analyzedAt, stockData } = body
     
@@ -42,7 +53,7 @@ export async function POST(request: NextRequest) {
       date: today
     }
     
-    await watchlistService.addStock(watchlistStock)
+    await watchlistService.addStock(watchlistStock, user.id)
     
     return NextResponse.json({ 
       message: 'Stock added to watchlist'
@@ -59,7 +70,12 @@ export async function POST(request: NextRequest) {
 // DELETE - Clear today's watchlist
 export async function DELETE() {
   try {
-    const deletedCount = await watchlistService.clearTodaysWatchlist()
+    const user = await getAuthenticatedUser()
+    if (!user) {
+      return createUnauthorizedResponse()
+    }
+
+    const deletedCount = await watchlistService.clearTodaysWatchlist(user.id)
     
     return NextResponse.json({ 
       message: 'Watchlist cleared',

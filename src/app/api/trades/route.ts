@@ -3,13 +3,19 @@ import { TradeService } from '@/services/tradeService'
 import { Trade } from '@/utils/store'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { getAuthenticatedUser, createUnauthorizedResponse } from '@/lib/auth-utils'
 
 const dataFile = path.join(process.cwd(), 'data', 'trades.json')
 const tradeService = new TradeService()
 
 export async function GET() {
   try {
-    const trades = await tradeService.getAllTrades()
+    const user = await getAuthenticatedUser()
+    if (!user) {
+      return createUnauthorizedResponse()
+    }
+
+    const trades = await tradeService.getAllTrades(user.id)
     return NextResponse.json(trades)
   } catch (error) {
     console.error('Error fetching trades:', error)
@@ -19,7 +25,12 @@ export async function GET() {
 
 export async function DELETE() {
   try {
-    const count = await tradeService.deleteAllTrades()
+    const user = await getAuthenticatedUser()
+    if (!user) {
+      return createUnauthorizedResponse()
+    }
+
+    const count = await tradeService.deleteAllTrades(user.id)
     return NextResponse.json({ count })
   } catch (error) {
     console.error('Error deleting trades:', error)
@@ -29,6 +40,11 @@ export async function DELETE() {
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getAuthenticatedUser()
+    if (!user) {
+      return createUnauthorizedResponse()
+    }
+
     const trade = await req.json()
     
     // Validate required fields
@@ -44,24 +60,13 @@ export async function POST(req: NextRequest) {
       trade.total = trade.quantity * trade.price
     }
 
-    // Read existing trades
-    let data: { trades: Trade[] } = { trades: [] }
-    try {
-      const content = await fs.readFile(dataFile, 'utf8')
-      data = JSON.parse(content)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error
-      }
-      // File doesn't exist, use empty trades array
-    }
-
     // Add trade ID
     trade.id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
-    // For SELL trades, calculate profit/loss
+    // For SELL trades, calculate profit/loss by finding user's BUY trades
     if (trade.type === 'SELL') {
-      const buyTrade = data.trades.find(t => 
+      const userTrades = await tradeService.getAllTrades(user.id)
+      const buyTrade = userTrades.trades.find(t => 
         t.type === 'BUY' && 
         t.symbol === trade.symbol && 
         new Date(t.date) < new Date(trade.date)
@@ -71,21 +76,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Add new trade
-    data.trades.push(trade)
-
-    // Sort trades by date
-    data.trades.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-
-    // Ensure data directory exists
-    await fs.mkdir(path.dirname(dataFile), { recursive: true })
-
-    // Write updated trades
-    await fs.writeFile(dataFile, JSON.stringify(data, null, 2))
-
     // Save trades using TradeService
     try {
-      const result = await tradeService.saveTrades([trade], 'API')
+      const result = await tradeService.saveTrades([trade], 'API', user.id)
       console.log('Save result:', result)
       return NextResponse.json(trade)
     } catch (error) {

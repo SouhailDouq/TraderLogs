@@ -18,9 +18,11 @@ export class TradeService {
     return `${trade.symbol}-${trade.date}-${trade.type.replace(/\s+/g, '-')}-${trade.quantity}-${timestamp}-${randomSuffix}`
   }
 
-  async getAllTrades() {
-    console.log('Fetching all trades from DB...')
+  async getAllTrades(userId?: string) {
+    console.log('Fetching all trades from DB for user:', userId)
+    const where = userId ? { userId } : {}
     const trades = await prisma.trade.findMany({
+      where,
       orderBy: { date: 'desc' }
     })
     console.log('Fetched trades:', trades)
@@ -31,18 +33,19 @@ export class TradeService {
     }
   }
 
-  async saveTrades(trades: Trade[], source: 'CSV' | 'API'): Promise<{ saved: number; skipped: number }> {
+  async saveTrades(trades: Trade[], source: 'CSV' | 'API', userId: string): Promise<{ saved: number; skipped: number }> {
     let saved = 0
     let skipped = 0
 
     for (const trade of trades) {
       const sourceId = this.generateSourceId(trade)
       try {
-        // Check if trade already exists
+        // Check if trade already exists for this user
         const existingTrade = await prisma.trade.findFirst({
           where: {
             sourceId,
-            source
+            source,
+            userId
           }
         })
 
@@ -54,6 +57,7 @@ export class TradeService {
         // Create new trade
         await prisma.trade.create({
           data: {
+            userId,
             symbol: trade.symbol,
             type: trade.type,
             quantity: trade.quantity,
@@ -139,10 +143,11 @@ export class TradeService {
   }
 
   /**
-   * Delete all trades from the database
+   * Delete all trades from the database for a specific user
    */
-  async deleteAllTrades(): Promise<number> {
-    const { count } = await prisma.trade.deleteMany({})
+  async deleteAllTrades(userId?: string): Promise<number> {
+    const where = userId ? { userId } : {}
+    const { count } = await prisma.trade.deleteMany({ where })
     return count
   }
 

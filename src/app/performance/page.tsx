@@ -195,12 +195,12 @@ export default function PerformancePage() {
           <h1 className={`text-2xl sm:text-3xl font-bold transition-colors ${
             isDarkMode ? 'text-white' : 'text-gray-900'
           }`}>
-            📈 Momentum Performance Analytics
+            📈 Performance Analytics
           </h1>
           <p className={`mt-2 text-sm sm:text-base transition-colors ${
             isDarkMode ? 'text-gray-300' : 'text-gray-600'
           }`}>
-            Advanced momentum trading performance with target achievement tracking
+            Track your trading performance and target achievements
           </p>
         </div>
 
@@ -212,7 +212,7 @@ export default function PerformancePage() {
             <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
               isDarkMode ? 'text-white' : 'text-gray-900'
             }`}>
-              🎯 Momentum Target Achievement
+              🎯 Target Achievement
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="text-center">
@@ -319,7 +319,7 @@ export default function PerformancePage() {
             <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
               isDarkMode ? 'text-white' : 'text-gray-900'
             }`}>
-              🌅 Premarket Performance
+              🌅 Premarket Stats
             </h2>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
@@ -338,7 +338,7 @@ export default function PerformancePage() {
                 }`}>Premarket Win Rate:</span>
                 <span className={`font-medium ${
                   performanceData.momentumMetrics.premarketWinRate >= 60 ? 'text-green-600' : 
-                  performanceData.momentumMetrics.premarketWinRate >= 40 ? 'text-yellow-600' : 'text-red-600'
+                  performanceData.momentumMetrics.premarketWinRate >= 40 ? 'text-orange-600' : 'text-red-600'
                 }`}>
                   {performanceData.momentumMetrics.premarketWinRate.toFixed(1)}%
                 </span>
@@ -346,21 +346,12 @@ export default function PerformancePage() {
               <div className="flex justify-between items-center">
                 <span className={`text-sm transition-colors ${
                   isDarkMode ? 'text-gray-300' : 'text-gray-600'
-                }`}>Strategy Focus:</span>
+                }`}>Best Time:</span>
                 <span className={`font-medium transition-colors ${
                   isDarkMode ? 'text-white' : 'text-gray-900'
                 }`}>
-                  9 AM France Time
+                  Premarket Hours
                 </span>
-              </div>
-              <div className={`mt-4 p-3 rounded-lg ${
-                isDarkMode ? 'bg-orange-900/20 border border-orange-700' : 'bg-orange-50 border border-orange-200'
-              }`}>
-                <p className={`text-xs ${
-                  isDarkMode ? 'text-orange-300' : 'text-orange-700'
-                }`}>
-                  💡 <strong>Optimal Window:</strong> 4:00-9:30 AM EST (10:00-15:30 France time)
-                </p>
               </div>
             </div>
           </div>
@@ -371,7 +362,7 @@ export default function PerformancePage() {
             <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
               isDarkMode ? 'text-white' : 'text-gray-900'
             }`}>
-              📊 Risk/Reward Analysis
+              📊 Risk/Reward
             </h2>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
@@ -380,7 +371,7 @@ export default function PerformancePage() {
                 }`}>Profit Factor:</span>
                 <span className={`font-medium ${
                   performanceData.profitFactor >= 2 ? 'text-green-600' : 
-                  performanceData.profitFactor >= 1 ? 'text-yellow-600' : 'text-red-600'
+                  performanceData.profitFactor >= 1 ? 'text-blue-600' : 'text-red-600'
                 }`}>
                   {performanceData.profitFactor === Infinity ? '∞' : performanceData.profitFactor.toFixed(2)}
                 </span>
@@ -404,19 +395,10 @@ export default function PerformancePage() {
               <div className="flex justify-between items-center">
                 <span className={`text-sm transition-colors ${
                   isDarkMode ? 'text-gray-300' : 'text-gray-600'
-                }`}>Best Momentum Trade:</span>
+                }`}>Best Trade:</span>
                 <span className={`font-medium text-green-600`}>
                   {performanceData.bestTrade ? formatCurrency(performanceData.bestTrade.profitLoss || 0) : 'No trades'}
                 </span>
-              </div>
-              <div className={`mt-4 p-3 rounded-lg ${
-                isDarkMode ? 'bg-blue-900/20 border border-blue-700' : 'bg-blue-50 border border-blue-200'
-              }`}>
-                <p className={`text-xs ${
-                  isDarkMode ? 'text-blue-300' : 'text-blue-700'
-                }`}>
-                  🎯 <strong>Trading 212 Strategy:</strong> Hold until green, no stop losses
-                </p>
               </div>
             </div>
           </div>

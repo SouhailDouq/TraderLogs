@@ -9,7 +9,7 @@ import PortfolioChart from '@/components/Charts/PortfolioChart';
 import AssetAllocationChart from '@/components/Charts/AssetAllocationChart';
 import PortfolioHeatMap from '@/components/Charts/PortfolioHeatMap';
 import BenchmarkComparison from '@/components/Charts/BenchmarkComparison';
-import { MarketDataResponse } from '@/services/marketDataService';
+import { UnifiedStockData } from '@/services/marketstackService';
 
 export default function MonitorPage() {
   const isDarkMode = useDarkMode();
@@ -17,7 +17,7 @@ export default function MonitorPage() {
   const [refreshTime, setRefreshTime] = useState(new Date());
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [isLoading, setIsLoading] = useState(false);
-  const [marketData, setMarketData] = useState<{ [symbol: string]: MarketDataResponse }>({});
+  const [marketData, setMarketData] = useState<{ [symbol: string]: UnifiedStockData }>({});
   const [marketDataLoading, setMarketDataLoading] = useState(false);
   const [marketDataError, setMarketDataError] = useState<string | null>(null);
   const [selectedView, setSelectedView] = useState<'overview' | 'heatmap' | 'benchmark'>('overview');
@@ -62,7 +62,7 @@ export default function MonitorPage() {
 
       try {
         const uniqueSymbols = [...new Set(openTrades.map(trade => trade.symbol))];
-        const marketDataMap: { [symbol: string]: MarketDataResponse } = {};
+        const marketDataMap: { [symbol: string]: UnifiedStockData } = {};
         
         // Batch symbols into groups of 10 to respect API limits
         const batchSize = 10;
@@ -78,7 +78,7 @@ export default function MonitorPage() {
           const data = await response.json();
 
           if (data.success) {
-            data.data.forEach((item: MarketDataResponse) => {
+            data.data.forEach((item: UnifiedStockData) => {
               marketDataMap[item.symbol] = item;
             });
           } else {
@@ -121,7 +121,7 @@ export default function MonitorPage() {
   }, [trades]);
 
   // Generate momentum alerts based on market data
-  const generateMomentumAlerts = (marketDataMap: { [symbol: string]: MarketDataResponse }, openTrades: any[]) => {
+  const generateMomentumAlerts = (marketDataMap: { [symbol: string]: UnifiedStockData }, openTrades: any[]) => {
     const alerts: any[] = [];
     
     openTrades.forEach(trade => {
@@ -328,12 +328,12 @@ export default function MonitorPage() {
               <h1 className={`text-2xl sm:text-3xl font-bold transition-colors ${
                 isDarkMode ? 'text-white' : 'text-gray-900'
               }`}>
-                👁️ Momentum Portfolio Monitor
+                👁️ Portfolio Monitor
               </h1>
               <p className={`mt-2 text-sm sm:text-base transition-colors ${
                 isDarkMode ? 'text-gray-300' : 'text-gray-600'
               }`}>
-                Real-time momentum tracking with alerts and targets
+                Real-time portfolio tracking with alerts and targets
               </p>
               <div className={`mt-2 px-3 py-1 rounded-full text-xs font-medium inline-block ${
                 marketStatus === 'premarket' ? 'bg-orange-100 text-orange-800' :
@@ -374,7 +374,7 @@ export default function MonitorPage() {
               <h2 className={`text-lg font-semibold mb-4 transition-colors ${
                 isDarkMode ? 'text-white' : 'text-gray-900'
               }`}>
-                🚨 Live Momentum Alerts
+                🚨 Live Alerts
               </h2>
               <div className="grid gap-3">
                 {momentumAlerts.slice(0, 5).map((alert, index) => (
@@ -382,14 +382,14 @@ export default function MonitorPage() {
                     key={index}
                     className={`p-3 rounded-lg border-l-4 ${
                       alert.priority === 'high' ? 'border-red-500 bg-red-50' :
-                      alert.priority === 'medium' ? 'border-yellow-500 bg-yellow-50' :
+                      alert.priority === 'medium' ? 'border-blue-500 bg-blue-50' :
                       'border-green-500 bg-green-50'
                     }`}
                   >
                     <div className="flex justify-between items-start">
                       <p className={`text-sm font-medium ${
                         alert.priority === 'high' ? 'text-red-800' :
-                        alert.priority === 'medium' ? 'text-yellow-800' :
+                        alert.priority === 'medium' ? 'text-blue-800' :
                         'text-green-800'
                       }`}>
                         {alert.message}
@@ -475,7 +475,7 @@ export default function MonitorPage() {
                   <h3 className={`text-lg font-semibold mb-4 transition-colors ${
                     isDarkMode ? 'text-white' : 'text-gray-900'
                   }`}>
-                    📈 Portfolio Performance (7 Days)
+                    📈 Portfolio Performance
                   </h3>
                   <div className="h-48 sm:h-64">
                     <PortfolioChart 
@@ -512,7 +512,7 @@ export default function MonitorPage() {
                 <h3 className={`text-lg font-semibold mb-4 transition-colors ${
                   isDarkMode ? 'text-white' : 'text-gray-900'
                 }`}>
-                  🔥 Portfolio Risk Heat Map
+                  🔥 Risk Heat Map
                 </h3>
                 <PortfolioHeatMap 
                   positions={openPositions}
@@ -695,7 +695,7 @@ export default function MonitorPage() {
                     <p className={`text-xs ${
                       isDarkMode ? 'text-blue-300' : 'text-blue-800'
                     }`}>
-                      💡 <strong>Trading 212 Strategy:</strong> Hold until green - No stop-loss orders placed
+                      💡 <strong>Strategy:</strong> Hold until profitable - No stop-loss orders
                     </p>
                   </div>
                 </div>
@@ -708,7 +708,7 @@ export default function MonitorPage() {
                 <h3 className={`text-lg font-semibold mb-4 transition-colors ${
                   isDarkMode ? 'text-white' : 'text-gray-900'
                 }`}>
-                  🎯 Momentum Targets
+                  🎯 Price Targets
                 </h3>
                 <div className="space-y-3">
                   {openPositions.map(position => {

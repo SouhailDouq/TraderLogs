@@ -184,12 +184,12 @@ export default function TradeEntryPage() {
           <h1 className={`text-2xl sm:text-3xl font-bold transition-colors ${
             isDarkMode ? 'text-white' : 'text-gray-900'
           }`}>
-            ⚡ Execute Trade
+            ⚡ Trade Entry
           </h1>
           <p className={`mt-2 text-sm sm:text-base transition-colors ${
             isDarkMode ? 'text-gray-300' : 'text-gray-600'
           }`}>
-            Enter your trade details and execute your position
+            Enter your trade details and manage your position
           </p>
         </div>
 
@@ -213,7 +213,7 @@ export default function TradeEntryPage() {
                 <h2 className={`text-lg sm:text-xl font-semibold transition-colors ${
                   isDarkMode ? 'text-white' : 'text-gray-900'
                 }`}>
-                  🚀 Momentum Trade Entry
+                  🚀 Trade Entry
                 </h2>
                 <div className={`px-3 py-1 rounded-full text-xs font-medium ${
                   marketStatus === 'premarket' ? 'bg-orange-100 text-orange-800' :
@@ -233,12 +233,12 @@ export default function TradeEntryPage() {
                   <h4 className={`text-sm font-medium mb-2 ${
                     isDarkMode ? 'text-gray-200' : 'text-gray-700'
                   }`}>
-                    💡 Quick Fill from Premarket Scanner
+                    💡 Quick Fill from Scanner
                   </h4>
                   <p className={`text-xs mb-3 ${
                     isDarkMode ? 'text-gray-400' : 'text-gray-600'
                   }`}>
-                    Paste momentum candidate data to auto-fill form
+                    Paste candidate data to auto-fill form
                   </p>
                   <div className="flex gap-2">
                     <input
@@ -382,7 +382,7 @@ export default function TradeEntryPage() {
                   <label className={`block text-sm font-medium mb-2 transition-colors ${
                     isDarkMode ? 'text-gray-200' : 'text-gray-700'
                   }`}>
-                    Trading 212 Order Type *
+                    Order Type *
                   </label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
@@ -412,7 +412,7 @@ export default function TradeEntryPage() {
                   <p className={`text-xs mt-2 ${
                     isDarkMode ? 'text-gray-400' : 'text-gray-500'
                   }`}>
-                    ⚠️ Trading 212 limitation: Cannot set both take-profit AND stop-loss simultaneously
+                    ⚠️ Platform limitation: Cannot set both take-profit AND stop-loss simultaneously
                   </p>
                 </div>
 
@@ -422,7 +422,7 @@ export default function TradeEntryPage() {
                     <label className={`block text-sm font-medium mb-2 transition-colors ${
                       isDarkMode ? 'text-gray-200' : 'text-gray-700'
                     }`}>
-                      🎯 Quick Momentum Targets
+                      🎯 Quick Targets
                     </label>
                     <div className="flex gap-2 flex-wrap">
                       {[
@@ -459,7 +459,7 @@ export default function TradeEntryPage() {
                       Stop Loss
                       {formData.orderType === 'take-profit' && (
                         <span className={`ml-2 text-xs ${
-                          isDarkMode ? 'text-yellow-400' : 'text-yellow-600'
+                          isDarkMode ? 'text-blue-400' : 'text-blue-600'
                         }`}>
                           (Manual monitoring)
                         </span>
@@ -490,7 +490,7 @@ export default function TradeEntryPage() {
                       Take Profit
                       {formData.orderType === 'stop-loss' && (
                         <span className={`ml-2 text-xs ${
-                          isDarkMode ? 'text-yellow-400' : 'text-yellow-600'
+                          isDarkMode ? 'text-blue-400' : 'text-blue-600'
                         }`}>
                           (Manual monitoring)
                         </span>
@@ -714,7 +714,7 @@ export default function TradeEntryPage() {
                 <h3 className={`text-lg font-semibold mb-4 transition-colors ${
                   isDarkMode ? 'text-white' : 'text-gray-900'
                 }`}>
-                  📈 Momentum Targets
+                  📈 Price Targets
                 </h3>
                 
                 <div className="space-y-3">

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { useDarkMode } from '@/hooks/useDarkMode'
 
 interface LoadingOverlayProps {
   isVisible: boolean
@@ -10,6 +11,7 @@ interface LoadingOverlayProps {
 }
 
 export default function LoadingOverlay({ isVisible, title, subtitle, progress }: LoadingOverlayProps) {
+  const isDarkMode = useDarkMode()
   useEffect(() => {
     if (isVisible) {
       // Prevent page navigation during loading
@@ -54,11 +56,17 @@ export default function LoadingOverlay({ isVisible, title, subtitle, progress }:
             </div>
           )}
           
-          <div className="mt-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <p className="text-xs text-yellow-800 font-medium">
+          <div className={`mt-6 p-3 rounded-lg border ${
+            isDarkMode ? 'bg-blue-900/20 border-blue-700' : 'bg-blue-50 border-blue-200'
+          }`}>
+            <p className={`text-xs font-medium ${
+              isDarkMode ? 'text-blue-200' : 'text-blue-800'
+            }`}>
               ⚠️ Please don't close this tab or navigate away
             </p>
-            <p className="text-xs text-yellow-700 mt-1">
+            <p className={`text-xs mt-1 ${
+              isDarkMode ? 'text-blue-300' : 'text-blue-700'
+            }`}>
               Your CSV import is in progress and will be lost if interrupted
             </p>
           </div>

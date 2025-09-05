@@ -80,11 +80,11 @@ export default function RiskManagement() {
           </div>
           <h1 className={`text-3xl font-bold ${
             isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>Risk Management Simulator</h1>
+          }`}>Risk Management</h1>
           <p className={`mt-2 ${
             isDarkMode ? 'text-gray-300' : 'text-gray-600'
           }`}>
-            Calculate position sizing, risk/reward ratios, and optimize your trading strategy
+            Calculate position sizing and risk/reward ratios
           </p>
         </div>
 
@@ -330,14 +330,14 @@ export default function RiskManagement() {
                     calculation.riskRewardRatio >= 2 
                       ? isDarkMode ? 'bg-green-900 border-green-700' : 'bg-green-50 border-green-200'
                       : calculation.riskRewardRatio >= 1 
-                        ? isDarkMode ? 'bg-yellow-900 border-yellow-700' : 'bg-yellow-50 border-yellow-200'
+                        ? isDarkMode ? 'bg-blue-900 border-blue-700' : 'bg-blue-50 border-blue-200'
                         : isDarkMode ? 'bg-red-900 border-red-700' : 'bg-red-50 border-red-200'
                   }`}>
                     <p className={`text-sm font-medium mb-1 ${
                       calculation.riskRewardRatio >= 2 
                         ? isDarkMode ? 'text-green-300' : 'text-green-600'
                         : calculation.riskRewardRatio >= 1 
-                          ? isDarkMode ? 'text-yellow-300' : 'text-yellow-600'
+                          ? isDarkMode ? 'text-blue-300' : 'text-blue-600'
                           : isDarkMode ? 'text-red-300' : 'text-red-600'
                     }`}>
                       Risk/Reward Ratio
@@ -346,7 +346,7 @@ export default function RiskManagement() {
                       calculation.riskRewardRatio >= 2 
                         ? isDarkMode ? 'text-green-100' : 'text-green-800'
                         : calculation.riskRewardRatio >= 1 
-                          ? isDarkMode ? 'text-yellow-100' : 'text-yellow-800'
+                          ? isDarkMode ? 'text-blue-100' : 'text-blue-800'
                           : isDarkMode ? 'text-red-100' : 'text-red-800'
                     }`}>
                       {calculation.riskRewardRatio.toFixed(2)}:1
@@ -355,7 +355,7 @@ export default function RiskManagement() {
                       calculation.riskRewardRatio >= 2 
                         ? isDarkMode ? 'text-green-300' : 'text-green-600'
                         : calculation.riskRewardRatio >= 1 
-                          ? isDarkMode ? 'text-yellow-300' : 'text-yellow-600'
+                          ? isDarkMode ? 'text-blue-300' : 'text-blue-600'
                           : isDarkMode ? 'text-red-300' : 'text-red-600'
                     }`}>
                       {calculation.riskRewardRatio >= 2 ? 'Excellent' : calculation.riskRewardRatio >= 1 ? 'Good' : 'Poor'}
@@ -408,7 +408,7 @@ export default function RiskManagement() {
                 }`}>
                   <h3 className={`text-lg font-medium mb-4 ${
                     isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                  }`}>Risk Guidelines</h3>
+                  }`}>Guidelines</h3>
                   <div className="space-y-3">
                     <div className={`flex items-center space-x-2 ${
                       calculation.riskRewardRatio >= 2 ? 'text-green-600' : 'text-red-600'
@@ -427,7 +427,7 @@ export default function RiskManagement() {
                       </span>
                     </div>
                     <div className={`flex items-center space-x-2 ${
-                      riskPercentage <= 2 ? 'text-green-600' : 'text-yellow-600'
+                      riskPercentage <= 2 ? 'text-green-600' : 'text-orange-600'
                     }`}>
                       {riskPercentage <= 2 ? (
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -443,7 +443,7 @@ export default function RiskManagement() {
                       </span>
                     </div>
                     <div className={`flex items-center space-x-2 ${
-                      calculation.positionSize <= accountSize * 0.1 ? 'text-green-600' : 'text-yellow-600'
+                      calculation.positionSize <= accountSize * 0.1 ? 'text-green-600' : 'text-orange-600'
                     }`}>
                       {calculation.positionSize <= accountSize * 0.1 ? (
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">

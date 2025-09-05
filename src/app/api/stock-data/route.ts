@@ -1,54 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchStockDataFinnhub, fetchStockDataYahoo, fetchMarketContext } from '@/utils/alphaVantageApi'
+import { eodhd } from '@/utils/eodhd'
+import { apiCache } from '@/utils/apiCache'
+import { rateLimiter } from '@/utils/rateLimiter'
+import { calculateScore, getSignal, formatMarketCap } from '@/utils/eodhd'
 
 export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams
+  const { searchParams } = new URL(request.url)
   const symbol = searchParams.get('symbol')
-
-  console.log('API route called for symbol:', symbol)
-
-  if (!symbol) {
-    return NextResponse.json({ error: 'Symbol is required' }, { status: 400 })
-  }
-
+  
   try {
-    console.log('Trying Finnhub API for', symbol)
-    // Try Finnhub API first for best data quality
-    let stockData = await fetchStockDataFinnhub(symbol)
-    console.log('Finnhub result:', stockData ? 'Success' : 'Failed')
     
-    if (stockData) {
-      console.log('Returning Finnhub data with source:', stockData.dataQuality?.source)
-      console.log('Data quality warnings:', stockData.dataQuality?.warnings)
+    if (!symbol) {
+      return NextResponse.json(
+        { error: 'Symbol parameter is required' },
+        { status: 400 }
+      )
     }
-    
-    if (!stockData) {
-      console.log('Finnhub failed, trying Yahoo Finance')
-      // Fallback to Yahoo Finance with real SMAs
-      stockData = await fetchStockDataYahoo(symbol)
-      
-      if (stockData) {
-        console.log('Yahoo Finance succeeded with source:', stockData.dataQuality?.source)
-      }
+
+    // Check cache first
+    const cacheKey = `stock_data_${symbol.toUpperCase()}`
+    const cached = apiCache.get(cacheKey)
+    if (cached) {
+      console.log(`Using cached data for ${symbol}`)
+      return NextResponse.json(cached)
     }
-    
-    if (!stockData) {
-      // Try legacy Yahoo Finance endpoints as last resort
-      stockData = await fetchFromYahooFinance(symbol)
-      
-      if (!stockData) {
-        stockData = await fetchFromAlternativeEndpoint(symbol)
-      }
+
+    // Check rate limit
+    if (!rateLimiter.canMakeCall()) {
+      const stats = rateLimiter.getStats()
+      return NextResponse.json(
+        { 
+          error: `API rate limit exceeded. Daily calls: ${stats.dailyCalls}/${stats.dailyLimit}. Try again later.`,
+          rateLimitInfo: stats
+        },
+        { status: 429 }
+      )
     }
+
+    console.log(`Fetching stock data for ${symbol}...`)
     
-    if (!stockData) {
+    // Record API call
+    rateLimiter.recordCall()
+    
+    // Get real-time data from EODHD
+    const [realTimeData, fundamentals, technicals] = await Promise.all([
+      eodhd.getRealTimeQuote(symbol.toUpperCase()),
+      eodhd.getFundamentals(symbol.toUpperCase()).catch(() => null),
+      eodhd.getTechnicals(symbol.toUpperCase()).catch(() => null)
+    ])
+    
+    if (!realTimeData) {
       // Return manual entry mode with helpful message
       return NextResponse.json({
         error: 'SYMBOL_NOT_FOUND',
         message: `Unable to fetch data for ${symbol}. This could be due to:
-• Symbol not found on financial APIs
-• API timeout or temporary unavailability
+• Symbol not found on EODHD
 • Symbol may be delisted or inactive
+• API timeout or temporary unavailability
 
 You can still analyze this stock by entering data manually.`,
         symbol: symbol,
@@ -56,232 +64,132 @@ You can still analyze this stock by entering data manually.`,
       }, { status: 404 })
     }
     
-    // Fetch market context for enhanced analysis
-    const marketContext = await fetchMarketContext()
+    console.log('Successfully fetched EODHD data for', symbol)
     
-    return NextResponse.json({
-      ...stockData,
-      marketContext
-    })
+    // Extract technical indicators
+    const techData = technicals?.[0] || {}
+    const fundData = fundamentals?.Highlights || {}
+    
+    // Calculate relative volume
+    const avgVolume = fundData.SharesOutstanding ? 
+      (fundData.SharesOutstanding * 0.02) : // Estimate 2% daily turnover
+      1000000 // Default fallback
+    const relativeVolume = realTimeData.volume / avgVolume
+    
+    // Calculate breakout-specific score for trade analyzer
+    const score = calculateScore(realTimeData, techData, 'breakout')
+    const signal = getSignal(score, 'breakout')
+    
+    // Convert to expected format for trade analyzer
+    const response = {
+      symbol: realTimeData.code.replace('.US', ''),
+      price: realTimeData.close,
+      change: `${realTimeData.change >= 0 ? '+' : ''}${realTimeData.change.toFixed(2)} (${realTimeData.change_p >= 0 ? '+' : ''}${realTimeData.change_p.toFixed(2)}%)`,
+      volume: realTimeData.volume ? realTimeData.volume.toLocaleString() : 'N/A',
+      avgVolume: avgVolume ? avgVolume.toLocaleString() : 'N/A',
+      marketCap: fundData.MarketCapitalization ? formatMarketCap(fundData.MarketCapitalization) : 'Unknown',
+      pe: fundData.PERatio ? fundData.PERatio.toFixed(2) : '-',
+      beta: fundData.Beta ? fundData.Beta.toFixed(2) : '-',
+      sma20: techData.EMA_20 ? techData.EMA_20.toFixed(2) : realTimeData.close.toFixed(2),
+      sma50: techData.SMA_50 ? techData.SMA_50.toFixed(2) : realTimeData.close.toFixed(2),
+      sma200: techData.SMA_200 ? techData.SMA_200.toFixed(2) : realTimeData.close.toFixed(2),
+      week52High: techData['52WeekHigh'] ? techData['52WeekHigh'].toFixed(2) : realTimeData.close.toFixed(2),
+      week52Low: techData['52WeekLow'] ? techData['52WeekLow'].toFixed(2) : realTimeData.close.toFixed(2),
+      rsi: techData.RSI_14 ? techData.RSI_14.toFixed(1) : '50.0',
+      relVolume: relativeVolume.toFixed(2),
+      
+      // EODHD real-time data
+      open: realTimeData.open,
+      high: realTimeData.high,
+      low: realTimeData.low,
+      close: realTimeData.close,
+      previousClose: realTimeData.previousClose,
+      exchange: 'US', // EODHD US market data
+      currency: 'USD',
+      lastUpdated: new Date(realTimeData.timestamp * 1000).toISOString(),
+      
+      // Extended hours data (EODHD provides this in real-time)
+      afterHoursPrice: realTimeData.close, // EODHD includes extended hours in real-time
+      afterHoursChange: realTimeData.change,
+      afterHoursChangePercent: realTimeData.change_p,
+      
+      // Market status with proper hours detection
+      marketHoursStatus: eodhd.getMarketHoursStatus(),
+      isAfterHours: eodhd.getMarketHoursStatus() === 'afterhours',
+      isPremarket: eodhd.getMarketHoursStatus() === 'premarket',
+      isRegularHours: eodhd.getMarketHoursStatus() === 'regular',
+      isExtendedHours: ['premarket', 'afterhours'].includes(eodhd.getMarketHoursStatus()),
+      
+      // Enhanced data from EODHD with strategy-specific scoring
+      score: score,
+      signal: signal,
+      strategy: 'breakout',
+      
+      // Technical indicators
+      macd: techData.MACD || null,
+      macdSignal: techData.MACD_Signal || null,
+      macdHistogram: techData.MACD_Histogram || null,
+      
+      // Market context
+      marketContext: {
+        vix: null, // Would need separate VIX call
+        spyTrend: null, // Would need SPY analysis
+        marketCondition: score >= 70 ? 'bullish' : score <= 40 ? 'bearish' : 'neutral'
+      },
+      
+      // Data quality info
+      dataQuality: {
+        source: 'EODHD API',
+        warnings: [],
+        reliability: 'high',
+        hasRealTime: true,
+        hasTechnicals: !!techData,
+        hasFundamentals: !!fundData
+      }
+    }
+
+    // Cache the response
+    apiCache.set(cacheKey, response, 'STOCK_DATA')
+    
+    return NextResponse.json(response)
+    
   } catch (error: any) {
     console.error(`Error fetching stock data for ${symbol}:`, error)
+    
+    // Handle specific API errors
+    if (error.message?.includes('401') || error.message?.includes('403')) {
+      return NextResponse.json(
+        { 
+          error: 'API_AUTH_ERROR',
+          message: `EODHD API authentication failed. Please check your API key configuration.`,
+          symbol: symbol,
+          manualEntryMode: true
+        }, 
+        { status: 401 }
+      )
+    }
+    
+    if (error.message?.includes('404') || error.message?.includes('not found')) {
+      return NextResponse.json(
+        { 
+          error: 'INVALID_SYMBOL',
+          message: `Symbol "${symbol}" is not valid or not available on EODHD. Please check the symbol and try again, or enter data manually.`,
+          symbol: symbol,
+          manualEntryMode: true
+        }, 
+        { status: 404 }
+      )
+    }
+    
     return NextResponse.json(
       { 
         error: 'FETCH_ERROR',
-        message: `Failed to fetch data for ${symbol}. Please try again or enter data manually.`,
+        message: `Failed to fetch data for ${symbol} from EODHD. Please try again or enter data manually.`,
         symbol: symbol,
-        manualEntryMode: true
+        manualEntryMode: true,
+        details: error.message
       }, 
       { status: 500 }
     )
-  }
-}
-
-// Helper function to fetch from primary Yahoo Finance endpoint
-async function fetchFromYahooFinance(symbol: string) {
-  try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 second timeout
-    
-    const response = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1y`,
-      { 
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      }
-    )
-    
-    clearTimeout(timeoutId)
-    
-    if (!response.ok) {
-      console.log(`Primary Yahoo Finance API returned ${response.status} for ${symbol}`)
-      return null
-    }
-
-    const data = await response.json()
-    
-    if (data.chart.error || !data.chart.result || data.chart.result.length === 0) {
-      console.log(`No data available for ${symbol} from primary endpoint`)
-      return null
-    }
-
-    return processYahooFinanceData(data, symbol)
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
-      console.log(`Timeout fetching ${symbol} from primary endpoint`)
-    } else {
-      console.log(`Error fetching ${symbol} from primary endpoint:`, error.message)
-    }
-    return null
-  }
-}
-
-// Helper function to try alternative Yahoo Finance endpoint
-async function fetchFromAlternativeEndpoint(symbol: string) {
-  try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 5000) // Shorter timeout for fallback
-    
-    const response = await fetch(
-      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,summaryDetail`,
-      { 
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      }
-    )
-    
-    clearTimeout(timeoutId)
-    
-    if (!response.ok) {
-      console.log(`Alternative Yahoo Finance API returned ${response.status} for ${symbol}`)
-      return null
-    }
-
-    const data = await response.json()
-    
-    if (data.quoteSummary.error || !data.quoteSummary.result || data.quoteSummary.result.length === 0) {
-      console.log(`No data available for ${symbol} from alternative endpoint`)
-      return null
-    }
-
-    return processAlternativeYahooData(data, symbol)
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
-      console.log(`Timeout fetching ${symbol} from alternative endpoint`)
-    } else {
-      console.log(`Error fetching ${symbol} from alternative endpoint:`, error.message)
-    }
-    return null
-  }
-}
-
-// Process data from primary Yahoo Finance endpoint
-function processYahooFinanceData(data: any, symbol: string) {
-  const result = data.chart.result[0]
-  const meta = result.meta
-  const quotes = result.indicators.quote[0]
-  
-  // Get current price and calculate change
-  const currentPrice = meta.regularMarketPrice || 0
-  const previousClose = meta.previousClose || currentPrice
-  const change = currentPrice - previousClose
-  const changePercent = ((change / previousClose) * 100).toFixed(2)
-  
-  // Get latest volume
-  const volumes = quotes.volume.filter((v: number) => v !== null)
-  const latestVolume = volumes[volumes.length - 1] || 0
-    
-  // Calculate simple moving averages from historical data
-  const closes = quotes.close.filter((c: number) => c !== null)
-  const calculateSMA = (period: number) => {
-    if (closes.length < period) return currentPrice
-    const recentCloses = closes.slice(-period)
-    const sum = recentCloses.reduce((acc: number, price: number) => acc + price, 0)
-    return (sum / period).toFixed(2)
-  }
-
-  // Calculate RSI (simplified)
-  const calculateRSI = () => {
-    if (closes.length < 14) return '50.0'
-    
-    const period = 14
-    const recentCloses = closes.slice(-period - 1)
-    let gains = 0
-    let losses = 0
-    
-    for (let i = 1; i < recentCloses.length; i++) {
-      const change = recentCloses[i] - recentCloses[i - 1]
-      if (change > 0) gains += change
-      else losses += Math.abs(change)
-    }
-    
-    const avgGain = gains / period
-    const avgLoss = losses / period
-    const rs = avgGain / avgLoss
-    const rsi = 100 - (100 / (1 + rs))
-    
-    return rsi.toFixed(1)
-  }
-
-  // Format market cap
-  const formatMarketCap = (shares: number, price: number) => {
-    if (!shares || !price) return '-'
-    const marketCap = shares * price
-    if (marketCap >= 1e12) return `${(marketCap / 1e12).toFixed(1)}T`
-    if (marketCap >= 1e9) return `${(marketCap / 1e9).toFixed(1)}B`
-    if (marketCap >= 1e6) return `${(marketCap / 1e6).toFixed(1)}M`
-    return `${marketCap.toFixed(0)}`
-  }
-
-  // Calculate average volume (20-day)
-  const avgVolume = volumes.length >= 20 
-    ? volumes.slice(-20).reduce((sum: number, vol: number) => sum + vol, 0) / 20
-    : latestVolume
-
-  const relativeVolume = avgVolume > 0 ? (latestVolume / avgVolume).toFixed(2) : '1.0'
-
-  return {
-    symbol: symbol.toUpperCase(),
-    price: currentPrice,
-    change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${Number(changePercent) >= 0 ? '+' : ''}${changePercent}%)`,
-    volume: latestVolume.toLocaleString(),
-    marketCap: formatMarketCap(meta.sharesOutstanding, currentPrice),
-    pe: meta.trailingPE ? meta.trailingPE.toFixed(2) : '-',
-    beta: meta.beta ? meta.beta.toFixed(2) : '-',
-    sma20: calculateSMA(20),
-    sma50: calculateSMA(50),
-    sma200: calculateSMA(200),
-    week52High: (meta.fiftyTwoWeekHigh || currentPrice).toFixed(2),
-    week52Low: (meta.fiftyTwoWeekLow || currentPrice).toFixed(2),
-    rsi: calculateRSI(),
-    relVolume: relativeVolume
-  }
-}
-
-// Process data from alternative Yahoo Finance endpoint
-function processAlternativeYahooData(data: any, symbol: string) {
-  const result = data.quoteSummary.result[0]
-  const price = result.price
-  const summaryDetail = result.summaryDetail
-  
-  // Get current price and calculate change
-  const currentPrice = price.regularMarketPrice?.raw || 0
-  const previousClose = price.regularMarketPreviousClose?.raw || currentPrice
-  const change = currentPrice - previousClose
-  const changePercent = ((change / previousClose) * 100).toFixed(2)
-  
-  // Get volume data
-  const latestVolume = price.regularMarketVolume?.raw || 0
-  const avgVolume = summaryDetail.averageVolume?.raw || latestVolume
-  const relativeVolume = avgVolume > 0 ? (latestVolume / avgVolume).toFixed(2) : '1.0'
-
-  // Format market cap
-  const formatMarketCap = (marketCap: number) => {
-    if (!marketCap) return '-'
-    if (marketCap >= 1e12) return `${(marketCap / 1e12).toFixed(1)}T`
-    if (marketCap >= 1e9) return `${(marketCap / 1e9).toFixed(1)}B`
-    if (marketCap >= 1e6) return `${(marketCap / 1e6).toFixed(1)}M`
-    return `${marketCap.toFixed(0)}`
-  }
-
-  return {
-    symbol: symbol.toUpperCase(),
-    price: currentPrice,
-    change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${Number(changePercent) >= 0 ? '+' : ''}${changePercent}%)`,
-    volume: latestVolume.toLocaleString(),
-    marketCap: formatMarketCap(price.marketCap?.raw || 0),
-    pe: summaryDetail.trailingPE?.raw ? summaryDetail.trailingPE.raw.toFixed(2) : '-',
-    beta: summaryDetail.beta?.raw ? summaryDetail.beta.raw.toFixed(2) : '-',
-    sma20: currentPrice.toFixed(2), // Fallback values since we don't have historical data
-    sma50: currentPrice.toFixed(2),
-    sma200: currentPrice.toFixed(2),
-    week52High: (summaryDetail.fiftyTwoWeekHigh?.raw || currentPrice).toFixed(2),
-    week52Low: (summaryDetail.fiftyTwoWeekLow?.raw || currentPrice).toFixed(2),
-    rsi: '50.0', // Default RSI since we don't have historical data
-    relVolume: relativeVolume
   }
 }

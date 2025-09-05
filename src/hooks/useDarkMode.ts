@@ -6,13 +6,15 @@ export function useDarkMode() {
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   useEffect(() => {
+    // Initialize from localStorage or default to false
+    const savedTheme = localStorage.getItem('theme');
+    const shouldBeDark = savedTheme === 'dark';
+    setIsDarkMode(shouldBeDark);
+    
     const checkTheme = () => {
       const isDark = document.documentElement.classList.contains('dark');
       setIsDarkMode(isDark);
     };
-    
-    // Check initial theme
-    checkTheme();
     
     // Listen for theme changes
     const observer = new MutationObserver(checkTheme);

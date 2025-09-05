@@ -251,7 +251,7 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Enter stock symbol (e.g., BTM, AAPL, TSLA)"
+                placeholder="Enter stock symbol (e.g., BTM, , TSLA)"
                 className={`w-full px-4 py-2 pr-12 rounded-lg border transition-colors ${
                   isDarkMode
                     ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:border-blue-500'
