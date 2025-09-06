@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { eodhd, calculateScore, getSignal, formatMarketCap, EODHDRealTimeData } from '@/utils/eodhd'
+import { NextRequest, NextResponse } from 'next/server';
+import { eodhd, summarizeNewsImpact, categorizeNewsByTags, calculateScore, getSignal, formatMarketCap, EODHDRealTimeData } from '@/utils/eodhd';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { apiCache } from '@/utils/apiCache'
 import { rateLimiter } from '@/utils/rateLimiter'
 
@@ -28,6 +30,12 @@ interface PremarketStock {
   strategy?: 'momentum' | 'breakout'
   marketCap: string
   lastUpdated: string
+  news?: {
+    count: number
+    sentiment: number
+    topCatalyst?: string
+    recentCount: number
+  }
 }
 
 // Get momentum stocks using EODHD API screener with caching and rate limiting
@@ -67,8 +75,8 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
     
     console.log(`EODHD screener found ${candidateStocks.length} momentum candidates`)
     
-    // Cache the results
-    apiCache.set(cacheKey, candidateStocks, 'PREMARKET_SCAN')
+    // Cache the results with shorter TTL for fresh premarket data
+    apiCache.set(cacheKey, candidateStocks, 'SCREENER')
     
     return candidateStocks
     
@@ -269,9 +277,37 @@ export async function POST(request: NextRequest) {
       try {
         const symbol = stock.code.replace('.US', '')
         
-        // Get enhanced data including technicals
+        // Get enhanced data including technicals and news
         const enhancedData = await getEnhancedStockData(symbol)
         if (!enhancedData) continue
+        
+        // Get news context for the stock with caching
+        let newsContext: { count: number; sentiment: number; topCatalyst?: string; recentCount: number } | undefined
+        try {
+          const newsCacheKey = `news_${symbol}`
+          let stockNews = apiCache.get<any[]>(newsCacheKey)
+          
+          if (!stockNews) {
+            stockNews = await eodhd.getStockNews(symbol, 5)
+            apiCache.set(newsCacheKey, stockNews, 'NEWS')
+          }
+          
+          if (stockNews.length > 0) {
+            const newsImpact = summarizeNewsImpact(stockNews)
+            const topCatalysts = stockNews.map(news => categorizeNewsByTags(news.tags))
+            const topCatalyst = topCatalysts.find(c => c.priority === 'High')?.category || 
+                              topCatalysts[0]?.category
+            
+            newsContext = {
+              count: stockNews.length,
+              sentiment: newsImpact.overallSentiment,
+              topCatalyst,
+              recentCount: newsImpact.recentNewsCount
+            }
+          }
+        } catch (error) {
+          console.log(`Could not fetch news for ${symbol}:`, error)
+        }
         
         // Calculate final score with technicals
         const score = calculateScore(stock, enhancedData.technicals || undefined, strategy)
@@ -292,7 +328,8 @@ export async function POST(request: NextRequest) {
           signal,
           strategy,
           marketCap: marketCapFormatted,
-          lastUpdated: new Date().toISOString()
+          lastUpdated: new Date().toISOString(),
+          news: newsContext
         })
         
       } catch (error) {

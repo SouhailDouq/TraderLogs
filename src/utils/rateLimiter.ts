@@ -94,6 +94,13 @@ class RateLimiter {
     }
   }
 
+  reset() {
+    this.calls = []
+    this.dailyCalls = 0
+    this.lastResetDate = new Date().toDateString()
+    this.saveToStorage()
+  }
+
   async waitForAvailability(): Promise<void> {
     if (this.canMakeCall()) return
 

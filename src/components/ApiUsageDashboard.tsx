@@ -56,7 +56,20 @@ export default function ApiUsageDashboard() {
           API Usage Monitor
         </h3>
         <button
-          onClick={() => apiCache.clear()}
+          onClick={async () => {
+            try {
+              const response = await fetch('/api/clear-cache', { method: 'POST' });
+              if (response.ok) {
+                // Force refresh of stats
+                const rateLimitStats = rateLimiter.getStats()
+                const cacheInfo = apiCache.getStats()
+                setStats(rateLimitStats)
+                setCacheStats(cacheInfo)
+              }
+            } catch (error) {
+              console.error('Failed to clear cache:', error);
+            }
+          }}
           className={`px-3 py-1 text-sm rounded-lg transition-colors ${
             isDarkMode 
               ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' 
@@ -162,11 +175,11 @@ export default function ApiUsageDashboard() {
       }`}>
         <div className="text-sm font-medium mb-2">💡 Optimization Tips</div>
         <ul className="text-xs space-y-1">
-          <li>• Data is cached for 2-5 minutes to reduce API calls</li>
+          <li>• Premarket scans cached for 30 seconds (very fresh for momentum)</li>
+          <li>• Stock data cached for 3 minutes, news for 2 minutes</li>
           <li>• Rate limited to 10 calls/minute, 3000 calls/day</li>
-          <li>• Use the premarket scanner sparingly (caches for 2 min)</li>
-          <li>• Individual stock lookups cache for 5 minutes</li>
-          <li>• Clear cache only if you need fresh data immediately</li>
+          <li>• Market status refreshes every 15 seconds</li>
+          <li>• Clear cache only if you need immediate fresh data</li>
         </ul>
       </div>
     </div>

@@ -51,6 +51,45 @@ export interface EODHDFundamentals {
   '52WeekLow'?: number;
 }
 
+export interface EODHDNewsItem {
+  date: string;
+  title: string;
+  content: string;
+  link: string;
+  symbols: string[];
+  tags: string[];
+  sentiment: {
+    polarity: number; // -1 to 1 (negative to positive)
+    neg: number;      // 0 to 1 (negative sentiment strength)
+    neu: number;      // 0 to 1 (neutral sentiment strength)
+    pos: number;      // 0 to 1 (positive sentiment strength)
+  };
+}
+
+export interface EODHDCalendarEvent {
+  date: string;
+  country: string;
+  event: string;
+  actual?: string;
+  previous?: string;
+  estimate?: string;
+  change?: number;
+  change_percentage?: number;
+  updated_at: string;
+}
+
+export interface EODHDEarningsEvent {
+  code: string;
+  report_date: string;
+  date: string;
+  before_after_market: string;
+  currency: string;
+  actual_eps?: number;
+  estimate_eps?: number;
+  difference?: number;
+  surprise_pct?: number;
+}
+
 class EODHDClient {
   private apiKey: string;
   private baseUrl = 'https://eodhd.com/api';
@@ -233,6 +272,116 @@ class EODHDClient {
     }
   }
   
+
+  // Get financial news for a specific stock
+  async getStockNews(symbol: string, limit = 10, offset = 0): Promise<EODHDNewsItem[]> {
+    try {
+      const data = await this.makeRequest('/news', {
+        s: `${symbol}.US`,
+        limit,
+        offset
+      });
+      
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return [];
+    } catch (error) {
+      console.warn(`Failed to get news for ${symbol}:`, error);
+      return [];
+    }
+  }
+
+  // Get news by tags (e.g., earnings, FDA approvals, etc.)
+  async getNewsByTags(tags: string[], limit = 20, offset = 0): Promise<EODHDNewsItem[]> {
+    try {
+      const tagString = tags.join(',');
+      const data = await this.makeRequest('/news', {
+        t: tagString,
+        limit,
+        offset
+      });
+      
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return [];
+    } catch (error) {
+      console.warn(`Failed to get news for tags ${tags.join(',')}:`, error);
+      return [];
+    }
+  }
+
+  // Get upcoming earnings
+  async getUpcomingEarnings(from?: string, to?: string): Promise<EODHDEarningsEvent[]> {
+    try {
+      const params: any = {};
+      if (from) params.from = from;
+      if (to) params.to = to;
+      
+      const data = await this.makeRequest('/calendar/earnings', params);
+      
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return [];
+    } catch (error) {
+      console.warn('Failed to get earnings calendar:', error);
+      return [];
+    }
+  }
+
+  // Get economic calendar events
+  async getEconomicCalendar(from?: string, to?: string): Promise<EODHDCalendarEvent[]> {
+    try {
+      const params: any = {};
+      if (from) params.from = from;
+      if (to) params.to = to;
+      
+      const data = await this.makeRequest('/calendar/economic', params);
+      
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return [];
+    } catch (error) {
+      console.warn('Failed to get economic calendar:', error);
+      return [];
+    }
+  }
+
+  // Get comprehensive stock context (news + earnings + fundamentals)
+  async getStockContext(symbol: string): Promise<{
+    news: EODHDNewsItem[];
+    upcomingEarnings: EODHDEarningsEvent[];
+    fundamentals?: { General?: any, Highlights?: EODHDFundamentals, Technicals?: EODHDTechnicals };
+  }> {
+    try {
+      const [news, earnings, fundamentals] = await Promise.allSettled([
+        this.getStockNews(symbol, 5),
+        this.getUpcomingEarnings(),
+        this.getFundamentals(symbol)
+      ]);
+
+      // Filter earnings for this specific symbol
+      const symbolEarnings = earnings.status === 'fulfilled' 
+        ? earnings.value.filter(e => e.code === symbol) 
+        : [];
+
+      return {
+        news: news.status === 'fulfilled' ? news.value : [],
+        upcomingEarnings: symbolEarnings,
+        fundamentals: fundamentals.status === 'fulfilled' ? fundamentals.value : undefined
+      };
+    } catch (error) {
+      console.warn(`Failed to get stock context for ${symbol}:`, error);
+      return {
+        news: [],
+        upcomingEarnings: [],
+        fundamentals: undefined
+      };
+    }
+  }
 
   // Get market status
   async getMarketStatus(): Promise<{ isOpen: boolean, nextOpen?: string, nextClose?: string }> {
@@ -424,4 +573,124 @@ export function formatMarketCap(marketCap: number): string {
   if (marketCap >= 1e9) return `$${(marketCap / 1e9).toFixed(1)}B`;
   if (marketCap >= 1e6) return `$${(marketCap / 1e6).toFixed(1)}M`;
   return `$${marketCap.toLocaleString()}`;
+}
+
+// News analysis helpers
+export function getSentimentLabel(polarity: number): 'Very Positive' | 'Positive' | 'Neutral' | 'Negative' | 'Very Negative' {
+  if (polarity >= 0.6) return 'Very Positive';
+  if (polarity >= 0.2) return 'Positive';
+  if (polarity >= -0.2) return 'Neutral';
+  if (polarity >= -0.6) return 'Negative';
+  return 'Very Negative';
+}
+
+export function getSentimentColor(polarity: number): string {
+  if (polarity >= 0.6) return 'text-green-600 dark:text-green-400';
+  if (polarity >= 0.2) return 'text-green-500 dark:text-green-300';
+  if (polarity >= -0.2) return 'text-gray-600 dark:text-gray-400';
+  if (polarity >= -0.6) return 'text-red-500 dark:text-red-300';
+  return 'text-red-600 dark:text-red-400';
+}
+
+export function categorizeNewsByTags(tags: string[]): {
+  category: 'Earnings' | 'FDA/Regulatory' | 'M&A' | 'Analyst' | 'Corporate' | 'Market' | 'Other';
+  priority: 'High' | 'Medium' | 'Low';
+  icon: string;
+} {
+  const tagString = tags.join(' ').toLowerCase();
+  
+  // High priority catalysts
+  if (tagString.includes('earnings') || tagString.includes('quarterly results')) {
+    return { category: 'Earnings', priority: 'High', icon: '📊' };
+  }
+  if (tagString.includes('fda') || tagString.includes('approval') || tagString.includes('regulatory')) {
+    return { category: 'FDA/Regulatory', priority: 'High', icon: '🏥' };
+  }
+  if (tagString.includes('merger') || tagString.includes('acquisition') || tagString.includes('buyout')) {
+    return { category: 'M&A', priority: 'High', icon: '🤝' };
+  }
+  
+  // Medium priority
+  if (tagString.includes('rating') || tagString.includes('price target') || tagString.includes('analyst')) {
+    return { category: 'Analyst', priority: 'Medium', icon: '🎯' };
+  }
+  if (tagString.includes('dividend') || tagString.includes('split') || tagString.includes('announcement')) {
+    return { category: 'Corporate', priority: 'Medium', icon: '🏢' };
+  }
+  
+  // Low priority
+  if (tagString.includes('market') || tagString.includes('sector') || tagString.includes('industry')) {
+    return { category: 'Market', priority: 'Low', icon: '📈' };
+  }
+  
+  return { category: 'Other', priority: 'Low', icon: '📰' };
+}
+
+export function getNewsFreshness(dateString: string): {
+  label: 'Breaking' | 'Recent' | 'Today' | 'Yesterday' | 'This Week' | 'Old';
+  color: string;
+} {
+  const newsDate = new Date(dateString);
+  const now = new Date();
+  const diffHours = (now.getTime() - newsDate.getTime()) / (1000 * 60 * 60);
+  
+  if (diffHours < 1) {
+    return { label: 'Breaking', color: 'text-red-600 dark:text-red-400' };
+  } else if (diffHours < 6) {
+    return { label: 'Recent', color: 'text-orange-600 dark:text-orange-400' };
+  } else if (diffHours < 24) {
+    return { label: 'Today', color: 'text-blue-600 dark:text-blue-400' };
+  } else if (diffHours < 48) {
+    return { label: 'Yesterday', color: 'text-gray-600 dark:text-gray-400' };
+  } else if (diffHours < 168) { // 7 days
+    return { label: 'This Week', color: 'text-gray-500 dark:text-gray-500' };
+  } else {
+    return { label: 'Old', color: 'text-gray-400 dark:text-gray-600' };
+  }
+}
+
+export function summarizeNewsImpact(news: EODHDNewsItem[]): {
+  overallSentiment: number;
+  highImpactCount: number;
+  recentNewsCount: number;
+  topCatalysts: string[];
+} {
+  if (news.length === 0) {
+    return {
+      overallSentiment: 0,
+      highImpactCount: 0,
+      recentNewsCount: 0,
+      topCatalysts: []
+    };
+  }
+
+  const recentNews = news.filter(item => {
+    const diffHours = (new Date().getTime() - new Date(item.date).getTime()) / (1000 * 60 * 60);
+    return diffHours < 24;
+  });
+
+  const highImpactNews = news.filter(item => {
+    const { priority } = categorizeNewsByTags(item.tags);
+    return priority === 'High';
+  });
+
+  const overallSentiment = news.reduce((sum, item) => sum + item.sentiment.polarity, 0) / news.length;
+
+  const catalystCounts: Record<string, number> = {};
+  news.forEach(item => {
+    const { category } = categorizeNewsByTags(item.tags);
+    catalystCounts[category] = (catalystCounts[category] || 0) + 1;
+  });
+
+  const topCatalysts = Object.entries(catalystCounts)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, 3)
+    .map(([category]) => category);
+
+  return {
+    overallSentiment,
+    highImpactCount: highImpactNews.length,
+    recentNewsCount: recentNews.length,
+    topCatalysts
+  };
 }

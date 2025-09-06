@@ -16,6 +16,12 @@ interface PremarketStock {
   marketCap: string
   lastUpdated: string
   strategy?: 'momentum' | 'breakout'
+  news?: {
+    count: number
+    sentiment: number
+    topCatalyst?: string
+    recentCount: number
+  }
 }
 
 type TradingStrategy = 'momentum' | 'breakout'
@@ -474,6 +480,7 @@ export default function PremarketScanner() {
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Change</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Volume</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Rel Vol</th>
+                    <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">News</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Score</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Signal</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Market Cap</th>
@@ -524,6 +531,45 @@ export default function PremarketScanner() {
                           }`}>{stock.relativeVolume.toFixed(1)}x</div>
                           <div className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>rel vol</div>
                         </div>
+                      </td>
+                      <td className="px-6 py-5">
+                        {stock.news ? (
+                          <div className="text-center">
+                            <button
+                              onClick={() => window.open(`/stock-news?symbol=${stock.symbol}`, '_blank')}
+                              className="hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded-lg transition-colors"
+                              title="View news articles"
+                            >
+                              <div className="flex items-center justify-center gap-2 mb-1">
+                                <span className={`text-lg ${
+                                  stock.news.sentiment > 0.3 ? 'text-green-600' :
+                                  stock.news.sentiment < -0.3 ? 'text-red-600' : 'text-gray-600'
+                                }`}>
+                                  {stock.news.sentiment > 0.3 ? '📈' : 
+                                   stock.news.sentiment < -0.3 ? '📉' : '📰'}
+                                </span>
+                                <span className="font-bold text-sm">{stock.news.count}</span>
+                              </div>
+                              {stock.news.topCatalyst && (
+                                <div className={`text-xs px-2 py-1 rounded-full ${
+                                  isDarkMode ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                  {stock.news.topCatalyst}
+                                </div>
+                              )}
+                              {stock.news.recentCount > 0 && (
+                                <div className="text-xs text-orange-600 dark:text-orange-400 font-medium mt-1">
+                                  {stock.news.recentCount} recent
+                                </div>
+                              )}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-center text-gray-400">
+                            <span className="text-lg">📰</span>
+                            <div className="text-xs">No news</div>
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
@@ -618,6 +664,39 @@ export default function PremarketScanner() {
                       }`}>{stock.relativeVolume.toFixed(1)}x</div>
                     </div>
                   </div>
+                  
+                  {/* News Section for Mobile */}
+                  {stock.news && (
+                    <button
+                      onClick={() => window.open(`/stock-news?symbol=${stock.symbol}`, '_blank')}
+                      className="mt-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg w-full hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-lg ${
+                            stock.news.sentiment > 0.3 ? 'text-green-600' :
+                            stock.news.sentiment < -0.3 ? 'text-red-600' : 'text-gray-600'
+                          }`}>
+                            {stock.news.sentiment > 0.3 ? '📈' : 
+                             stock.news.sentiment < -0.3 ? '📉' : '📰'}
+                          </span>
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            {stock.news.count} news articles
+                          </span>
+                        </div>
+                        {stock.news.recentCount > 0 && (
+                          <span className="text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-1 rounded-full font-medium">
+                            {stock.news.recentCount} recent
+                          </span>
+                        )}
+                      </div>
+                      {stock.news.topCatalyst && (
+                        <div className="text-xs text-gray-600 dark:text-gray-400 text-left">
+                          <span className="font-medium">Top catalyst:</span> {stock.news.topCatalyst}
+                        </div>
+                      )}
+                    </button>
+                  )}
                   
                   <div className="flex items-center justify-between">
                     <div className="text-sm">

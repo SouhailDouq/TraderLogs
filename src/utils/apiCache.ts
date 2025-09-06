@@ -9,11 +9,12 @@ class APICache {
   
   // Default TTL values for different data types
   private readonly TTL = {
-    STOCK_DATA: 5 * 60 * 1000,      // 5 minutes for stock data
-    PREMARKET_SCAN: 2 * 60 * 1000,  // 2 minutes for premarket scans
-    FUNDAMENTALS: 24 * 60 * 60 * 1000, // 24 hours for fundamentals
-    SCREENER: 1 * 60 * 1000,        // 1 minute for screener results
-    MARKET_STATUS: 30 * 1000,       // 30 seconds for market status
+    STOCK_DATA: 3 * 60 * 1000,      // 3 minutes for stock data (shorter for fresher data)
+    PREMARKET_SCAN: 1 * 60 * 1000,  // 1 minute for premarket scans (very fresh for momentum)
+    FUNDAMENTALS: 4 * 60 * 60 * 1000, // 4 hours for fundamentals (shorter refresh)
+    SCREENER: 30 * 1000,            // 30 seconds for screener results (very fresh)
+    MARKET_STATUS: 15 * 1000,       // 15 seconds for market status (fresher)
+    NEWS: 2 * 60 * 1000,            // 2 minutes for news data
   }
 
   set<T>(key: string, data: T, type: keyof typeof this.TTL = 'STOCK_DATA'): void {
