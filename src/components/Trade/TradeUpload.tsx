@@ -210,13 +210,26 @@ export default function TradeUpload() {
       />
       
       <div>
-        <h2 className="text-xl font-bold text-gray-800 mb-4">Import Trades</h2>
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Import Trades</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Upload your CSV file to import trading data</p>
+          </div>
+        </div>
       
-      <div className="space-y-4">
+      <div className="space-y-6">
         <div
-          className={`border-2 border-dashed rounded-lg p-6 text-center ${
-            dragActive ? 'border-blue-500 bg-blue-50' : 
-            isProcessing ? 'border-gray-200 bg-gray-50' : 'border-gray-300'
+          className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300 ${
+            dragActive 
+              ? 'border-blue-500 bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-500/10 dark:to-blue-600/5 scale-[1.02]' 
+              : isProcessing 
+                ? 'border-gray-300 bg-gray-50 dark:border-gray-600 dark:bg-gray-700/30' 
+                : 'border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-gray-50 dark:hover:bg-gray-700/20'
           }`}
           onDragEnter={!isProcessing ? handleDrag : undefined}
           onDragLeave={!isProcessing ? handleDrag : undefined}
@@ -233,57 +246,63 @@ export default function TradeUpload() {
           />
           
           {isProcessing ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-center space-x-2">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                <span className="text-sm font-medium text-gray-700">Processing CSV...</span>
+            <div className="space-y-6">
+              <div className="flex items-center justify-center space-x-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-3 border-blue-500 border-t-transparent"></div>
+                <span className="text-lg font-semibold text-gray-700 dark:text-gray-300">Processing CSV...</span>
               </div>
               
-              <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
                 <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+                  className="bg-gradient-to-r from-blue-500 to-purple-600 h-3 rounded-full transition-all duration-500 ease-out shadow-lg"
                   style={{ width: `${progress}%` }}
                 ></div>
               </div>
               
-              <p className="text-xs text-gray-600">{processingStep}</p>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{processingStep}</p>
               
-              <p className="text-xs text-gray-500">
-                Please don't refresh the page or navigate away during import
-              </p>
+              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/30 rounded-xl">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200 font-medium">
+                  ⚠️ Please don't refresh the page or navigate away during import
+                </p>
+              </div>
             </div>
           ) : (
-            <label
-              htmlFor="file-upload"
-              className="cursor-pointer text-sm text-gray-600"
-            >
-              <span className="block mb-2">
-                Drag and drop a CSV file or click to upload
-              </span>
-              <span className="text-blue-600 hover:text-blue-700">
-                Browse files
-              </span>
-            </label>
+            <div className="space-y-6">
+              <div className="flex flex-col items-center">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mb-4 shadow-lg">
+                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <label
+                  htmlFor="file-upload"
+                  className="cursor-pointer text-center group"
+                >
+                  <span className="block text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                    Drag and drop your CSV file here
+                  </span>
+                  <span className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-xl hover:from-blue-600 hover:to-purple-700 transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg">
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    Browse Files
+                  </span>
+                </label>
+              </div>
+              
+              <div className="flex items-center justify-center">
+                <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>Supports CSV files only</span>
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
-        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <h3 className="font-medium text-blue-800 mb-2">📊 Enhanced CSV Support</h3>
-          <p className="text-sm text-blue-700 mb-2">
-            Your CSV can now include extended analysis fields for better strategy tracking:
-          </p>
-          <ul className="text-xs text-blue-600 space-y-1">
-            <li>• <strong>Volume</strong> - Daily trading volume</li>
-            <li>• <strong>Avg Volume</strong> - 30-day average volume</li>
-            <li>• <strong>52 Week High</strong> - Yearly high price</li>
-            <li>• <strong>4 Week Performance</strong> - Monthly performance %</li>
-            <li>• <strong>Market Cap</strong> - Market capitalization</li>
-            <li>• <strong>Notes</strong> - Trade notes and comments</li>
-          </ul>
-          <p className="text-xs text-blue-600 mt-2">
-            These fields are optional but enable advanced strategy analysis and compliance tracking.
-          </p>
-        </div>
       </div>
       </div>
     </>

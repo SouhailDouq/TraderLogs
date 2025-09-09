@@ -18,76 +18,39 @@ const workflowSteps = [
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  // Initialize theme from localStorage or default to light mode
+  // Force dark mode always
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    
-    // Default to light mode unless explicitly set to dark
-    const shouldBeDark = savedTheme === 'dark';
-    
-    setIsDarkMode(shouldBeDark);
-    applyTheme(shouldBeDark);
-  }, []);
-
-  const applyTheme = (isDark: boolean) => {
     const root = document.documentElement;
-    
-    if (isDark) {
-      root.style.setProperty('--background', '#111827');
-      root.style.setProperty('--foreground', '#f9fafb');
-      root.classList.add('dark');
-      document.body.style.backgroundColor = '#111827';
-      document.body.style.color = '#f9fafb';
-    } else {
-      root.style.setProperty('--background', '#ffffff');
-      root.style.setProperty('--foreground', '#171717');
-      root.classList.remove('dark');
-      document.body.style.backgroundColor = '#ffffff';
-      document.body.style.color = '#171717';
-    }
-  };
-
-  const toggleTheme = () => {
-    const newTheme = !isDarkMode;
-    
-    setIsDarkMode(newTheme);
-    applyTheme(newTheme);
-    
-    localStorage.setItem('theme', newTheme ? 'dark' : 'light');
-    
-    console.log('Theme toggled to:', newTheme ? 'dark' : 'light');
-  };
+    root.style.setProperty('--background', '#111827');
+    root.style.setProperty('--foreground', '#f9fafb');
+    root.classList.add('dark');
+    document.body.style.backgroundColor = '#111827';
+    document.body.style.color = '#f9fafb';
+  }, []);
 
   const navigateToStep = (path: string) => {
     router.push(path);
   };
 
   return (
-    <nav className={`border-b transition-colors ${
-      isDarkMode 
-        ? 'bg-gray-800 border-gray-600' 
-        : 'bg-white border-gray-200'
-    }`}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-14">
+    <nav className="border-b backdrop-blur-md transition-all duration-300 sticky top-0 z-50 bg-gray-900/95 border-gray-700 shadow-lg shadow-gray-900/20">
+      <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <div className="flex items-center">
             <button
               onClick={() => router.push('/')}
-              className={`text-xl font-semibold transition-colors ${
-                isDarkMode
-                  ? 'text-blue-400 hover:text-blue-300'
-                  : 'text-blue-600 hover:text-blue-700'
-              }`}
+              className="text-xl font-bold transition-all duration-200 hover:scale-105 flex items-center gap-2 text-blue-400 hover:text-blue-300"
             >
-              TraderLogs
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-lg">
+                TL
+              </div>
+              <span className="hidden sm:inline">TraderLogs</span>
             </button>
           </div>
 
           {/* Workflow Navigation */}
-          <div className="hidden sm:flex items-center space-x-1 overflow-x-auto">
+          <div className="hidden md:flex items-center space-x-2 overflow-x-auto px-4">
             {workflowSteps.map((step, index) => {
               const isActive = pathname === step.path;
               const isCompleted = workflowSteps.findIndex(s => s.path === pathname) > index;
@@ -96,29 +59,25 @@ export default function Header() {
                 <div key={step.id} className="flex items-center flex-shrink-0">
                   <button
                     onClick={() => navigateToStep(step.path)}
-                    className={`flex items-center px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
+                    className={`flex items-center px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap hover:scale-[1.02] active:scale-95 min-w-fit ${
                       isActive 
-                        ? isDarkMode
-                          ? 'bg-blue-900 text-blue-300 border border-blue-700'
-                          : 'bg-blue-100 text-blue-700 border border-blue-200'
+                        ? 'bg-blue-600 text-white shadow-md'
                         : isCompleted
-                        ? isDarkMode
-                          ? 'text-green-400 hover:bg-green-900/20'
-                          : 'text-green-600 hover:bg-green-50'
-                        : isDarkMode
-                        ? 'text-gray-300 hover:text-gray-100 hover:bg-gray-700'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                        ? 'text-green-400 hover:bg-green-900/20 bg-green-900/10'
+                        : 'text-gray-300 hover:text-white hover:bg-gray-700/70'
                     }`}
                     title={`Step ${index + 1}: ${step.title}`}
                   >
-                    <span className="mr-1 sm:mr-2">{step.icon}</span>
-                    <span className="hidden md:inline">{step.title}</span>
-                    <span className="md:hidden">{index + 1}</span>
+                    <span className="mr-2">{step.icon}</span>
+                    <span className="hidden xl:inline">{step.title}</span>
+                    <span className="xl:hidden font-semibold">{step.title.slice(0, 4)}</span>
                   </button>
                   
                   {index < workflowSteps.length - 1 && (
-                    <div className={`mx-0.5 sm:mx-1 h-0.5 w-2 sm:w-3 flex-shrink-0 ${
-                      isCompleted ? 'bg-green-400' : 'bg-gray-300'
+                    <div className={`mx-2 h-0.5 w-6 rounded-full flex-shrink-0 transition-colors duration-300 ${
+                      isCompleted 
+                        ? 'bg-green-500' 
+                        : 'bg-gray-600'
                     }`}></div>
                   )}
                 </div>
@@ -129,35 +88,16 @@ export default function Header() {
           {/* Right side - Theme toggle, User Menu and Mobile Menu */}
           <div className="flex items-center space-x-3">
             {/* Theme Toggle */}
-            <button
-              onClick={toggleTheme}
-              className={`p-2 rounded-lg transition-colors ${
-                isDarkMode
-                  ? 'text-gray-300 hover:text-gray-100 hover:bg-gray-700'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-              }`}
-              title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {isDarkMode ? (
-                <SunIcon className="h-5 w-5" />
-              ) : (
-                <MoonIcon className="h-5 w-5" />
-              )}
-            </button>
 
             {/* User Menu */}
             <UserMenu />
 
-            {/* Mobile Menu - Simple dropdown for mobile */}
+            {/* Mobile Menu - Enhanced dropdown for mobile */}
             <div className="md:hidden">
               <select
                 value={pathname}
                 onChange={(e) => navigateToStep(e.target.value)}
-                className={`text-sm border rounded-lg px-3 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                  isDarkMode
-                    ? 'border-gray-600 bg-gray-700 text-gray-100'
-                    : 'border-gray-300 bg-white text-gray-900'
-                }`}
+                className="text-sm border rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 font-medium min-w-[120px] border-gray-600 bg-gray-700/80 text-gray-100 hover:bg-gray-700"
               >
                 {workflowSteps.map((step, index) => (
                   <option key={step.id} value={step.path}>

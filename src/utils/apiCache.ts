@@ -15,6 +15,7 @@ class APICache {
     SCREENER: 30 * 1000,            // 30 seconds for screener results (very fresh)
     MARKET_STATUS: 15 * 1000,       // 15 seconds for market status (fresher)
     NEWS: 2 * 60 * 1000,            // 2 minutes for news data
+    REALTIME: 30 * 1000,            // 30 seconds for real-time premarket data
   }
 
   set<T>(key: string, data: T, type: keyof typeof this.TTL = 'STOCK_DATA'): void {

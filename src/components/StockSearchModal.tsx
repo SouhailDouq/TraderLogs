@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { format } from 'date-fns'
 import { formatCurrency } from '@/utils/formatters'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import { createPortal } from 'react-dom'
 
 interface StockSearchResult {
   symbol: string
@@ -33,15 +34,24 @@ interface StockSearchModalProps {
 }
 
 export default function StockSearchModal({ isOpen, onClose, searchResult, loading }: StockSearchModalProps) {
+  const [mounted, setMounted] = useState(false)
   const isDarkMode = useDarkMode()
 
-  if (!isOpen) return null
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className={`max-w-4xl w-full max-h-[90vh] overflow-hidden rounded-xl shadow-2xl transition-colors ${
-        isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
-      }`}>
+  if (!isOpen || !mounted) return null
+
+  const modalContent = (
+    <div className="fixed inset-0 bg-black bg-opacity-75 z-[9999]" onClick={onClose}>
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div 
+          className={`max-w-4xl w-full max-h-[90vh] overflow-hidden rounded-xl shadow-2xl transition-colors ${
+            isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Header */}
         <div className={`px-6 py-4 border-b flex items-center justify-between ${
           isDarkMode ? 'border-gray-700 bg-gray-750' : 'border-gray-200 bg-gray-50'
@@ -228,7 +238,10 @@ export default function StockSearchModal({ isOpen, onClose, searchResult, loadin
             </div>
           )}
         </div>
+        </div>
       </div>
     </div>
   )
+
+  return createPortal(modalContent, document.body)
 }

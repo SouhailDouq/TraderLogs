@@ -16,17 +16,24 @@ export default function ApiUsageDashboard() {
     canMakeCall: true
   })
   const [cacheStats, setCacheStats] = useState({ size: 0, keys: [] as string[] })
+  const [isClearing, setIsClearing] = useState(false)
+  const [clearMessage, setClearMessage] = useState('')
 
   useEffect(() => {
     const updateStats = () => {
-      const rateLimitStats = rateLimiter.getStats()
-      const cacheInfo = apiCache.getStats()
-      setStats(rateLimitStats)
-      setCacheStats(cacheInfo)
+      try {
+        const rateLimitStats = rateLimiter.getStats()
+        const cacheInfo = apiCache.getStats()
+        console.log('Dashboard stats update:', { rateLimitStats, cacheInfo })
+        setStats(rateLimitStats)
+        setCacheStats(cacheInfo)
+      } catch (error) {
+        console.error('Error updating dashboard stats:', error)
+      }
     }
 
     updateStats()
-    const interval = setInterval(updateStats, 5000) // Update every 5 seconds
+    const interval = setInterval(updateStats, 2000) // Update every 2 seconds for more responsive UI
 
     return () => clearInterval(interval)
   }, [])
@@ -57,28 +64,54 @@ export default function ApiUsageDashboard() {
         </h3>
         <button
           onClick={async () => {
+            setIsClearing(true)
+            setClearMessage('')
             try {
               const response = await fetch('/api/clear-cache', { method: 'POST' });
               if (response.ok) {
-                // Force refresh of stats
-                const rateLimitStats = rateLimiter.getStats()
-                const cacheInfo = apiCache.getStats()
-                setStats(rateLimitStats)
-                setCacheStats(cacheInfo)
+                setClearMessage('✅ Cache cleared successfully!')
+                // Force immediate refresh of stats
+                setTimeout(() => {
+                  const rateLimitStats = rateLimiter.getStats()
+                  const cacheInfo = apiCache.getStats()
+                  setStats(rateLimitStats)
+                  setCacheStats(cacheInfo)
+                }, 100)
+              } else {
+                setClearMessage('❌ Failed to clear cache')
               }
             } catch (error) {
               console.error('Failed to clear cache:', error);
+              setClearMessage('❌ Error clearing cache')
+            } finally {
+              setIsClearing(false)
+              // Clear message after 3 seconds
+              setTimeout(() => setClearMessage(''), 3000)
             }
           }}
+          disabled={isClearing}
           className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-            isDarkMode 
-              ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' 
-              : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            isClearing 
+              ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+              : isDarkMode 
+                ? 'bg-gray-700 hover:bg-gray-600 text-gray-300' 
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
           }`}
         >
-          Clear Cache
+          {isClearing ? '🔄 Clearing...' : 'Clear Cache'}
         </button>
       </div>
+
+      {/* Clear Cache Feedback */}
+      {clearMessage && (
+        <div className={`mb-4 p-2 rounded-lg text-sm font-medium ${
+          clearMessage.includes('✅') 
+            ? 'bg-green-100 text-green-800 border border-green-200'
+            : 'bg-red-100 text-red-800 border border-red-200'
+        }`}>
+          {clearMessage}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {/* Daily Usage */}

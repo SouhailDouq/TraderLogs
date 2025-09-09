@@ -21,7 +21,8 @@ export default function Home() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null)
   const [tradeTimeRange, setTradeTimeRange] = useState<{ earliest: Date | null; latest: Date | null }>({ earliest: null, latest: null })
-  const isDarkMode = useDarkMode()
+  // Force dark mode always
+  const isDarkMode = true
 
   useEffect(() => {
     // Load trades from database on page load
@@ -97,164 +98,185 @@ export default function Home() {
   }, [])
 
   return (
-    <div className={`min-h-screen transition-colors ${
-      isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
-    }`}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <h1 className={`text-3xl font-bold ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              🚀 TraderLogs
-            </h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setCurrentMonth(new Date())}
-              className={`px-3 py-1.5 text-sm font-medium rounded transition-colors duration-200 ${
-                isDarkMode
-                  ? 'text-gray-200 hover:text-white hover:bg-gray-700'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-              }`}
-            >
-              Today
-            </button>
-          </div>
-        </div>
-
-        {/* Momentum Trading Workflow */}
-        <div className="mb-8">
-          <div className={`rounded-lg shadow-sm border p-6 transition-colors ${
-            isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Hero Section */}
+      <div className="text-center mb-12">
+        <div className="inline-flex items-center gap-3 mb-4">
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg text-white font-bold transition-all duration-300 ${
+            isDarkMode 
+              ? 'bg-gradient-to-br from-emerald-500 to-emerald-600' 
+              : 'bg-gradient-to-br from-emerald-600 to-emerald-700'
           }`}>
-            <h2 className={`text-xl font-semibold mb-4 ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
+            TL
+          </div>
+          <h1 className={`text-4xl font-bold transition-colors ${
+            isDarkMode 
+              ? 'bg-gradient-to-r from-emerald-400 to-emerald-300 bg-clip-text text-transparent' 
+              : 'bg-gradient-to-r from-emerald-700 to-emerald-800 bg-clip-text text-transparent'
+          }`}>
+            TraderLogs
+          </h1>
+        </div>
+        <p className={`text-lg max-w-2xl mx-auto ${
+          isDarkMode ? 'text-slate-300' : 'text-slate-600'
+        }`}>
+          Your complete momentum trading command center. From premarket scanning to performance analysis.
+        </p>
+        
+        {/* Quick Actions */}
+        <div className="flex items-center justify-center gap-4 mt-6">
+          <button 
+            onClick={() => setCurrentMonth(new Date())}
+            className={`px-4 py-2 text-sm font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 ${
+              isDarkMode
+                ? 'text-slate-200 hover:text-white hover:bg-slate-700/50 bg-slate-700/30 border border-slate-600/30'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50 bg-slate-50/50 border border-slate-200'
+            }`}
+          >
+            📅 Today
+          </button>
+          <a 
+            href="/premarket-scanner"
+            className="px-6 py-3 text-sm font-semibold rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white shadow-lg shadow-emerald-500/25 transition-all duration-200 hover:scale-105 active:scale-95 hover:shadow-emerald-500/40"
+          >
+            🌅 Start Scanning
+          </a>
+        </div>
+      </div>
+
+      {/* Momentum Trading Workflow */}
+      <div className="mb-12">
+        <div className={`rounded-2xl shadow-xl border backdrop-blur-sm transition-all duration-300 p-8 ${
+          isDarkMode 
+            ? 'bg-slate-800/90 border-slate-700/60 shadow-slate-900/30' 
+            : 'bg-white/90 border-slate-200/60 shadow-slate-200/30'
+        }`}>
+          <div className="text-center mb-8">
+            <h2 className={`text-xl font-bold transition-colors ${
+              isDarkMode ? 'text-slate-100' : 'text-slate-900'
             }`}>
-              ⚡ Trading Workflow
+              ⚡ 4-Step Trading Workflow
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Step 1: Premarket Scanner */}
-              <a href="/premarket-scanner" className={`block p-4 rounded-lg border transition-all hover:scale-105 ${
-                isDarkMode 
-                  ? 'border-blue-500/30 bg-blue-500/10 hover:border-blue-400/50 hover:bg-blue-500/20' 
-                  : 'border-blue-200 bg-blue-50 hover:border-blue-300 hover:bg-blue-100'
-              }`}>
-                <div className="text-center">
-                  <div className="text-2xl mb-2">🌅</div>
-                  <h3 className={`font-semibold text-sm mb-1 ${
-                    isDarkMode ? 'text-blue-300' : 'text-blue-700'
-                  }`}>
-                    1. Premarket Scan
-                  </h3>
-                  <p className={`text-xs ${
-                    isDarkMode ? 'text-blue-200/80' : 'text-blue-600'
-                  }`}>
-                    Find momentum candidates
-                  </p>
-                </div>
-              </a>
+            <p className={`text-sm font-medium transition-colors ${
+              isDarkMode ? 'text-slate-400' : 'text-slate-600'
+            }`}>
+              Your systematic approach to momentum trading success
+            </p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            {/* Step 1: Premarket Scanner */}
+            <a href="/premarket-scanner" className={`group block p-6 rounded-2xl border transition-all duration-300 hover:scale-105 hover:shadow-xl active:scale-95 ${
+              isDarkMode 
+                ? 'border-orange-600/30 bg-gradient-to-br from-orange-700/10 to-orange-800/5 hover:border-orange-500/50 hover:from-orange-700/20 hover:to-orange-800/10 hover:shadow-orange-500/20' 
+                : 'border-orange-200 bg-gradient-to-br from-orange-50 to-orange-100/50 hover:border-orange-300 hover:from-orange-100 hover:to-orange-200/50 hover:shadow-orange-200/30'
+            }`}>
+              <div className="text-center">
+                <div className="text-3xl mb-3 group-hover:scale-110 transition-transform duration-200">🌅</div>
+                <h3 className={`font-bold text-base mb-2 ${
+                  isDarkMode ? 'text-orange-200' : 'text-orange-700'
+                }`}>
+                  1. Premarket Scan
+                </h3>
+                <p className={`text-sm leading-relaxed ${
+                  isDarkMode ? 'text-orange-300/80' : 'text-orange-600'
+                }`}>
+                  Find high-momentum candidates with volume spikes
+                </p>
+              </div>
+            </a>
 
-              {/* Step 2: Risk Management */}
-              <a href="/risk-management" className={`block p-4 rounded-lg border transition-all hover:scale-105 ${
-                isDarkMode 
-                  ? 'border-gray-500/30 bg-gray-500/10 hover:border-gray-400/50 hover:bg-gray-500/20' 
-                  : 'border-gray-200 bg-gray-50 hover:border-gray-300 hover:bg-gray-100'
-              }`}>
-                <div className="text-center">
-                  <div className="text-2xl mb-2">🛡️</div>
-                  <h3 className={`font-semibold text-sm mb-1 ${
-                    isDarkMode ? 'text-gray-300' : 'text-gray-700'
-                  }`}>
-                    2. Position Sizing
-                  </h3>
-                  <p className={`text-xs ${
-                    isDarkMode ? 'text-gray-200/80' : 'text-gray-600'
-                  }`}>
-                    Calculate risk & size
-                  </p>
-                </div>
-              </a>
+            {/* Step 2: Risk Management */}
+            <a href="/risk-management" className={`group block p-6 rounded-2xl border transition-all duration-300 hover:scale-105 hover:shadow-xl active:scale-95 ${
+              isDarkMode 
+                ? 'border-indigo-600/30 bg-gradient-to-br from-indigo-700/10 to-indigo-800/5 hover:border-indigo-500/50 hover:from-indigo-700/20 hover:to-indigo-800/10 hover:shadow-indigo-500/20' 
+                : 'border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-100/50 hover:border-indigo-300 hover:from-indigo-100 hover:to-indigo-200/50 hover:shadow-indigo-200/30'
+            }`}>
+              <div className="text-center">
+                <div className="text-3xl mb-3 group-hover:scale-110 transition-transform duration-200">🛡️</div>
+                <h3 className={`font-bold text-base mb-2 ${
+                  isDarkMode ? 'text-indigo-200' : 'text-indigo-700'
+                }`}>
+                  2. Position Sizing
+                </h3>
+                <p className={`text-sm leading-relaxed ${
+                  isDarkMode ? 'text-indigo-300/80' : 'text-indigo-600'
+                }`}>
+                  Calculate optimal position size and risk levels
+                </p>
+              </div>
+            </a>
 
-              {/* Step 3: Trade Entry */}
-              <a href="/trade-entry" className={`block p-4 rounded-lg border transition-all hover:scale-105 ${
-                isDarkMode 
-                  ? 'border-green-500/30 bg-green-500/10 hover:border-green-400/50 hover:bg-green-500/20' 
-                  : 'border-green-200 bg-green-50 hover:border-green-300 hover:bg-green-100'
-              }`}>
-                <div className="text-center">
-                  <div className="text-2xl mb-2">🎯</div>
-                  <h3 className={`font-semibold text-sm mb-1 ${
-                    isDarkMode ? 'text-green-300' : 'text-green-700'
-                  }`}>
-                    3. Plan Trade
-                  </h3>
-                  <p className={`text-xs ${
-                    isDarkMode ? 'text-green-200/80' : 'text-green-600'
-                  }`}>
-                    Entry & targets
-                  </p>
-                </div>
-              </a>
+            {/* Step 3: Trade Entry */}
+            <a href="/trade-entry" className={`group block p-6 rounded-2xl border transition-all duration-300 hover:scale-105 hover:shadow-xl active:scale-95 ${
+              isDarkMode 
+                ? 'border-emerald-600/30 bg-gradient-to-br from-emerald-700/10 to-emerald-800/5 hover:border-emerald-500/50 hover:from-emerald-700/20 hover:to-emerald-800/10 hover:shadow-emerald-500/20' 
+                : 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-emerald-100/50 hover:border-emerald-300 hover:from-emerald-100 hover:to-emerald-200/50 hover:shadow-emerald-200/30'
+            }`}>
+              <div className="text-center">
+                <div className="text-3xl mb-3 group-hover:scale-110 transition-transform duration-200">🎯</div>
+                <h3 className={`font-bold text-base mb-2 ${
+                  isDarkMode ? 'text-emerald-200' : 'text-emerald-700'
+                }`}>
+                  3. Plan Trade
+                </h3>
+                <p className={`text-sm leading-relaxed ${
+                  isDarkMode ? 'text-emerald-300/80' : 'text-emerald-600'
+                }`}>
+                  Set entry points and profit targets
+                </p>
+              </div>
+            </a>
 
-              {/* Step 4: Monitor Portfolio */}
-              <a href="/portfolio" className={`block p-4 rounded-lg border transition-all hover:scale-105 ${
-                isDarkMode 
-                  ? 'border-orange-500/30 bg-orange-500/10 hover:border-orange-400/50 hover:bg-orange-500/20' 
-                  : 'border-orange-200 bg-orange-50 hover:border-orange-300 hover:bg-orange-100'
-              }`}>
-                <div className="text-center">
-                  <div className="text-2xl mb-2">📊</div>
-                  <h3 className={`font-semibold text-sm mb-1 ${
-                    isDarkMode ? 'text-orange-300' : 'text-orange-700'
-                  }`}>
-                    4. Monitor & Exit
-                  </h3>
-                  <p className={`text-xs ${
-                    isDarkMode ? 'text-orange-200/80' : 'text-orange-600'
-                  }`}>
-                    Track & exit
-                  </p>
-                </div>
-              </a>
-            </div>
-
+            {/* Step 4: Monitor Portfolio */}
+            <a href="/portfolio" className={`group block p-6 rounded-2xl border transition-all duration-300 hover:scale-105 hover:shadow-xl active:scale-95 ${
+              isDarkMode 
+                ? 'border-amber-600/30 bg-gradient-to-br from-amber-700/10 to-amber-800/5 hover:border-amber-500/50 hover:from-amber-700/20 hover:to-amber-800/10 hover:shadow-amber-500/20' 
+                : 'border-amber-200 bg-gradient-to-br from-amber-50 to-amber-100/50 hover:border-amber-300 hover:from-amber-100 hover:to-amber-200/50 hover:shadow-amber-200/30'
+            }`}>
+              <div className="text-center">
+                <div className="text-3xl mb-3 group-hover:scale-110 transition-transform duration-200">📊</div>
+                <h3 className={`font-bold text-base mb-2 ${
+                  isDarkMode ? 'text-amber-200' : 'text-amber-700'
+                }`}>
+                  4. Monitor & Exit
+                </h3>
+                <p className={`text-sm leading-relaxed ${
+                  isDarkMode ? 'text-amber-300/80' : 'text-amber-600'
+                }`}>
+                  Track positions and execute exits
+                </p>
+              </div>
+            </a>
           </div>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-8">
-            <div className={`rounded-lg shadow-sm border p-6 mb-6 transition-colors ${
-              isDarkMode 
-                ? 'bg-gray-800 border-gray-700' 
-                : 'bg-white border-gray-200'
-            }`}>
-              <ClientCalendar currentMonth={currentMonth} onMonthChange={setCurrentMonth} />
-            </div>
-            <div className={`rounded-lg shadow-sm border p-6 transition-colors ${
-              isDarkMode 
-                ? 'bg-gray-800 border-gray-700' 
-                : 'bg-white border-gray-200'
-            }`}>
-              <ClientStrategyDashboard />
-            </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="lg:col-span-8">
+          <div className={`rounded-2xl shadow-xl border backdrop-blur-sm p-8 mb-8 transition-all duration-300 ${
+            isDarkMode 
+              ? 'bg-slate-800/90 border-slate-700/60 shadow-slate-900/30' 
+              : 'bg-white/90 border-slate-200/60 shadow-slate-200/30'
+          }`}>
+            <ClientCalendar currentMonth={currentMonth} onMonthChange={setCurrentMonth} />
           </div>
-          <div className="lg:col-span-4 space-y-6">
-            <MonthlyPnL selectedMonth={currentMonth} />
-            <div className={`rounded-lg shadow-sm border p-6 transition-colors ${
-              isDarkMode 
-                ? 'bg-gray-800 border-gray-700' 
-                : 'bg-white border-gray-200'
-            }`}>
-              <ClientTradeUpload />
-            </div>
-            <div className={`rounded-lg shadow-sm border p-6 transition-colors ${
-              isDarkMode 
-                ? 'bg-gray-800 border-gray-700' 
-                : 'bg-white border-gray-200'
-            }`}>
-              <ClientTradeSummary />
-            </div>
+          <div className={`rounded-2xl shadow-xl border backdrop-blur-sm p-8 transition-all duration-300 ${
+            isDarkMode 
+              ? 'bg-slate-800/90 border-slate-700/60 shadow-slate-900/30' 
+              : 'bg-white/90 border-slate-200/60 shadow-slate-200/30'
+          }`}>
+            <ClientTradeSummary />
+          </div>
+        </div>
+        <div className="lg:col-span-4 space-y-8">
+          <MonthlyPnL selectedMonth={currentMonth} />
+          <div className={`rounded-2xl shadow-xl border backdrop-blur-sm p-8 transition-all duration-300 ${
+            isDarkMode 
+              ? 'bg-slate-800/90 border-slate-700/60 shadow-slate-900/30' 
+              : 'bg-white/90 border-slate-200/60 shadow-slate-200/30'
+          }`}>
+            <ClientTradeUpload />
           </div>
         </div>
       </div>

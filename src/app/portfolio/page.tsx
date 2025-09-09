@@ -289,27 +289,35 @@ export default function MonitorPage() {
   }, [trades, marketData, refreshTime]);
 
   const StatCard = ({ title, value, subtitle, color = 'default', icon }: { title: string; value: string | number; subtitle: string; color?: string; icon: string }) => (
-    <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-      isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+    <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+      isDarkMode ? 'bg-slate-800/90 border-slate-700/60' : 'bg-white/90 border-slate-200/60'
     }`}>
-      <div className="flex items-center justify-between">
-        <h3 className={`text-sm font-medium transition-colors ${
-          isDarkMode ? 'text-gray-300' : 'text-gray-600'
+      <div className="flex items-center justify-between mb-3">
+        <h3 className={`text-sm font-semibold transition-colors ${
+          isDarkMode ? 'text-slate-300' : 'text-slate-600'
         }`}>
           {title}
         </h3>
-        {icon && <span className="text-lg">{icon}</span>}
+        {icon && (
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 ${
+            isDarkMode 
+              ? 'bg-gradient-to-br from-amber-500 to-amber-600' 
+              : 'bg-gradient-to-br from-amber-600 to-amber-700'
+          }`}>
+            <span className="text-white text-sm">{icon}</span>
+          </div>
+        )}
       </div>
-      <p className={`text-xl sm:text-2xl font-bold mt-2 ${
-        color === 'green' ? 'text-green-600' :
-        color === 'red' ? 'text-red-600' :
-        isDarkMode ? 'text-white' : 'text-gray-900'
+      <p className={`text-2xl font-bold mb-2 ${
+        color === 'green' ? 'text-emerald-600 dark:text-emerald-400' :
+        color === 'red' ? 'text-red-600 dark:text-red-400' :
+        isDarkMode ? 'text-slate-100' : 'text-slate-900'
       }`}>
         {value}
       </p>
       {subtitle && (
-        <p className={`text-xs sm:text-sm mt-1 transition-colors ${
-          isDarkMode ? 'text-gray-400' : 'text-gray-500'
+        <p className={`text-sm transition-colors ${
+          isDarkMode ? 'text-slate-400' : 'text-slate-500'
         }`}>
           {subtitle}
         </p>
@@ -322,23 +330,39 @@ export default function MonitorPage() {
       isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
     }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        <div className="mb-6 sm:mb-8">
+        <div className="mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className={`text-2xl sm:text-3xl font-bold transition-colors ${
-                isDarkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                👁️ Portfolio Monitor
-              </h1>
-              <p className={`mt-2 text-sm sm:text-base transition-colors ${
-                isDarkMode ? 'text-gray-300' : 'text-gray-600'
-              }`}>
-                Real-time portfolio tracking with alerts and targets
-              </p>
+              <div className="flex items-center gap-4 mb-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-all duration-300 ${
+                  isDarkMode 
+                    ? 'bg-gradient-to-br from-amber-500 to-amber-600' 
+                    : 'bg-gradient-to-br from-amber-600 to-amber-700'
+                }`}>
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </div>
+                <div>
+                  <h1 className={`text-3xl font-bold transition-colors ${
+                    isDarkMode 
+                      ? 'bg-gradient-to-r from-amber-400 to-amber-300 bg-clip-text text-transparent' 
+                      : 'bg-gradient-to-r from-amber-700 to-amber-800 bg-clip-text text-transparent'
+                  }`}>
+                    Portfolio Monitor
+                  </h1>
+                  <p className={`text-base transition-colors ${
+                    isDarkMode ? 'text-slate-300' : 'text-slate-600'
+                  }`}>
+                    Real-time momentum tracking with intelligent alerts
+                  </p>
+                </div>
+              </div>
               <div className={`mt-2 px-3 py-1 rounded-full text-xs font-medium inline-block ${
-                marketStatus === 'premarket' ? 'bg-orange-100 text-orange-800' :
-                marketStatus === 'open' ? 'bg-green-100 text-green-800' :
-                'bg-gray-100 text-gray-800'
+                marketStatus === 'premarket' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' :
+                marketStatus === 'open' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' :
+                'bg-slate-100 text-slate-800 dark:bg-slate-800/50 dark:text-slate-300'
               }`}>
                 {marketStatus === 'premarket' ? '🌅 Premarket Active' :
                  marketStatus === 'open' ? '🔔 Market Open' : '🌙 Market Closed'}
@@ -347,8 +371,8 @@ export default function MonitorPage() {
             <div className="flex items-center gap-4">
               {marketDataLoading && (
                 <div className="flex items-center gap-2">
-                  <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>
-                  <span className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Updating...</span>
+                  <div className="animate-spin w-4 h-4 border-2 border-slate-500 border-t-transparent rounded-full"></div>
+                  <span className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Updating...</span>
                 </div>
               )}
               {marketDataError && (
@@ -357,7 +381,7 @@ export default function MonitorPage() {
                 </div>
               )}
               <div className={`text-sm transition-colors ${
-                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                isDarkMode ? 'text-slate-400' : 'text-slate-500'
               }`}>
                 Last updated: {isMounted ? format(lastUpdated, 'HH:mm:ss') : '--:--:--'}
               </div>
@@ -367,23 +391,30 @@ export default function MonitorPage() {
 
         {/* Momentum Alerts */}
         {momentumAlerts.length > 0 && (
-          <div className="mb-6 sm:mb-8">
-            <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-              isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+          <div className="mb-8">
+            <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+              isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
             }`}>
-              <h2 className={`text-lg font-semibold mb-4 transition-colors ${
-                isDarkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                🚨 Live Alerts
-              </h2>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-red-500 to-orange-600 flex items-center justify-center">
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <h2 className={`text-xl font-bold transition-colors ${
+                  isDarkMode ? 'text-slate-100' : 'text-slate-900'
+                }`}>
+                  Live Alerts
+                </h2>
+              </div>
               <div className="grid gap-3">
                 {momentumAlerts.slice(0, 5).map((alert, index) => (
                   <div
                     key={index}
-                    className={`p-3 rounded-lg border-l-4 ${
-                      alert.priority === 'high' ? 'border-red-500 bg-red-50' :
-                      alert.priority === 'medium' ? 'border-blue-500 bg-blue-50' :
-                      'border-green-500 bg-green-50'
+                    className={`p-4 rounded-xl border-l-4 transition-all duration-300 hover:scale-102 ${
+                      alert.priority === 'high' ? 'border-red-500 bg-gradient-to-r from-red-50 to-red-25 dark:from-red-500/20 dark:to-red-500/5' :
+                      alert.priority === 'medium' ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-blue-25 dark:from-blue-500/20 dark:to-blue-500/5' :
+                      'border-green-500 bg-gradient-to-r from-green-50 to-green-25 dark:from-green-500/20 dark:to-green-500/5'
                     }`}
                   >
                     <div className="flex justify-between items-start">
@@ -410,7 +441,7 @@ export default function MonitorPage() {
         )}
 
         {/* Portfolio Overview Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatCard
             title="Portfolio Value"
             value={portfolioMetrics.openPositions > 0 ? formatCurrency(portfolioMetrics.totalValue) : "No Open Positions"}
@@ -442,8 +473,8 @@ export default function MonitorPage() {
         </div>
 
         {/* View Selector */}
-        <div className="mb-6">
-          <div className="flex flex-wrap gap-2">
+        <div className="mb-8">
+          <div className="flex flex-wrap gap-3">
             {[
               { key: 'overview', label: '📊 Overview', icon: '📊' },
               { key: 'heatmap', label: '🔥 Heat Map', icon: '🔥' },
@@ -452,10 +483,10 @@ export default function MonitorPage() {
               <button
                 key={view.key}
                 onClick={() => setSelectedView(view.key as any)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-6 py-3 rounded-2xl text-sm font-semibold transition-all duration-300 hover:scale-105 shadow-lg ${
                   selectedView === view.key
-                    ? (isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white')
-                    : (isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300')
+                    ? 'bg-gradient-to-r from-slate-600 to-slate-700 text-white shadow-slate-500/25'
+                    : (isDarkMode ? 'bg-slate-800/90 text-slate-300 hover:bg-slate-700/90 border border-slate-700/50' : 'bg-white/90 text-slate-700 hover:bg-slate-50/90 border border-slate-200/50')
                 }`}
               >
                 {view.label}
@@ -468,15 +499,22 @@ export default function MonitorPage() {
         {openPositions.length > 0 && (
           <div className="mb-6 sm:mb-8">
             {selectedView === 'overview' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
-                <div className={`lg:col-span-2 rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-                  isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className={`lg:col-span-2 rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+                  isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
                 }`}>
-                  <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                    isDarkMode ? 'text-white' : 'text-gray-900'
-                  }`}>
-                    📈 Portfolio Performance
-                  </h3>
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-700 flex items-center justify-center">
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                      </svg>
+                    </div>
+                    <h3 className={`text-xl font-bold transition-colors ${
+                      isDarkMode ? 'text-white' : 'text-gray-900'
+                    }`}>
+                      Portfolio Performance
+                    </h3>
+                  </div>
                   <div className="h-48 sm:h-64">
                     <PortfolioChart 
                       trades={trades} 
@@ -486,14 +524,22 @@ export default function MonitorPage() {
                   </div>
                 </div>
 
-                <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-                  isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+                <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+                  isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
                 }`}>
-                  <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                    isDarkMode ? 'text-white' : 'text-gray-900'
-                  }`}>
-                    🥧 Asset Allocation
-                  </h3>
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-700 flex items-center justify-center">
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+                      </svg>
+                    </div>
+                    <h3 className={`text-xl font-bold transition-colors ${
+                      isDarkMode ? 'text-white' : 'text-gray-900'
+                    }`}>
+                      Asset Allocation
+                    </h3>
+                  </div>
                   <div className="h-48 sm:h-64 relative">
                     <AssetAllocationChart 
                       positions={openPositions}
@@ -506,14 +552,22 @@ export default function MonitorPage() {
             )}
 
             {selectedView === 'heatmap' && (
-              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+                isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
               }`}>
-                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                  isDarkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  🔥 Risk Heat Map
-                </h3>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-red-500 to-pink-600 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+                    </svg>
+                  </div>
+                  <h3 className={`text-xl font-bold transition-colors ${
+                    isDarkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    Risk Heat Map
+                  </h3>
+                </div>
                 <PortfolioHeatMap 
                   positions={openPositions}
                   totalValue={portfolioMetrics.totalValue}
@@ -523,14 +577,21 @@ export default function MonitorPage() {
             )}
 
             {selectedView === 'benchmark' && (
-              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+                isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
               }`}>
-                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                  isDarkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  📈 Benchmark Comparison
-                </h3>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-teal-600 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                  </div>
+                  <h3 className={`text-xl font-bold transition-colors ${
+                    isDarkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    Benchmark Comparison
+                  </h3>
+                </div>
                 <BenchmarkComparison 
                   portfolioData={[]}
                   className="min-h-96"
@@ -540,25 +601,24 @@ export default function MonitorPage() {
           </div>
         )}
 
-        {/* Open Positions Table */}
-        <div className={`rounded-lg shadow-sm border transition-colors ${
-          isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-        }`}>
-          <div className="p-4 sm:p-6">
-            <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              Open Positions
-            </h2>
-            
-            {openPositions.length === 0 ? (
-              <div className={`text-center py-8 transition-colors ${
-                isDarkMode ? 'text-gray-400' : 'text-gray-500'
-              }`}>
-                <p className="text-lg mb-2">📭 No open positions</p>
-                <p className="text-sm">Execute some trades to start monitoring your portfolio</p>
+        {/* Trading History and Open Positions */}
+        {openPositions.length > 0 ? (
+          <div className={`rounded-2xl shadow-lg border transition-all duration-300 backdrop-blur-sm ${
+            isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
+          }`}>
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 8l2 2 4-4" />
+                  </svg>
+                </div>
+                <h2 className={`text-xl font-bold transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Open Positions
+                </h2>
               </div>
-            ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full">
                   <thead>
@@ -649,38 +709,97 @@ export default function MonitorPage() {
                   </tbody>
                 </table>
               </div>
-            )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className={`rounded-2xl shadow-lg border transition-all duration-300 backdrop-blur-sm ${
+            isDarkMode ? 'bg-slate-800/90 border-slate-700/60' : 'bg-white/90 border-slate-200/60'
+          }`}>
+            <div className="p-8 text-center border-b border-slate-200 dark:border-slate-700">
+              <div className="text-4xl mb-3">✅</div>
+              <h3 className={`text-lg font-bold mb-2 ${
+                isDarkMode ? 'text-slate-200' : 'text-slate-800'
+              }`}>
+                All Positions Closed
+              </h3>
+              <p className={`text-sm ${
+                isDarkMode ? 'text-slate-400' : 'text-slate-600'
+              }`}>
+                Great job! No open positions means no overnight risk.
+              </p>
+            </div>
+            
+            <div className="p-6">
+              <h4 className={`text-md font-semibold mb-4 ${
+                isDarkMode ? 'text-slate-300' : 'text-slate-700'
+              }`}>
+                Recent Closed Trades
+              </h4>
+              {trades.filter(t => !t.isOpen && t.profitLoss !== 0).slice(0, 5).map((trade, index) => (
+                <div key={trade.id} className={`flex justify-between items-center py-2 px-3 rounded-lg mb-2 ${
+                  isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100/50'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium">{trade.symbol}</span>
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      trade.profitLoss > 0 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                    }`}>
+                      {trade.profitLoss > 0 ? '+' : ''}{formatCurrency(trade.profitLoss)}
+                    </span>
+                  </div>
+                  <span className={`text-xs ${
+                    isDarkMode ? 'text-slate-400' : 'text-slate-600'
+                  }`}>
+                    {format(new Date(trade.date), 'MMM dd')}
+                  </span>
+                </div>
+              ))}
+              {trades.filter(t => !t.isOpen && t.profitLoss !== 0).length === 0 && (
+                <p className={`text-sm text-center py-4 ${
+                  isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                }`}>
+                  No closed trades yet. Start trading to build your history!
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Enhanced Risk Management & Momentum Tracking */}
         {openPositions.length > 0 && (
-          <div className="mt-6 sm:mt-8">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="mt-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Risk Alerts */}
-              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+                isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
               }`}>
-                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                  isDarkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  🚨 Risk Management
-                </h3>
-                <div className="space-y-3">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-red-500 to-orange-600 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </div>
+                  <h3 className={`text-xl font-bold transition-colors ${
+                    isDarkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    Risk Management
+                  </h3>
+                </div>
+                <div className="space-y-4">
                   {openPositions.filter(p => p.unrealizedPnLPercent < -10).length > 0 ? (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <p className="text-sm text-red-800">
+                    <div className="p-4 bg-gradient-to-r from-red-50 to-red-25 dark:from-red-500/20 dark:to-red-500/5 border border-red-200 dark:border-red-800 rounded-xl">
+                      <p className="text-sm font-semibold text-red-800 dark:text-red-300">
                         ⚠️ {openPositions.filter(p => p.unrealizedPnLPercent < -10).length} position(s) down more than 10%
                       </p>
-                      <div className="mt-2 text-xs text-red-600">
+                      <div className="mt-2 text-xs text-red-600 dark:text-red-400">
                         Consider exit strategy or position sizing review
                       </div>
                     </div>
                   ) : (
-                    <div className={`p-3 rounded-lg ${
-                      isDarkMode ? 'bg-green-900/20 border border-green-800' : 'bg-green-50 border border-green-200'
+                    <div className={`p-4 rounded-xl border ${
+                      isDarkMode ? 'bg-gradient-to-r from-green-500/20 to-green-500/5 border-green-800' : 'bg-gradient-to-r from-green-50 to-green-25 border-green-200'
                     }`}>
-                      <p className={`text-sm ${
+                      <p className={`text-sm font-semibold ${
                         isDarkMode ? 'text-green-300' : 'text-green-800'
                       }`}>
                         ✅ All positions within acceptable risk levels
@@ -689,10 +808,10 @@ export default function MonitorPage() {
                   )}
                   
                   {/* Trading 212 Reminder */}
-                  <div className={`p-3 rounded-lg border ${
-                    isDarkMode ? 'bg-blue-900/20 border-blue-800' : 'bg-blue-50 border-blue-200'
+                  <div className={`p-4 rounded-xl border ${
+                    isDarkMode ? 'bg-gradient-to-r from-blue-500/20 to-blue-500/5 border-blue-800' : 'bg-gradient-to-r from-blue-50 to-blue-25 border-blue-200'
                   }`}>
-                    <p className={`text-xs ${
+                    <p className={`text-sm font-medium ${
                       isDarkMode ? 'text-blue-300' : 'text-blue-800'
                     }`}>
                       💡 <strong>Strategy:</strong> Hold until profitable - No stop-loss orders
@@ -702,15 +821,22 @@ export default function MonitorPage() {
               </div>
 
               {/* Momentum Targets */}
-              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+                isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
               }`}>
-                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                  isDarkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  🎯 Price Targets
-                </h3>
-                <div className="space-y-3">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                    </svg>
+                  </div>
+                  <h3 className={`text-xl font-bold transition-colors ${
+                    isDarkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    Price Targets
+                  </h3>
+                </div>
+                <div className="space-y-4">
                   {openPositions.map(position => {
                     const targets = [
                       { percent: 3, label: 'Conservative', reached: position.unrealizedPnLPercent >= 3 },
@@ -719,8 +845,8 @@ export default function MonitorPage() {
                     ];
                     
                     return (
-                      <div key={position.id} className={`p-2 rounded border ${
-                        isDarkMode ? 'border-gray-600 bg-gray-700' : 'border-gray-200 bg-gray-50'
+                      <div key={position.id} className={`p-4 rounded-xl border transition-all duration-300 hover:scale-102 ${
+                        isDarkMode ? 'border-gray-600/50 bg-gradient-to-r from-gray-700/50 to-gray-700/25' : 'border-gray-200/50 bg-gradient-to-r from-gray-50 to-gray-25'
                       }`}>
                         <div className="flex justify-between items-center mb-1">
                           <span className={`text-sm font-medium ${

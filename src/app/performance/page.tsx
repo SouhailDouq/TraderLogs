@@ -161,23 +161,23 @@ export default function PerformancePage() {
   }, [processedTrades]);
 
   const StatCard = ({ title, value, subtitle, color = 'default' }: { title: string; value: string | number; subtitle: string; color?: string }) => (
-    <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-      isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+    <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm hover:scale-[1.02] ${
+      isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
     }`}>
-      <h3 className={`text-sm font-medium transition-colors ${
+      <h3 className={`text-sm font-semibold transition-colors ${
         isDarkMode ? 'text-gray-300' : 'text-gray-600'
       }`}>
         {title}
       </h3>
-      <p className={`text-xl sm:text-2xl font-bold mt-2 ${
-        color === 'green' ? 'text-green-600' :
-        color === 'red' ? 'text-red-600' :
+      <p className={`text-2xl font-bold mt-2 ${
+        color === 'green' ? 'text-green-600 dark:text-green-400' :
+        color === 'red' ? 'text-red-600 dark:text-red-400' :
         isDarkMode ? 'text-white' : 'text-gray-900'
       }`}>
         {value}
       </p>
       {subtitle && (
-        <p className={`text-xs sm:text-sm mt-1 transition-colors ${
+        <p className={`text-sm mt-1 font-medium transition-colors ${
           isDarkMode ? 'text-gray-400' : 'text-gray-500'
         }`}>
           {subtitle}
@@ -191,66 +191,92 @@ export default function PerformancePage() {
       isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
     }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        <div className="mb-6 sm:mb-8">
-          <h1 className={`text-2xl sm:text-3xl font-bold transition-colors ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>
-            📈 Performance Analytics
-          </h1>
-          <p className={`mt-2 text-sm sm:text-base transition-colors ${
-            isDarkMode ? 'text-gray-300' : 'text-gray-600'
-          }`}>
-            Track your trading performance and target achievements
-          </p>
+        <div className="mb-8">
+          <div className="flex items-center gap-4 mb-4">
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shadow-lg transition-all duration-300 ${
+              isDarkMode 
+                ? 'bg-gradient-to-br from-violet-500 to-violet-600' 
+                : 'bg-gradient-to-br from-violet-600 to-violet-700'
+            }`}>
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className={`text-3xl font-bold transition-colors ${
+                isDarkMode 
+                  ? 'bg-gradient-to-r from-violet-400 to-violet-300 bg-clip-text text-transparent' 
+                  : 'bg-gradient-to-r from-violet-700 to-violet-800 bg-clip-text text-transparent'
+              }`}>
+                Performance Analytics
+              </h1>
+              <p className={`text-base transition-colors ${
+                isDarkMode ? 'text-slate-300' : 'text-slate-600'
+              }`}>
+                Track your momentum trading success
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Momentum Target Achievement */}
         <div className="mb-6 sm:mb-8">
-          <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-            isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+          <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+            isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
           }`}>
-            <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              🎯 Target Achievement
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="text-center">
-                <div className={`text-2xl font-bold mb-1 ${
-                  performanceData.momentumMetrics.target3Hits > 0 ? 'text-green-600' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
+            <div className="flex items-center gap-3 mb-6">
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 ${
+                isDarkMode 
+                  ? 'bg-gradient-to-br from-emerald-500 to-emerald-600' 
+                  : 'bg-gradient-to-br from-emerald-600 to-emerald-700'
+              }`}>
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h2 className={`text-xl font-bold transition-colors ${
+                isDarkMode ? 'text-white' : 'text-gray-900'
+              }`}>
+                Target Achievement
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-green-50 to-green-100/50 dark:from-green-500/10 dark:to-green-600/5 border border-green-200 dark:border-green-500/30 text-center transition-all duration-300 hover:scale-[1.02]">
+                <div className={`text-3xl font-bold mb-2 ${
+                  performanceData.momentumMetrics.target3Hits > 0 ? 'text-green-600 dark:text-green-400' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
                 }`}>
                   {performanceData.momentumMetrics.target3Hits}
                 </div>
-                <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                <div className={`text-sm font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                   3% Target Hits
                 </div>
-                <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                <div className={`text-xs mt-1 font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                   Conservative gains
                 </div>
               </div>
-              <div className="text-center">
-                <div className={`text-2xl font-bold mb-1 ${
-                  performanceData.momentumMetrics.target8Hits > 0 ? 'text-blue-600' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-500/10 dark:to-blue-600/5 border border-blue-200 dark:border-blue-500/30 text-center transition-all duration-300 hover:scale-[1.02]">
+                <div className={`text-3xl font-bold mb-2 ${
+                  performanceData.momentumMetrics.target8Hits > 0 ? 'text-blue-600 dark:text-blue-400' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
                 }`}>
                   {performanceData.momentumMetrics.target8Hits}
                 </div>
-                <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                <div className={`text-sm font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                   8% Target Hits
                 </div>
-                <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                <div className={`text-xs mt-1 font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                   Moderate momentum
                 </div>
               </div>
-              <div className="text-center">
-                <div className={`text-2xl font-bold mb-1 ${
-                  performanceData.momentumMetrics.target15Hits > 0 ? 'text-purple-600' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-500/10 dark:to-purple-600/5 border border-purple-200 dark:border-purple-500/30 text-center transition-all duration-300 hover:scale-[1.02]">
+                <div className={`text-3xl font-bold mb-2 ${
+                  performanceData.momentumMetrics.target15Hits > 0 ? 'text-purple-600 dark:text-purple-400' : isDarkMode ? 'text-gray-400' : 'text-gray-500'
                 }`}>
                   {performanceData.momentumMetrics.target15Hits}
                 </div>
-                <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                <div className={`text-sm font-semibold ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                   15% Target Hits
                 </div>
-                <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                <div className={`text-xs mt-1 font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                   Aggressive breakouts
                 </div>
               </div>
@@ -313,14 +339,21 @@ export default function PerformancePage() {
         {/* Advanced Metrics */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 mb-6 sm:mb-8">
           {/* Premarket Performance */}
-          <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-            isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+          <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+            isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
           }`}>
-            <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              🌅 Premarket Stats
-            </h2>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              </div>
+              <h2 className={`text-xl font-bold transition-colors ${
+                isDarkMode ? 'text-white' : 'text-gray-900'
+              }`}>
+                Premarket Stats
+              </h2>
+            </div>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className={`text-sm transition-colors ${
@@ -356,14 +389,21 @@ export default function PerformancePage() {
             </div>
           </div>
 
-          <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-            isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+          <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+            isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
           }`}>
-            <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              📊 Risk/Reward
-            </h2>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <h2 className={`text-xl font-bold transition-colors ${
+                isDarkMode ? 'text-white' : 'text-gray-900'
+              }`}>
+                Risk/Reward
+              </h2>
+            </div>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className={`text-sm transition-colors ${
@@ -405,38 +445,45 @@ export default function PerformancePage() {
         </div>
 
         {/* Monthly Performance Chart */}
-        <div className={`rounded-lg shadow-sm border p-4 sm:p-6 mb-6 sm:mb-8 transition-colors ${
-          isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        <div className={`rounded-2xl shadow-lg border p-6 mb-8 transition-all duration-300 backdrop-blur-sm ${
+          isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
         }`}>
-          <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>
-            Monthly Performance
-          </h2>
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h2 className={`text-xl font-bold transition-colors ${
+              isDarkMode ? 'text-white' : 'text-gray-900'
+            }`}>
+              Monthly Performance
+            </h2>
+          </div>
           <div className="overflow-x-auto">
             <div className="min-w-full">
               <div className="grid grid-cols-12 gap-2 sm:gap-4">
                 {performanceData.monthlyData.map((month, index) => (
                   <div key={index} className="text-center">
-                    <div className={`h-20 sm:h-24 flex items-end justify-center mb-2 ${
-                      month.pnl >= 0 ? 'bg-green-100' : 'bg-red-100'
-                    } rounded`}>
+                    <div className={`h-24 flex items-end justify-center mb-2 rounded-xl transition-all duration-300 hover:scale-105 ${
+                      month.pnl >= 0 ? 'bg-gradient-to-t from-green-100 to-green-50 dark:from-green-500/20 dark:to-green-500/5' : 'bg-gradient-to-t from-red-100 to-red-50 dark:from-red-500/20 dark:to-red-500/5'
+                    }`}>
                       <div
-                        className={`w-full rounded ${
-                          month.pnl >= 0 ? 'bg-green-500' : 'bg-red-500'
+                        className={`w-full rounded-lg shadow-sm ${
+                          month.pnl >= 0 ? 'bg-gradient-to-t from-green-500 to-green-400' : 'bg-gradient-to-t from-red-500 to-red-400'
                         }`}
                         style={{
-                          height: `${Math.max(Math.abs(month.pnl) / Math.max(...performanceData.monthlyData.map(m => Math.abs(m.pnl))) * 100, 5)}%`
+                          height: `${Math.max(Math.abs(month.pnl) / Math.max(...performanceData.monthlyData.map(m => Math.abs(m.pnl))) * 100, 8)}%`
                         }}
                       />
                     </div>
-                    <p className={`text-xs font-medium transition-colors ${
-                      isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                    <p className={`text-xs font-semibold transition-colors ${
+                      isDarkMode ? 'text-gray-300' : 'text-gray-700'
                     }`}>
                       {month.month.split(' ')[0]}
                     </p>
-                    <p className={`text-xs transition-colors ${
-                      month.pnl >= 0 ? 'text-green-600' : 'text-red-600'
+                    <p className={`text-xs font-bold transition-colors ${
+                      month.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                     }`}>
                       {formatCurrency(month.pnl)}
                     </p>
@@ -448,14 +495,21 @@ export default function PerformancePage() {
         </div>
 
         {/* Strategy Breakdown */}
-        <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-          isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 hover:scale-105 backdrop-blur-sm ${
+          isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
         }`}>
-          <h2 className={`text-lg sm:text-xl font-semibold mb-4 transition-colors ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>
-            Strategy Performance
-          </h2>
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+              </svg>
+            </div>
+            <h2 className={`text-xl font-bold transition-colors ${
+              isDarkMode ? 'text-white' : 'text-gray-900'
+            }`}>
+              Strategy Performance
+            </h2>
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>

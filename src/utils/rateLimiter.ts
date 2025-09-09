@@ -10,7 +10,7 @@ class RateLimiter {
   private lastResetDate: string = new Date().toDateString()
   
   private readonly config: RateLimitConfig = {
-    maxCalls: 10,        // Max 10 calls per minute
+    maxCalls: 20,        // Increased to 20 calls per minute for premarket scanning
     windowMs: 60 * 1000, // 1 minute window
     dailyLimit: 3000     // Max 3000 calls per day (100k/month ≈ 3.3k/day)
   }

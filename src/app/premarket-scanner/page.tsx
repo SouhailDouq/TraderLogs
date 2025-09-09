@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { useDarkMode } from '@/hooks/useDarkMode'
-import ApiUsageDashboard from '@/components/ApiUsageDashboard'
 
 interface PremarketStock {
   symbol: string
@@ -16,6 +15,9 @@ interface PremarketStock {
   marketCap: string
   lastUpdated: string
   strategy?: 'momentum' | 'breakout'
+  priceAction?: 'bullish' | 'bearish' | 'neutral'
+  volumeSpike?: boolean
+  intradayChange?: number
   news?: {
     count: number
     sentiment: number
@@ -48,6 +50,7 @@ export default function PremarketScanner() {
   const [selectedStrategy, setSelectedStrategy] = useState<TradingStrategy>('momentum')
   const [error, setError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
+  const [isInitialized, setIsInitialized] = useState(false)
   
   // Strategy-specific filter presets
   const strategyFilters: Record<TradingStrategy, StrategyFilters> = {
@@ -58,26 +61,115 @@ export default function PremarketScanner() {
       minVolume: 1000000, // >1M avg volume (matches sh_avgvol_o1000)
       maxPrice: 10, // <$10 price (matches sh_price_u10)
       minRelativeVolume: 1.5, // >1.5x relative volume (matches sh_relvol_o1.5)
-      minScore: 50, // Lower threshold for momentum plays
+      minScore: 0, // No score filter for momentum - let all stocks through
       minMarketCap: 300000000, // Small cap and over (matches cap_smallover ~$300M+)
       maxMarketCap: 10000000000 // Allow up to large cap
     },
     breakout: {
-      // News-driven breakout strategy with low float focus
-      minChange: 10, // Minimum 10% premarket move
-      maxChange: 100, // Allow big premarket moves
-      minVolume: 500000, // Base volume requirement
-      maxPrice: 20, // $2-$20 price range (minPrice handled separately)
-      minPrice: 2, // Minimum $2 price
-      minRelativeVolume: 5.0, // 5x above 30-day average volume
-      minScore: 45, // More realistic threshold for breakout opportunities
-      minMarketCap: 50000000, // $50M minimum
-      maxMarketCap: 10000000000, // $10B maximum
-      maxFloat: 10000000 // Under 10M float shares
+      // Finviz breakout strategy: gap up >10%, float <10M, price <$20, rel vol >5x
+      minChange: 10, // Gap up >10% (ta_gap_u10)
+      maxChange: 100, // Allow big gap moves
+      minVolume: 0, // No minimum volume requirement in Finviz filter
+      maxPrice: 20, // Price <$20 (sh_price_u20)
+      minPrice: 0, // No minimum price in Finviz filter
+      minRelativeVolume: 5.0, // Relative volume >5x (sh_relvol_o5)
+      minScore: 0, // No score filter in Finviz
+      minMarketCap: 0, // No market cap filter in Finviz
+      maxMarketCap: 0, // No market cap filter in Finviz
+      maxFloat: 10000000 // Float <10M shares (sh_float_u10)
     }
   }
   
   const [filters, setFilters] = useState<StrategyFilters>(strategyFilters.momentum)
+  const [enabledFilters, setEnabledFilters] = useState({
+    minChange: false,
+    maxChange: false,
+    minVolume: false,
+    maxPrice: false,
+    minPrice: false,
+    minRelativeVolume: false,
+    minScore: false,
+    minMarketCap: false,
+    maxMarketCap: false,
+    maxFloat: false
+  })
+  const [showDecliningStocks, setShowDecliningStocks] = useState(true)
+  const [hideHighRiskStocks, setHideHighRiskStocks] = useState(false)
+
+  // Load persisted data on component mount
+  useEffect(() => {
+    const loadPersistedData = () => {
+      try {
+        const savedStocks = localStorage.getItem('premarket-scanner-stocks')
+        const savedLastScan = localStorage.getItem('premarket-scanner-last-scan')
+        const savedStrategy = localStorage.getItem('premarket-scanner-strategy')
+        
+        if (savedStocks) {
+          const parsedStocks = JSON.parse(savedStocks)
+          setStocks(parsedStocks)
+        }
+        
+        if (savedLastScan) {
+          setLastScan(savedLastScan)
+        }
+        
+        if (savedStrategy && (savedStrategy === 'momentum' || savedStrategy === 'breakout')) {
+          setSelectedStrategy(savedStrategy as TradingStrategy)
+        }
+      } catch (error) {
+        console.error('Failed to load persisted scanner data:', error)
+      } finally {
+        setIsInitialized(true)
+      }
+    }
+
+    loadPersistedData()
+  }, [])
+
+  // Persist data whenever stocks or strategy changes
+  useEffect(() => {
+    if (isInitialized) {
+      try {
+        localStorage.setItem('premarket-scanner-stocks', JSON.stringify(stocks))
+      } catch (error) {
+        console.error('Failed to persist stocks data:', error)
+      }
+    }
+  }, [stocks, isInitialized])
+
+  useEffect(() => {
+    if (isInitialized) {
+      try {
+        localStorage.setItem('premarket-scanner-strategy', selectedStrategy)
+      } catch (error) {
+        console.error('Failed to persist strategy:', error)
+      }
+    }
+  }, [selectedStrategy, isInitialized])
+
+  useEffect(() => {
+    if (isInitialized && lastScan) {
+      try {
+        localStorage.setItem('premarket-scanner-last-scan', lastScan)
+      } catch (error) {
+        console.error('Failed to persist last scan time:', error)
+      }
+    }
+  }, [lastScan, isInitialized])
+
+  const clearResults = () => {
+    setStocks([])
+    setLastScan('')
+    setError(null)
+    
+    // Clear persisted data
+    try {
+      localStorage.removeItem('premarket-scanner-stocks')
+      localStorage.removeItem('premarket-scanner-last-scan')
+    } catch (error) {
+      console.error('Failed to clear persisted data:', error)
+    }
+  }
 
   const scanPremarket = async (isRetry = false) => {
     setIsLoading(true)
@@ -87,15 +179,34 @@ export default function PremarketScanner() {
       const response = await fetch('/api/premarket-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...filters, strategy: selectedStrategy })
+        body: JSON.stringify({ ...getActiveFilters(), strategy: selectedStrategy })
       })
       
       if (response.ok) {
         const data = await response.json()
-        setStocks(data.stocks || [])
-        setLastScan(new Date().toLocaleTimeString())
+        const processedStocks = (data.stocks || []).map((stock: PremarketStock) => ({
+          ...stock,
+          // Add price action classification based on change percentage
+          priceAction: stock.changePercent > 3 ? 'bullish' : 
+                      stock.changePercent < -3 ? 'bearish' : 'neutral',
+          // Mark volume spikes (>2x relative volume)
+          volumeSpike: stock.relativeVolume > 2,
+          // Use changePercent as intradayChange for now
+          intradayChange: stock.changePercent
+        }))
+        setStocks(processedStocks)
+        const scanTime = new Date().toLocaleTimeString()
+        setLastScan(scanTime)
         setRetryCount(0)
         setError(null)
+        
+        // Persist the new scan results immediately
+        try {
+          localStorage.setItem('premarket-scanner-stocks', JSON.stringify(processedStocks))
+          localStorage.setItem('premarket-scanner-last-scan', scanTime)
+        } catch (error) {
+          console.error('Failed to persist scan results:', error)
+        }
       } else {
         throw new Error(`API returned ${response.status}: ${response.statusText}`)
       }
@@ -122,6 +233,82 @@ export default function PremarketScanner() {
     setSelectedStrategy(strategy)
     setFilters(strategyFilters[strategy])
     setStocks([]) // Clear previous results
+    
+    // Keep all filters disabled by default - user must explicitly enable them
+    // This ensures all stocks are shown initially without any filtering
+  }
+
+  // Handle filter toggle
+  const handleFilterToggle = (filterKey: keyof typeof enabledFilters) => {
+    setEnabledFilters(prev => ({ ...prev, [filterKey]: !prev[filterKey] }))
+  }
+
+  // Handle filter value change
+  const handleFilterChange = (filterKey: keyof StrategyFilters, value: number) => {
+    setFilters(prev => ({ ...prev, [filterKey]: value }))
+  }
+
+  // Get active filters for API call
+  const getActiveFilters = () => {
+    const activeFilters: StrategyFilters = {
+      minChange: enabledFilters.minChange ? filters.minChange : 0,
+      maxChange: enabledFilters.maxChange ? filters.maxChange : 0,
+      minVolume: enabledFilters.minVolume ? filters.minVolume : 0,
+      maxPrice: enabledFilters.maxPrice ? filters.maxPrice : 0,
+      minRelativeVolume: enabledFilters.minRelativeVolume ? filters.minRelativeVolume : 0,
+      minScore: enabledFilters.minScore ? filters.minScore : 0,
+      minMarketCap: enabledFilters.minMarketCap ? filters.minMarketCap : 0,
+      maxMarketCap: enabledFilters.maxMarketCap ? filters.maxMarketCap : 0,
+      minPrice: enabledFilters.minPrice ? filters.minPrice : 0,
+      maxFloat: enabledFilters.maxFloat ? filters.maxFloat : 0
+    }
+    return activeFilters
+  }
+
+  // Filter stocks based on risk assessment
+  const getFilteredStocks = () => {
+    let filteredStocks = stocks
+    
+    // Filter declining stocks if option is disabled
+    if (!showDecliningStocks) {
+      filteredStocks = filteredStocks.filter(stock => stock.changePercent >= 0)
+    }
+    
+    // Filter high-risk stocks (declining >5% with high scores)
+    if (hideHighRiskStocks) {
+      filteredStocks = filteredStocks.filter(stock => {
+        // Hide stocks that are down >5% despite having good scores (potential false signals)
+        if (stock.changePercent < -5 && stock.score > 60) {
+          return false
+        }
+        return true
+      })
+    }
+    
+    return filteredStocks
+  }
+
+  // Get risk warning for a stock
+  const getRiskWarning = (stock: PremarketStock) => {
+    if (stock.changePercent < -5 && stock.score > 60) {
+      return {
+        level: 'high',
+        message: 'High Risk: Stock declining >5% despite good score - potential false signal'
+      }
+    }
+    if (stock.changePercent < -3 && stock.score > 70) {
+      return {
+        level: 'medium', 
+        message: 'Caution: Stock declining despite strong score - verify momentum'
+      }
+    }
+    if (stock.changePercent < 0 && stock.volumeSpike && stock.relativeVolume > 3) {
+      return {
+        level: 'medium',
+        message: 'Selling Pressure: High volume on declining stock - possible distribution'
+      }
+    }
+    return null
   }
 
   useEffect(() => {
@@ -144,10 +331,22 @@ export default function PremarketScanner() {
 
   const isPremarketHours = () => {
     const now = new Date()
-    const utc = now.getTime() + (now.getTimezoneOffset() * 60000)
-    const est = new Date(utc + (-5 * 3600000)) // EST timezone
-    const hour = est.getHours()
-    return hour >= 4 && hour < 9.5 // 4:00 AM - 9:30 AM EST
+    const nyTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}))
+    const hour = nyTime.getHours()
+    const minute = nyTime.getMinutes()
+    
+    // Market is open Monday-Friday
+    const day = nyTime.getDay()
+    if (day === 0 || day === 6) return false // Weekend
+    
+    // Combined trading hours: 4:00 AM - 8:00 PM ET
+    // Premarket: 4:00 AM - 9:30 AM ET
+    // Regular market: 9:30 AM - 4:00 PM ET  
+    // Extended hours: 4:00 PM - 8:00 PM ET
+    if (hour >= 4 && hour < 20) return true
+    if (hour === 20 && minute === 0) return true // Include exactly 8:00 PM
+    
+    return false
   }
 
   return (
@@ -176,7 +375,7 @@ export default function PremarketScanner() {
                 }`}></div>
                 <div>
                   <div className="font-bold text-lg">
-                    {isPremarketHours() ? 'PREMARKET LIVE' : 'MARKET CLOSED'}
+                    {isPremarketHours() ? 'MARKET OPEN' : 'MARKET CLOSED'}
                   </div>
                   <div className="text-sm opacity-90">
                     {new Date().toLocaleTimeString('en-US', { 
@@ -186,6 +385,11 @@ export default function PremarketScanner() {
                       timeZoneName: 'short'
                     })}
                   </div>
+                  {stocks.length > 0 && lastScan && (
+                    <div className="text-xs opacity-75 mt-1">
+                      📊 {stocks.length} stocks cached from {lastScan}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -200,8 +404,8 @@ export default function PremarketScanner() {
               <div className="flex items-center gap-2">
                 <span className="text-xl">⏰</span>
                 <div>
-                  <p className="font-medium">Premarket Hours: 4:00 AM - 9:30 AM EST</p>
-                  <p className="text-sm opacity-90">Best momentum opportunities occur during active premarket trading</p>
+                  <p className="font-medium">Market Hours: 4:00 AM - 8:00 PM ET (Premarket, Regular & Extended)</p>
+                  <p className="text-sm opacity-90">Best momentum opportunities occur during active trading hours</p>
                 </div>
               </div>
             </div>
@@ -230,7 +434,7 @@ export default function PremarketScanner() {
                   <span className="text-lg font-bold">Momentum Strategy</span>
                 </div>
                 <div className="text-sm opacity-90 text-left">
-                  High % moves • &lt;$10 price • &gt;1M volume • Quick profits
+                  New highs • Above SMAs • &lt;$10 price • &gt;1M volume
                 </div>
               </button>
               <button
@@ -248,9 +452,348 @@ export default function PremarketScanner() {
                   <span className="text-lg font-bold">Breakout Strategy</span>
                 </div>
                 <div className="text-sm opacity-90 text-left">
-                  News catalyst • Low float • $2-$20 range • Big moves
+                  Gap up &gt;10% • Float &lt;10M • Price &lt;$20 • Rel vol &gt;5x
                 </div>
               </button>
+            </div>
+          </div>
+
+          {/* Dynamic Filters */}
+          <div className="mb-6">
+            <h4 className="text-md font-semibold mb-4">
+              Refinement Filters 
+              <span className="text-sm font-normal text-gray-500 ml-2">
+                (Quality stocks shown by default - check to refine further)
+              </span>
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Min Change Filter */}
+              <div className={`p-4 rounded-lg border ${
+                enabledFilters.minChange 
+                  ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                  : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enabledFilters.minChange}
+                      onChange={() => handleFilterToggle('minChange')}
+                      className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                    />
+                    <span className="font-medium">Min Change %</span>
+                  </label>
+                </div>
+                {enabledFilters.minChange && (
+                  <input
+                    type="number"
+                    value={filters.minChange}
+                    onChange={(e) => handleFilterChange('minChange', parseFloat(e.target.value) || 0)}
+                    className={`w-full px-3 py-2 rounded border ${
+                      isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                    }`}
+                    step="0.1"
+                    min="-100"
+                    max="100"
+                  />
+                )}
+              </div>
+
+              {/* Min Volume Filter */}
+              <div className={`p-4 rounded-lg border ${
+                enabledFilters.minVolume 
+                  ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                  : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enabledFilters.minVolume}
+                      onChange={() => handleFilterToggle('minVolume')}
+                      className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                    />
+                    <span className="font-medium">Min Volume</span>
+                  </label>
+                </div>
+                {enabledFilters.minVolume && (
+                  <input
+                    type="number"
+                    value={filters.minVolume}
+                    onChange={(e) => handleFilterChange('minVolume', parseInt(e.target.value) || 0)}
+                    className={`w-full px-3 py-2 rounded border ${
+                      isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                    }`}
+                    step="100000"
+                    min="0"
+                  />
+                )}
+              </div>
+
+              {/* Max Price Filter */}
+              <div className={`p-4 rounded-lg border ${
+                enabledFilters.maxPrice 
+                  ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                  : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enabledFilters.maxPrice}
+                      onChange={() => handleFilterToggle('maxPrice')}
+                      className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                    />
+                    <span className="font-medium">Max Price</span>
+                  </label>
+                </div>
+                {enabledFilters.maxPrice && (
+                  <input
+                    type="number"
+                    value={filters.maxPrice}
+                    onChange={(e) => handleFilterChange('maxPrice', parseFloat(e.target.value) || 0)}
+                    className={`w-full px-3 py-2 rounded border ${
+                      isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                    }`}
+                    step="1"
+                    min="0"
+                  />
+                )}
+              </div>
+
+              {/* Min Price Filter (Breakout only) */}
+              {selectedStrategy === 'breakout' && (
+                <div className={`p-4 rounded-lg border ${
+                  enabledFilters.minPrice 
+                    ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                    : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={enabledFilters.minPrice}
+                        onChange={() => handleFilterToggle('minPrice')}
+                        className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                      />
+                      <span className="font-medium">Min Price</span>
+                    </label>
+                  </div>
+                  {enabledFilters.minPrice && (
+                    <input
+                      type="number"
+                      value={filters.minPrice || 0}
+                      onChange={(e) => handleFilterChange('minPrice', parseFloat(e.target.value) || 0)}
+                      className={`w-full px-3 py-2 rounded border ${
+                        isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                      }`}
+                      step="0.1"
+                      min="0"
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Min Relative Volume Filter */}
+              <div className={`p-4 rounded-lg border ${
+                enabledFilters.minRelativeVolume 
+                  ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                  : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enabledFilters.minRelativeVolume}
+                      onChange={() => handleFilterToggle('minRelativeVolume')}
+                      className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                    />
+                    <span className="font-medium">Min Rel. Volume</span>
+                  </label>
+                </div>
+                {enabledFilters.minRelativeVolume && (
+                  <input
+                    type="number"
+                    value={filters.minRelativeVolume}
+                    onChange={(e) => handleFilterChange('minRelativeVolume', parseFloat(e.target.value) || 0)}
+                    className={`w-full px-3 py-2 rounded border ${
+                      isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                    }`}
+                    step="0.1"
+                    min="0"
+                  />
+                )}
+              </div>
+
+              {/* Min Score Filter */}
+              <div className={`p-4 rounded-lg border ${
+                enabledFilters.minScore 
+                  ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                  : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enabledFilters.minScore}
+                      onChange={() => handleFilterToggle('minScore')}
+                      className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                    />
+                    <span className="font-medium">Min Score</span>
+                  </label>
+                </div>
+                {enabledFilters.minScore && (
+                  <input
+                    type="number"
+                    value={filters.minScore}
+                    onChange={(e) => handleFilterChange('minScore', parseInt(e.target.value) || 0)}
+                    className={`w-full px-3 py-2 rounded border ${
+                      isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                    }`}
+                    step="5"
+                    min="0"
+                    max="100"
+                  />
+                )}
+              </div>
+
+              {/* Min Market Cap Filter */}
+              <div className={`p-4 rounded-lg border ${
+                enabledFilters.minMarketCap 
+                  ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                  : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enabledFilters.minMarketCap}
+                      onChange={() => handleFilterToggle('minMarketCap')}
+                      className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                    />
+                    <span className="font-medium">Min Market Cap</span>
+                  </label>
+                </div>
+                {enabledFilters.minMarketCap && (
+                  <div className="space-y-2">
+                    <input
+                      type="number"
+                      value={filters.minMarketCap ? filters.minMarketCap / 1000000 : 0}
+                      onChange={(e) => handleFilterChange('minMarketCap', (parseFloat(e.target.value) || 0) * 1000000)}
+                      className={`w-full px-3 py-2 rounded border ${
+                        isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                      }`}
+                      step="50"
+                      min="0"
+                      placeholder="Million $"
+                    />
+                    <div className="text-xs text-gray-500">Value in millions (e.g., 300 = $300M)</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Max Market Cap Filter */}
+              <div className={`p-4 rounded-lg border ${
+                enabledFilters.maxMarketCap 
+                  ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                  : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enabledFilters.maxMarketCap}
+                      onChange={() => handleFilterToggle('maxMarketCap')}
+                      className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                    />
+                    <span className="font-medium">Max Market Cap</span>
+                  </label>
+                </div>
+                {enabledFilters.maxMarketCap && (
+                  <div className="space-y-2">
+                    <input
+                      type="number"
+                      value={filters.maxMarketCap ? filters.maxMarketCap / 1000000 : 0}
+                      onChange={(e) => handleFilterChange('maxMarketCap', (parseFloat(e.target.value) || 0) * 1000000)}
+                      className={`w-full px-3 py-2 rounded border ${
+                        isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                      }`}
+                      step="1000"
+                      min="0"
+                      placeholder="Million $"
+                    />
+                    <div className="text-xs text-gray-500">Value in millions (e.g., 10000 = $10B)</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Max Float Filter (Breakout only) */}
+              {selectedStrategy === 'breakout' && (
+                <div className={`p-4 rounded-lg border ${
+                  enabledFilters.maxFloat 
+                    ? isDarkMode ? 'bg-green-900/20 border-green-600' : 'bg-green-50 border-green-300'
+                    : isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={enabledFilters.maxFloat}
+                        onChange={() => handleFilterToggle('maxFloat')}
+                        className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                      />
+                      <span className="font-medium">Max Float</span>
+                    </label>
+                  </div>
+                  {enabledFilters.maxFloat && (
+                    <div className="space-y-2">
+                      <input
+                        type="number"
+                        value={filters.maxFloat ? filters.maxFloat / 1000000 : 0}
+                        onChange={(e) => handleFilterChange('maxFloat', (parseFloat(e.target.value) || 0) * 1000000)}
+                        className={`w-full px-3 py-2 rounded border ${
+                          isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300'
+                        }`}
+                        step="1"
+                        min="0"
+                        placeholder="Million shares"
+                      />
+                      <div className="text-xs text-gray-500">Value in millions (e.g., 10 = 10M shares)</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Risk Management Controls */}
+          <div className={`p-4 rounded-xl mb-6 border ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+            <h4 className="text-md font-semibold mb-3 flex items-center gap-2">
+              <span>⚠️</span>
+              Risk Management Filters
+            </h4>
+            <div className="flex flex-wrap gap-4">
+              <label className={`flex items-center gap-2 cursor-pointer ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                <input
+                  type="checkbox"
+                  checked={showDecliningStocks}
+                  onChange={(e) => setShowDecliningStocks(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <span>Show declining stocks</span>
+              </label>
+              <label className={`flex items-center gap-2 cursor-pointer ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                <input
+                  type="checkbox"
+                  checked={hideHighRiskStocks}
+                  onChange={(e) => setHideHighRiskStocks(e.target.checked)}
+                  className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                />
+                <span>Hide high-risk false signals</span>
+              </label>
+            </div>
+            <div className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              High-risk: Stocks declining &gt;5% despite good scores (potential false signals)
             </div>
           </div>
 
@@ -297,25 +840,44 @@ export default function PremarketScanner() {
                 onClick={() => scanPremarket()}
                 disabled={isLoading}
                 className={`px-8 py-4 font-bold rounded-xl transition-all duration-300 transform hover:scale-105 ${
-                  isLoading 
-                    ? 'bg-gray-400 cursor-not-allowed' 
+                  isLoading
+                    ? 'bg-gray-400 cursor-not-allowed'
                     : selectedStrategy === 'momentum'
-                      ? 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-xl hover:shadow-2xl'
-                      : 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-xl hover:shadow-2xl'
-                } text-white`}
+                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl'
+                    : 'bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white shadow-lg hover:shadow-xl'
+                }`}
               >
                 {isLoading ? (
                   <div className="flex items-center gap-3">
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
                     <span className="text-lg">Scanning...</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-3">
-                    <span className="text-xl">🔍</span>
+                    <span className="text-2xl">{selectedStrategy === 'momentum' ? '🚀' : '💥'}</span>
                     <span className="text-lg">Scan {selectedStrategy === 'momentum' ? 'Momentum' : 'Breakout'} Stocks</span>
                   </div>
                 )}
               </button>
+              
+              {stocks.length > 0 && (
+                <button
+                  onClick={clearResults}
+                  disabled={isLoading}
+                  className={`px-6 py-4 font-medium rounded-xl transition-all duration-300 transform hover:scale-105 ${
+                    isLoading
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : isDarkMode
+                      ? 'bg-gray-700 hover:bg-gray-600 text-gray-300 border border-gray-600'
+                      : 'bg-gray-200 hover:bg-gray-300 text-gray-700 border border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span>🗑️</span>
+                    <span>Clear Results</span>
+                  </div>
+                </button>
+              )}
               
               <label className={`flex items-center gap-2 cursor-pointer ${
                 isDarkMode ? 'text-gray-300' : 'text-gray-700'
@@ -376,9 +938,25 @@ export default function PremarketScanner() {
         </div>
 
         {/* Results */}
-        <div className={`rounded-xl shadow-xl ${
+        <div className={`rounded-xl shadow-lg overflow-hidden ${
           isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-        } border overflow-hidden`}>
+        } border`}>
+          {/* Persistence indicator */}
+          <div className={`px-6 py-3 border-b ${
+            isDarkMode ? 'bg-gray-750 border-gray-700 text-gray-300' : 'bg-gray-50 border-gray-200 text-gray-600'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">💾</span>
+                <span className="text-sm font-medium">
+                  Results cached - will persist until next scan or manual clear
+                </span>
+              </div>
+              <div className="text-xs opacity-75">
+                Last updated: {lastScan}
+              </div>
+            </div>
+          </div>
           <div className={`p-6 border-b ${
             isDarkMode ? 'border-gray-700 bg-gray-750' : 'border-gray-200 bg-gray-50'
           }`}>
@@ -387,12 +965,21 @@ export default function PremarketScanner() {
                 <span className="text-3xl">📊</span>
                 Top {selectedStrategy === 'momentum' ? 'Momentum' : 'Breakout'} Candidates
               </h2>
-              <div className={`px-4 py-2 rounded-full text-sm font-bold ${
-                stocks.length > 0 
-                  ? 'bg-green-100 text-green-800 border border-green-200'
-                  : 'bg-gray-100 text-gray-600 border border-gray-200'
-              }`}>
-                {stocks.length} found
+              <div className="flex items-center gap-3">
+                <div className={`px-4 py-2 rounded-full text-sm font-bold ${
+                  getFilteredStocks().length > 0 
+                    ? 'bg-green-100 text-green-800 border border-green-200'
+                    : 'bg-gray-100 text-gray-600 border border-gray-200'
+                }`}>
+                  {getFilteredStocks().length} shown
+                </div>
+                {stocks.length !== getFilteredStocks().length && (
+                  <div className={`px-3 py-1 rounded-full text-xs font-medium ${
+                    isDarkMode ? 'bg-yellow-900/30 text-yellow-300' : 'bg-yellow-100 text-yellow-700'
+                  }`}>
+                    {stocks.length - getFilteredStocks().length} filtered
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -438,7 +1025,7 @@ export default function PremarketScanner() {
             </div>
           )}
           
-          {stocks.length === 0 && !error ? (
+          {getFilteredStocks().length === 0 && !error ? (
             <div className="p-8 text-center">
               {isLoading ? (
                 <div className="flex flex-col items-center gap-4">
@@ -457,10 +1044,10 @@ export default function PremarketScanner() {
                   <span className="text-6xl opacity-50">📊</span>
                   <div>
                     <p className={`text-lg ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      No {selectedStrategy} candidates found
+                      {stocks.length === 0 ? `No ${selectedStrategy} candidates found` : 'All stocks filtered out'}
                     </p>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                      Try adjusting filters or scan again for fresh data
+                      {stocks.length === 0 ? 'Try adjusting filters or scan again for fresh data' : 'Try enabling declining stocks or adjusting risk filters'}
                     </p>
                   </div>
                 </div>
@@ -468,7 +1055,7 @@ export default function PremarketScanner() {
             </div>
           ) : null}
           
-          {stocks.length > 0 && (
+          {getFilteredStocks().length > 0 && (
             <>
               {/* Desktop Table View */}
               <div className="hidden lg:block overflow-x-auto">
@@ -487,13 +1074,36 @@ export default function PremarketScanner() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stocks.map((stock, index) => (
+                  {getFilteredStocks().map((stock, index) => {
+                    const riskWarning = getRiskWarning(stock)
+                    return (
                     <tr key={stock.symbol} className={`border-t transition-all duration-200 ${
+                      riskWarning?.level === 'high' ? 
+                        (isDarkMode ? 'border-red-700 bg-red-900/10 hover:bg-red-900/20' : 'border-red-300 bg-red-50 hover:bg-red-100') :
+                      riskWarning?.level === 'medium' ?
+                        (isDarkMode ? 'border-yellow-700 bg-yellow-900/10 hover:bg-yellow-900/20' : 'border-yellow-300 bg-yellow-50 hover:bg-yellow-100') :
                       isDarkMode ? 'border-gray-700 hover:bg-gray-750' : 'border-gray-200 hover:bg-gray-50'
                     }`}>
                       <td className="px-6 py-5">
                         <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-                          <span className="font-bold text-xl text-blue-600">{stock.symbol}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xl text-blue-600">{stock.symbol}</span>
+                            {stock.priceAction === 'bearish' && (
+                              <span className="text-red-500 text-lg" title="Bearish price action">📉</span>
+                            )}
+                            {stock.volumeSpike && (
+                              <span className="text-orange-500 text-sm" title="Volume spike detected">🔥</span>
+                            )}
+                          </div>
+                          {riskWarning && (
+                            <div className={`px-2 py-1 rounded text-xs font-medium ${
+                              riskWarning.level === 'high' ? 
+                                (isDarkMode ? 'bg-red-900/30 text-red-300' : 'bg-red-100 text-red-700') :
+                                (isDarkMode ? 'bg-yellow-900/30 text-yellow-300' : 'bg-yellow-100 text-yellow-700')
+                            }`} title={riskWarning.message}>
+                              {riskWarning.level === 'high' ? '⚠️ HIGH RISK' : '⚠️ CAUTION'}
+                            </div>
+                          )}
                           <button
                             onClick={() => window.open(`/trade-analyzer?symbol=${stock.symbol}`, '_blank')}
                             className="px-4 py-2 text-sm bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg flex items-center gap-2 w-fit"
@@ -511,9 +1121,14 @@ export default function PremarketScanner() {
                         <div className={`inline-flex items-center px-3 py-2 rounded-lg font-bold text-lg ${
                           stock.changePercent >= 0 
                             ? 'bg-green-100 text-green-700 border border-green-200' 
-                            : 'bg-red-100 text-red-700 border border-red-200'
+                            : stock.changePercent < -5 
+                              ? 'bg-red-200 text-red-800 border-2 border-red-400'
+                              : 'bg-red-100 text-red-700 border border-red-200'
                         }`}>
                           {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                          {stock.changePercent < -5 && (
+                            <span className="ml-1 text-xs">⚠️</span>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-5">
@@ -601,20 +1216,44 @@ export default function PremarketScanner() {
                         <div className="text-base font-bold">{stock.marketCap || 'Unknown'}</div>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
             
             {/* Mobile Card View */}
             <div className="lg:hidden space-y-4 p-4">
-              {stocks.map((stock, index) => (
+              {getFilteredStocks().map((stock, index) => {
+                const riskWarning = getRiskWarning(stock)
+                return (
                 <div key={stock.symbol} className={`p-4 rounded-xl border shadow-lg ${
+                  riskWarning?.level === 'high' ? 
+                    (isDarkMode ? 'bg-red-900/10 border-red-700' : 'bg-red-50 border-red-300') :
+                  riskWarning?.level === 'medium' ?
+                    (isDarkMode ? 'bg-yellow-900/10 border-yellow-700' : 'bg-yellow-50 border-yellow-300') :
                   isDarkMode ? 'bg-gray-750 border-gray-600' : 'bg-white border-gray-200'
                 }`}>
+                  {riskWarning && (
+                    <div className={`mb-3 p-2 rounded-lg text-xs font-medium ${
+                      riskWarning.level === 'high' ? 
+                        (isDarkMode ? 'bg-red-900/30 text-red-300' : 'bg-red-100 text-red-700') :
+                        (isDarkMode ? 'bg-yellow-900/30 text-yellow-300' : 'bg-yellow-100 text-yellow-700')
+                    }`}>
+                      {riskWarning.message}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <span className="font-bold text-2xl text-blue-600">{stock.symbol}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-2xl text-blue-600">{stock.symbol}</span>
+                        {stock.priceAction === 'bearish' && (
+                          <span className="text-red-500 text-lg" title="Bearish price action">📉</span>
+                        )}
+                        {stock.volumeSpike && (
+                          <span className="text-orange-500 text-sm" title="Volume spike detected">🔥</span>
+                        )}
+                      </div>
                       <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${
                         stock.score >= 80 ? 'bg-green-100 text-green-700' :
                         stock.score >= 60 ? 'bg-blue-100 text-blue-700' : 
@@ -645,10 +1284,14 @@ export default function PremarketScanner() {
                     </div>
                     <div className="text-center">
                       <div className="text-xs font-medium text-gray-500 mb-1">Change</div>
-                      <div className={`text-xl font-bold ${
-                        stock.changePercent >= 0 ? 'text-green-600' : 'text-red-600'
+                      <div className={`text-xl font-bold flex items-center justify-center gap-1 ${
+                        stock.changePercent >= 0 ? 'text-green-600' : 
+                        stock.changePercent < -5 ? 'text-red-700' : 'text-red-600'
                       }`}>
                         {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                        {stock.changePercent < -5 && (
+                          <span className="text-xs">⚠️</span>
+                        )}
                       </div>
                     </div>
                     <div className="text-center">
@@ -713,16 +1356,13 @@ export default function PremarketScanner() {
                     </button>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
             </>
           )}
         </div>
 
-        {/* API Usage Dashboard */}
-        <div className="mb-8">
-          <ApiUsageDashboard />
-        </div>
 
         {/* Enhanced Trading Insights */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">

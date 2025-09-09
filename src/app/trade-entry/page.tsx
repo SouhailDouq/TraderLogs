@@ -180,45 +180,72 @@ export default function TradeEntryPage() {
       isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
     }`}>
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        <div className="mb-6 sm:mb-8">
-          <h1 className={`text-2xl sm:text-3xl font-bold transition-colors ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>
-            ⚡ Trade Entry
-          </h1>
-          <p className={`mt-2 text-sm sm:text-base transition-colors ${
-            isDarkMode ? 'text-gray-300' : 'text-gray-600'
-          }`}>
-            Enter your trade details and manage your position
-          </p>
+        <div className="mb-8">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center shadow-lg">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className={`text-3xl font-bold transition-colors ${
+                isDarkMode ? 'text-slate-100' : 'text-slate-900'
+              }`}>
+                Trade Entry
+              </h1>
+              <p className={`text-base transition-colors ${
+                isDarkMode ? 'text-slate-300' : 'text-slate-600'
+              }`}>
+                Execute your momentum trading strategy
+              </p>
+            </div>
+          </div>
         </div>
 
         {submitMessage && (
-          <div className={`mb-6 p-4 rounded-lg ${
+          <div className={`mb-6 p-4 rounded-2xl border transition-all duration-300 ${
             submitMessage.includes('Error') 
-              ? 'bg-red-100 text-red-700 border border-red-200' 
-              : 'bg-green-100 text-green-700 border border-green-200'
+              ? 'bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-500/10 dark:to-red-600/5 text-red-700 dark:text-red-400 border-red-200 dark:border-red-500/30' 
+              : 'bg-gradient-to-br from-green-50 to-green-100/50 dark:from-green-500/10 dark:to-green-600/5 text-green-700 dark:text-green-400 border-green-200 dark:border-green-500/30'
           }`}>
-            {submitMessage}
+            <div className="flex items-center gap-2">
+              {submitMessage.includes('Error') ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              )}
+              <span className="font-medium">{submitMessage}</span>
+            </div>
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
           {/* Trade Entry Form */}
           <div className="lg:col-span-2">
-            <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-              isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+            <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+              isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
             }`}>
-              <div className="flex justify-between items-center mb-4 sm:mb-6">
-                <h2 className={`text-lg sm:text-xl font-semibold transition-colors ${
-                  isDarkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  🚀 Trade Entry
-                </h2>
-                <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  marketStatus === 'premarket' ? 'bg-orange-100 text-orange-800' :
-                  marketStatus === 'open' ? 'bg-green-100 text-green-800' :
-                  'bg-gray-100 text-gray-800'
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <h2 className={`text-xl font-bold transition-colors ${
+            isDarkMode ? 'text-slate-100' : 'text-slate-900'
+          }`}>
+                    Enter Trade
+                  </h2>
+                </div>
+                <div className={`px-4 py-2 rounded-2xl text-sm font-semibold shadow-lg transition-all duration-300 ${
+                  marketStatus === 'premarket' ? 'bg-gradient-to-br from-orange-500 to-orange-600 text-white' :
+                  marketStatus === 'open' ? 'bg-gradient-to-br from-green-500 to-green-600 text-white' :
+                  'bg-gradient-to-br from-gray-500 to-gray-600 text-white'
                 }`}>
                   {marketStatus === 'premarket' ? '🌅 Premarket' :
                    marketStatus === 'open' ? '🔔 Market Open' : '🌙 Market Closed'}
@@ -227,14 +254,21 @@ export default function TradeEntryPage() {
 
               {/* Quick Fill from Scanner */}
               {marketStatus === 'premarket' && (
-                <div className={`mb-6 p-4 rounded-lg border-2 border-dashed ${
-                  isDarkMode ? 'border-gray-600 bg-gray-700' : 'border-gray-300 bg-gray-50'
+                <div className={`mb-6 p-4 rounded-2xl border-2 border-dashed transition-all duration-300 ${
+                  isDarkMode ? 'border-gray-600/50 bg-gradient-to-br from-gray-700/50 to-gray-800/30' : 'border-gray-300/50 bg-gradient-to-br from-gray-50/50 to-gray-100/30'
                 }`}>
-                  <h4 className={`text-sm font-medium mb-2 ${
-                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                  }`}>
-                    💡 Quick Fill from Scanner
-                  </h4>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center">
+                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    </div>
+                    <h4 className={`text-sm font-semibold ${
+                      isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                    }`}>
+                      Quick Fill from Scanner
+                    </h4>
+                  </div>
                   <p className={`text-xs mb-3 ${
                     isDarkMode ? 'text-gray-400' : 'text-gray-600'
                   }`}>
@@ -262,7 +296,7 @@ export default function TradeEntryPage() {
                       type="button"
                       onClick={quickFillMomentumData}
                       disabled={!quickFillData?.symbol || !quickFillData?.price}
-                      className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                      className="px-4 py-2 text-xs font-semibold bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl hover:scale-105 transition-all duration-200 disabled:from-gray-400 disabled:to-gray-500 disabled:scale-100 shadow-lg"
                     >
                       Fill
                     </button>
@@ -637,14 +671,21 @@ export default function TradeEntryPage() {
           {/* Position Summary & Momentum Analysis */}
           <div className="lg:col-span-1 space-y-6">
             {/* Position Summary */}
-            <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-              isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+            <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+              isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
             }`}>
-              <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                isDarkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                💰 Position Summary
-              </h3>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-700 flex items-center justify-center">
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h3 className={`text-lg font-bold transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Position Summary
+                </h3>
+              </div>
 
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
@@ -708,14 +749,21 @@ export default function TradeEntryPage() {
 
             {/* Momentum Analysis */}
             {formData.entryPrice && (
-              <div className={`rounded-lg shadow-sm border p-4 sm:p-6 transition-colors ${
-                isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+              <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
+                isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
               }`}>
-                <h3 className={`text-lg font-semibold mb-4 transition-colors ${
-                  isDarkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  📈 Price Targets
-                </h3>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                  </div>
+                  <h3 className={`text-lg font-bold transition-colors ${
+                    isDarkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    Price Targets
+                  </h3>
+                </div>
                 
                 <div className="space-y-3">
                   {[
@@ -725,27 +773,28 @@ export default function TradeEntryPage() {
                   ].map((target) => {
                     const targetPrice = parseFloat(formData.entryPrice) * (1 + target.percent / 100);
                     return (
-                      <div key={target.percent} className={`flex justify-between items-center p-2 rounded ${
-                        target.color === 'green' ? 'bg-green-50' :
-                        target.color === 'blue' ? 'bg-blue-50' : 'bg-purple-50'
+                      <div key={target.percent} className={`flex justify-between items-center p-3 rounded-2xl transition-all duration-300 hover:scale-[1.02] ${
+                        target.color === 'green' ? 'bg-gradient-to-br from-green-50 to-green-100/50 dark:from-green-500/10 dark:to-green-600/5 border border-green-200 dark:border-green-500/30' :
+                        target.color === 'blue' ? 'bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-500/10 dark:to-blue-600/5 border border-blue-200 dark:border-blue-500/30' : 
+                        'bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-500/10 dark:to-purple-600/5 border border-purple-200 dark:border-purple-500/30'
                       }`}>
                         <div>
-                          <span className={`text-sm font-medium ${
-                            target.color === 'green' ? 'text-green-700' :
-                            target.color === 'blue' ? 'text-blue-700' : 'text-purple-700'
+                          <span className={`text-sm font-semibold ${
+                            target.color === 'green' ? 'text-green-700 dark:text-green-400' :
+                            target.color === 'blue' ? 'text-blue-700 dark:text-blue-400' : 'text-purple-700 dark:text-purple-400'
                           }`}>
                             {target.label} ({target.percent}%)
                           </span>
-                          <div className={`text-xs ${
-                            target.color === 'green' ? 'text-green-600' :
+                          <div className={`text-xs font-medium ${
+                            target.color === 'green' ? 'text-green-600 dark:text-green-500' :
                             target.color === 'blue' ? 'text-blue-600' : 'text-purple-600'
                           }`}>
                             ${targetPrice.toFixed(2)}
                           </div>
                         </div>
-                        <div className={`text-sm font-medium ${
-                          target.color === 'green' ? 'text-green-700' :
-                          target.color === 'blue' ? 'text-blue-700' : 'text-purple-700'
+                        <div className={`text-sm font-bold ${
+                          target.color === 'green' ? 'text-green-700 dark:text-green-400' :
+                          target.color === 'blue' ? 'text-blue-700 dark:text-blue-400' : 'text-purple-700 dark:text-purple-400'
                         }`}>
                           +{formatCurrency(target.profit)}
                         </div>
@@ -769,14 +818,21 @@ export default function TradeEntryPage() {
             )}
 
             {/* Trading 212 Reminder */}
-            <div className={`rounded-lg shadow-sm border p-4 transition-colors ${
-              isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+            <div className={`rounded-2xl shadow-lg border p-4 transition-all duration-300 backdrop-blur-sm ${
+              isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
             }`}>
-              <h4 className={`text-sm font-semibold mb-2 transition-colors ${
-                isDarkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                🏦 Trading 212 Workflow
-              </h4>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                </div>
+                <h4 className={`text-sm font-bold transition-colors ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  Trading 212 Workflow
+                </h4>
+              </div>
               <div className="space-y-2 text-xs">
                 <div className={`flex items-center gap-2 ${
                   isDarkMode ? 'text-gray-300' : 'text-gray-600'

@@ -1,6 +1,19 @@
 // EODHD API utilities for real-time and historical stock data
 // Documentation: https://eodhd.com/financial-apis/
 
+import { getWebSocketManager, type WebSocketMessage } from './websocket';
+
+// Helper function to safely convert API values to numbers
+function toNumber(value: string | number | null | undefined): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    if (value === 'NA' || value === 'N/A' || value === '') return 0;
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
 export interface EODHDQuote {
   code: string;
   timestamp: number;
@@ -30,6 +43,7 @@ export interface EODHDRealTimeData {
 }
 
 export interface EODHDTechnicals {
+  SMA_20?: number;
   SMA_50?: number;
   SMA_200?: number;
   EMA_20?: number;
@@ -39,6 +53,7 @@ export interface EODHDTechnicals {
   MACD_Histogram?: number;
   '52WeekHigh'?: number;
   '52WeekLow'?: number;
+  high_52weeks?: number;
 }
 
 export interface EODHDFundamentals {
@@ -113,6 +128,9 @@ class EODHDClient {
       }
     });
 
+    // Add small delay between requests
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     // Only log URLs for debugging when needed
     // console.log('EODHD API Request URL:', url.toString());
     const response = await fetch(url.toString());
@@ -125,15 +143,101 @@ class EODHDClient {
     return response.json();
   }
 
-  // Get real-time quote for a single symbol
+  // Get live (delayed) quote for a single symbol - includes premarket/extended hours
   async getRealTimeQuote(symbol: string): Promise<EODHDRealTimeData> {
-    return this.makeRequest(`/real-time/${symbol}.US`);
+    // Use WebSocket for truly live data during market hours
+    if (this.isLiveDataFresh()) {
+      try {
+        const wsManager = getWebSocketManager();
+        await wsManager.connect();
+        
+        const wsData = await wsManager.getLiveQuote(symbol, 5000);
+        const convertedData = this.convertWebSocketToRealTimeData(wsData);
+        
+        console.log(`WebSocket live data for ${symbol}: ${new Date().toISOString()} (real-time)`);
+        return convertedData;
+      } catch (error) {
+        console.log(`WebSocket failed for ${symbol}, falling back to REST API:`, error);
+      }
+    }
+    
+    // Fallback to REST API
+    const data = await this.makeRequest(`/real-time/${symbol}.US`);
+    
+    // Log timestamp for debugging data freshness
+    if (data?.timestamp) {
+      const dataTime = new Date(data.timestamp * 1000);
+      const now = new Date();
+      const ageMinutes = Math.round((now.getTime() - dataTime.getTime()) / (1000 * 60));
+      console.log(`REST API data for ${symbol}: ${dataTime.toISOString()} (${ageMinutes} min old)`);
+    }
+    
+    return data;
   }
 
-  // Get real-time quotes for multiple symbols
+  // Get live (delayed) quotes for multiple symbols - includes premarket/extended hours
   async getRealTimeQuotes(symbols: string[]): Promise<EODHDRealTimeData[]> {
-    const symbolsParam = symbols.map(s => `${s}.US`).join(',');
-    return this.makeRequest('/real-time-bulk', { symbols: symbolsParam });
+    if (symbols.length === 0) return [];
+    
+    // Use REST API exclusively (WebSocket has too many API limits)
+    
+    // Use REST API for reliable data
+    // For EODHD real-time API, we need to use the correct format:
+    // /real-time/SYMBOL.US?s=OTHER1.US,OTHER2.US for multiple symbols
+    // Remove any existing .US suffix to avoid double suffixes
+    const cleanSymbols = symbols.map(s => s.replace('.US', ''));
+    const firstSymbol = `${cleanSymbols[0]}.US`;
+    const additionalSymbols = cleanSymbols.slice(1).map(s => `${s}.US`).join(',');
+    
+    const params: any = {};
+    if (additionalSymbols) {
+      params.s = additionalSymbols;
+    }
+    
+    const result = await this.makeRequest(`/real-time/${firstSymbol}`, params);
+    
+    // Handle both single object and array responses
+    let dataArray: EODHDRealTimeData[] = [];
+    if (Array.isArray(result)) {
+      dataArray = result;
+    } else if (result && typeof result === 'object') {
+      dataArray = [result];
+    }
+    
+    // Log successful data retrieval - convert string values to numbers
+    const processedData = dataArray.map(d => ({
+      ...d,
+      open: toNumber(d.open),
+      high: toNumber(d.high),
+      low: toNumber(d.low),
+      close: toNumber(d.close),
+      volume: toNumber(d.volume),
+      previousClose: toNumber(d.previousClose),
+      change: toNumber(d.change),
+      change_p: toNumber(d.change_p)
+    }));
+    
+    const validData = processedData.filter(d => d.close > 0 && !isNaN(d.close));
+    console.log(`📊 Retrieved ${validData.length}/${processedData.length} valid stock quotes from REST API`);
+    
+    return processedData;
+  }
+
+  // Convert WebSocket message to EODHDRealTimeData format
+  private convertWebSocketToRealTimeData(wsData: WebSocketMessage): EODHDRealTimeData {
+    return {
+      code: `${wsData.s}.US`,
+      timestamp: wsData.t / 1000, // Convert milliseconds to seconds
+      gmtoffset: 0,
+      open: toNumber(wsData.p), // WebSocket only provides last price
+      high: toNumber(wsData.p),
+      low: toNumber(wsData.p),
+      close: toNumber(wsData.p),
+      volume: toNumber(wsData.v) || 0,
+      previousClose: toNumber(wsData.p), // Approximation
+      change: 0, // Would need previous close to calculate
+      change_p: 0 // Would need previous close to calculate
+    };
   }
 
   // Get technical indicators
@@ -185,31 +289,75 @@ class EODHDClient {
   // Determine current market hours status
   getMarketHoursStatus(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
     const now = new Date();
-    const easternTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
-    const hour = easternTime.getHours();
-    const minute = easternTime.getMinutes();
-    const day = easternTime.getDay(); // 0 = Sunday, 6 = Saturday
+    // Use Intl.DateTimeFormat for more reliable timezone conversion
+    const etTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
+    const timeInMinutes = etTime.getHours() * 60 + etTime.getMinutes();
     
-    // Weekend
-    if (day === 0 || day === 6) return 'closed';
+    console.log(`Current ET time: ${etTime.toLocaleString()}, minutes: ${timeInMinutes}`);
     
-    const timeInMinutes = hour * 60 + minute;
+    // Skip weekends
+    const dayOfWeek = etTime.getDay(); // 0 = Sunday, 6 = Saturday
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      console.log(`Weekend detected (day ${dayOfWeek}), market closed`);
+      return 'closed';
+    }
     
     // Premarket: 4:00 AM - 9:30 AM ET
-    if (timeInMinutes >= 240 && timeInMinutes < 570) return 'premarket';
+    if (timeInMinutes >= 240 && timeInMinutes < 570) {
+      console.log('Market status: premarket');
+      return 'premarket';
+    }
     
     // Regular hours: 9:30 AM - 4:00 PM ET
-    if (timeInMinutes >= 570 && timeInMinutes < 960) return 'regular';
+    if (timeInMinutes >= 570 && timeInMinutes < 960) {
+      console.log('Market status: regular hours');
+      return 'regular';
+    }
     
     // After hours: 4:00 PM - 8:00 PM ET
-    if (timeInMinutes >= 960 && timeInMinutes < 1200) return 'afterhours';
+    if (timeInMinutes >= 960 && timeInMinutes < 1200) {
+      console.log('Market status: afterhours');
+      return 'afterhours';
+    }
     
     // Closed
+    console.log('Market status: closed');
     return 'closed';
   }
 
-  // Search for stocks by criteria (for premarket scanner)
-  async searchStocks(params: {
+  // Check if live data is expected to be fresh
+  isLiveDataFresh(): boolean {
+    const status = this.getMarketHoursStatus();
+    return ['premarket', 'regular', 'afterhours'].includes(status);
+  }
+
+  // Get next market open time
+  getNextMarketOpen(): Date {
+    const now = new Date();
+    const etTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
+    const nextOpen = new Date(etTime);
+    
+    // If it's weekend, go to Monday
+    const dayOfWeek = etTime.getDay();
+    if (dayOfWeek === 0) { // Sunday
+      nextOpen.setDate(nextOpen.getDate() + 1);
+    } else if (dayOfWeek === 6) { // Saturday
+      nextOpen.setDate(nextOpen.getDate() + 2);
+    } else if (this.getMarketHoursStatus() !== 'closed') {
+      // Market is open, return current time
+      return etTime;
+    } else {
+      // Weekday but after hours, go to next day
+      nextOpen.setDate(nextOpen.getDate() + 1);
+    }
+    
+    // Set to 4:00 AM ET (premarket open)
+    nextOpen.setHours(4, 0, 0, 0);
+    return nextOpen;
+  }
+
+  // Get live premarket movers using fresh market-wide discovery
+  async getPremarketMovers(params: {
     minVolume?: number;
     maxPrice?: number;
     minChange?: number;
@@ -218,60 +366,149 @@ class EODHDClient {
     maxMarketCap?: number;
   } = {}): Promise<EODHDRealTimeData[]> {
     try {
-      // Use correct EODHD screener API format
-      const filters = [
-        ['exchange', '=', 'US'], // Use 'US' instead of individual exchanges
-        ['avgvol_1d', '>', params.minVolume || 1000000],
-        ['adjusted_close', '<', params.maxPrice || 10],
-        ['market_capitalization', '>', params.minMarketCap || 300000000]
+      console.log('🔍 Fresh market discovery: Scanning entire market for today\'s momentum opportunities');
+      
+      // Use multiple screener approaches to find fresh daily movers
+      const screenerQueries = [
+        // Query 1: Volume leaders with movement
+        {
+          filters: [
+            ['exchange', '=', 'US'],
+            ['avgvol_1d', '>', params.minVolume || 500000],
+            ['adjusted_close', '<', params.maxPrice || 20],
+            ['adjusted_close', '>', 1], // Avoid penny stocks
+            ['market_capitalization', '>', params.minMarketCap || 50000000]
+          ],
+          sort: 'avgvol_1d.desc',
+          limit: 30
+        },
+        // Query 2: Percentage gainers
+        {
+          filters: [
+            ['exchange', '=', 'US'],
+            ['refund_1d_p', '>', 2], // At least 2% movement
+            ['adjusted_close', '<', params.maxPrice || 20],
+            ['avgvol_1d', '>', 200000]
+          ],
+          sort: 'refund_1d_p.desc',
+          limit: 30
+        },
+        // Query 3: Percentage losers (for contrarian plays)
+        {
+          filters: [
+            ['exchange', '=', 'US'],
+            ['refund_1d_p', '<', -2], // At least -2% movement
+            ['adjusted_close', '<', params.maxPrice || 20],
+            ['avgvol_1d', '>', 200000]
+          ],
+          sort: 'refund_1d_p.asc',
+          limit: 20
+        }
       ];
       
-      // Only add change filters if specified (momentum strategy may not need daily change)
-      if (params.minChange !== undefined && params.minChange > 0) {
-        filters.push(['refund_1d_p', '>', params.minChange]);
-      }
-      if (params.maxChange !== undefined) {
-        filters.push(['refund_1d_p', '<', params.maxChange]);
-      }
+      const allCandidates = new Set<string>();
       
-      if (params.maxMarketCap) {
-        filters.push(['market_capitalization', '<', params.maxMarketCap]);
-      }
-      
-      const data = await this.makeRequest('/screener', {
-        filters: JSON.stringify(filters),
-        sort: 'refund_1d_p.desc', // Sort by daily change descending
-        limit: 50
-      });
-      
-      console.log('EODHD screener response:', data);
-      
-      if (data && Array.isArray(data.data)) {
-        // Transform screener data to match EODHDRealTimeData format
-        return data.data.map((item: any) => ({
-          code: item.code + '.US',
-          timestamp: Date.now() / 1000,
-          gmtoffset: 0,
-          open: item.adjusted_close || 0,
-          high: item.adjusted_close || 0,
-          low: item.adjusted_close || 0,
-          close: item.adjusted_close || 0,
-          volume: item.avgvol_1d || 0,
-          previousClose: item.adjusted_close ? item.adjusted_close / (1 + (item.refund_1d_p || 0) / 100) : 0,
-          change: item.adjusted_close && item.refund_1d_p ? 
-            item.adjusted_close * (item.refund_1d_p / 100) : 0,
-          change_p: item.refund_1d_p || 0
-        }));
+      // Execute multiple screener queries to get diverse fresh candidates
+      for (const [index, query] of screenerQueries.entries()) {
+        try {
+          console.log(`Running screener query ${index + 1}/3...`);
+          
+          const screenerData = await this.makeRequest('/screener', {
+            filters: JSON.stringify(query.filters),
+            sort: query.sort,
+            limit: query.limit
+          });
+          
+          if (screenerData?.data && Array.isArray(screenerData.data)) {
+            screenerData.data.forEach((item: any) => {
+              if (item.code) {
+                allCandidates.add(`${item.code}.US`);
+              }
+            });
+          }
+          
+          // Brief delay between queries
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+        } catch (error) {
+          console.error(`Error in screener query ${index + 1}:`, error);
+        }
       }
       
-      return [];
+      const symbols = Array.from(allCandidates);
+      console.log(`📊 Found ${symbols.length} unique candidates from fresh market screening`);
+      
+      if (symbols.length === 0) {
+        console.log('No fresh candidates found from screener');
+        return [];
+      }
+      
+      // Get live quotes for discovered candidates
+      const liveData: EODHDRealTimeData[] = [];
+      const batchSize = 10;
+      
+      for (let i = 0; i < symbols.length; i += batchSize) {
+        const batch = symbols.slice(i, i + batchSize);
+        
+        try {
+          const batchData = await this.getRealTimeQuotes(batch);
+          if (Array.isArray(batchData)) {
+            // Apply quality filters to fresh data
+            const qualified = batchData.filter(stock => {
+              const price = stock.close;
+              const volume = stock.volume;
+              const changePercent = Math.abs(stock.change_p);
+              
+              return price >= 1 && // Minimum $1
+                     price <= (params.maxPrice || 25) &&
+                     volume >= (params.minVolume || 200000) &&
+                     changePercent >= 0.5; // At least 0.5% movement for more candidates
+            });
+            
+            liveData.push(...qualified);
+          }
+          
+          // Rate limiting delay
+          if (i + batchSize < symbols.length) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        } catch (error) {
+          console.error(`Error fetching live data for batch:`, error);
+        }
+      }
+      
+      // Sort by absolute change percentage to prioritize most active
+      liveData.sort((a, b) => Math.abs(b.change_p || 0) - Math.abs(a.change_p || 0));
+      
+      // Return top candidates for further analysis
+      const topCandidates = liveData.slice(0, 20);
+      
+      console.log(`🎯 Fresh discovery complete: ${topCandidates.length} live candidates`);
+      if (topCandidates.length > 0) {
+        console.log('Today\'s top movers:', topCandidates.slice(0, 5).map(s => 
+          `${s.code.replace('.US', '')}: ${s.change_p?.toFixed(2)}%`
+        ).join(', '));
+      }
+      
+      return topCandidates;
+      
     } catch (error) {
-      console.error('EODHD screener error:', error);
-      // Return empty array - no fallback to predefined stocks
+      console.error('Error in fresh market discovery:', error);
       return [];
     }
   }
   
+  // Legacy method for backward compatibility
+  async searchStocks(params: {
+    minVolume?: number;
+    maxPrice?: number;
+    minChange?: number;
+    maxChange?: number;
+    minMarketCap?: number;
+    maxMarketCap?: number;
+  } = {}): Promise<EODHDRealTimeData[]> {
+    return this.getPremarketMovers(params);
+  }
 
   // Get financial news for a specific stock
   async getStockNews(symbol: string, limit = 10, offset = 0): Promise<EODHDNewsItem[]> {
@@ -409,6 +646,61 @@ export function calculateRelativeVolume(currentVolume: number, avgVolume: number
   return avgVolume > 0 ? currentVolume / avgVolume : 1;
 }
 
+// Calculate momentum score - focuses on technical strength over daily gaps
+function calculateMomentumScore(data: EODHDRealTimeData, technicals?: EODHDTechnicals): number {
+  let score = 0;
+  const price = data.close || 0;
+  const changePercent = data.change_p || 0;
+  const volume = data.volume || 0;
+
+  // 1. Technical Trend Analysis (40 points max) - CRITICAL for momentum
+  if (technicals) {
+    const { SMA_20, SMA_50, SMA_200, high_52weeks } = technicals;
+    
+    // Price above SMAs (essential momentum indicator)
+    if (SMA_20 && price > SMA_20) score += 15; // Above 20-day SMA
+    if (SMA_50 && price > SMA_50) score += 10;  // Above 50-day SMA  
+    if (SMA_200 && price > SMA_200) score += 10; // Above 200-day SMA
+    
+    // 52-week high proximity (new highs detection)
+    if (high_52weeks) {
+      const highProximity = (price / high_52weeks) * 100;
+      if (highProximity > 95) score += 20; // Near new highs
+      else if (highProximity > 90) score += 15;
+      else if (highProximity > 80) score += 10;
+      else if (highProximity < 50) score -= 10; // Far from highs
+    }
+  }
+
+  // 2. Volume Strength (20 points max)
+  if (volume > 2000000) score += 20;
+  else if (volume > 1000000) score += 15;
+  else if (volume > 500000) score += 10;
+  else score += 5;
+
+  // 3. Price Action (20 points max) - Less emphasis on daily change
+  if (changePercent > 5) score += 20;
+  else if (changePercent > 2) score += 15;
+  else if (changePercent > 0) score += 10;
+  else if (changePercent > -2) score += 5;
+  else score -= 10; // Penalty for significant decline
+
+  // 4. Price Range (10 points max)
+  if (price >= 2 && price <= 15) score += 10;
+  else if (price > 15 && price <= 25) score += 5;
+  else if (price < 1) score -= 15;
+
+  // 5. RSI Momentum (10 points max)
+  if (technicals?.RSI_14) {
+    const rsi = technicals.RSI_14;
+    if (rsi >= 55 && rsi <= 75) score += 10;
+    else if (rsi > 75) score += 5; // Still bullish but overbought
+    else if (rsi < 45) score -= 5;
+  }
+
+  return Math.min(Math.max(score, 0), 100);
+}
+
 // Calculate score based on trading strategy
 export function calculateScore(
   data: EODHDRealTimeData, 
@@ -420,63 +712,6 @@ export function calculateScore(
   } else {
     return calculateBreakoutScore(data, technicals);
   }
-}
-
-// Momentum strategy scoring (for premarket scanner)
-function calculateMomentumScore(data: EODHDRealTimeData, technicals?: EODHDTechnicals): number {
-  let score = 0;
-
-  // Price change momentum (0-30 points) - Most important for momentum
-  const changePercent = data.change_p || 0;
-  if (changePercent >= 15) score += 30;
-  else if (changePercent >= 10) score += 25;
-  else if (changePercent >= 7) score += 20;
-  else if (changePercent >= 5) score += 15;
-  else if (changePercent >= 3) score += 10;
-  else if (changePercent < 0) score -= 10; // Penalize negative momentum
-
-  // Volume surge (0-25 points)
-  const volume = data.volume || 0;
-  if (volume > 10000000) score += 25;
-  else if (volume > 5000000) score += 20;
-  else if (volume > 2000000) score += 15;
-  else if (volume > 1000000) score += 10;
-  else if (volume > 500000) score += 5;
-
-  // Price level preference (0-15 points)
-  const price = data.close || 0;
-  if (price < 2) score += 15; // Penny stock momentum
-  else if (price < 5) score += 12;
-  else if (price < 8) score += 8;
-  else if (price < 10) score += 5;
-  else if (price > 20) score -= 5; // Penalize higher priced stocks
-
-  // Technical indicators (0-20 points)
-  if (technicals) {
-    const { RSI_14, SMA_50, SMA_200 } = technicals;
-    const currentPrice = data.close || 0;
-
-    // RSI momentum confirmation
-    if (RSI_14) {
-      if (RSI_14 > 60 && RSI_14 < 85) score += 10; // Strong momentum
-      else if (RSI_14 > 50 && RSI_14 <= 60) score += 5; // Building momentum
-      else if (RSI_14 > 85) score -= 5; // Overbought warning
-      else if (RSI_14 < 40) score -= 10; // Weak momentum
-    }
-
-    // Price vs moving averages
-    if (SMA_50 && currentPrice > SMA_50 * 1.02) score += 5; // Above SMA50 with buffer
-    if (SMA_200 && currentPrice > SMA_200 * 1.05) score += 5; // Above SMA200 with buffer
-  }
-
-  // Gap up bonus (0-10 points)
-  const open = data.open || data.close || 0;
-  const previousClose = data.previousClose || open;
-  const gapPercent = ((open - previousClose) / previousClose) * 100;
-  if (gapPercent > 5) score += 10;
-  else if (gapPercent > 2) score += 5;
-
-  return Math.min(Math.max(score, 0), 100);
 }
 
 // Breakout strategy scoring - optimized for news-driven low float plays
