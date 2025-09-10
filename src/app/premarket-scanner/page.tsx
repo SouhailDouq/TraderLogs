@@ -244,7 +244,15 @@ export default function PremarketScanner() {
           console.error('Failed to persist scan results:', error)
         }
       } else {
-        throw new Error(`API returned ${response.status}: ${response.statusText}`)
+        // Handle specific error responses
+        const errorData = await response.json().catch(() => null)
+        
+        if (response.status === 400 && errorData?.error?.includes('not available during regular market hours')) {
+          setError(`⏰ ${errorData.message || 'Premarket scanner is only available during premarket hours (4:00 AM - 9:30 AM ET)'}`)
+          return // Don't retry for market hours restriction
+        } else {
+          throw new Error(`API returned ${response.status}: ${response.statusText}`)
+        }
       }
     } catch (error) {
       console.error('Premarket scan failed:', error)

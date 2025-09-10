@@ -17,8 +17,21 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning={true}>
-      <body className={inter.className}>
+    <html lang="en" className="dark" suppressHydrationWarning={true}>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                document.documentElement.classList.add('dark');
+                document.documentElement.style.setProperty('--background', '#111827');
+                document.documentElement.style.setProperty('--foreground', '#f9fafb');
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className={`${inter.className} bg-gray-900 text-gray-100`}>
         <AuthProvider>
           <ClientLayout>
             <main>{children}</main>

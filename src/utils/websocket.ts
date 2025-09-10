@@ -129,7 +129,7 @@ class EODHDWebSocketManager {
         "symbols": cleanSymbol
       });
       this.ws!.send(subscribeMessage);
-      console.log(`📡 Subscribed to live pre-market updates for ${symbol}`);
+      console.log(`📡 Subscribed to live market updates for ${symbol}`);
     }
   }
 

@@ -3,13 +3,16 @@
 import { useState, useEffect } from 'react';
 
 export function useDarkMode() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true); // Default to true since we force dark mode
 
   useEffect(() => {
-    // Initialize from localStorage or default to false
-    const savedTheme = localStorage.getItem('theme');
-    const shouldBeDark = savedTheme === 'dark';
-    setIsDarkMode(shouldBeDark);
+    // Always set to dark mode - app is designed for dark mode only
+    setIsDarkMode(true);
+    
+    // Ensure dark class is always present
+    if (!document.documentElement.classList.contains('dark')) {
+      document.documentElement.classList.add('dark');
+    }
     
     const checkTheme = () => {
       const isDark = document.documentElement.classList.contains('dark');

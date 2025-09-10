@@ -134,17 +134,30 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
         const symbol = stock.code.replace('.US', '')
         console.log(`Analyzing fresh candidate ${symbol}: $${stock.close}, vol: ${stock.volume}, change: ${stock.change_p}%`)
         
-        // Skip backend filtering - let frontend handle all filtering for better user control
-        // Only apply basic sanity checks to avoid obvious junk data
-        
-        // Basic sanity checks only
-        if (stock.close <= 0) {
-          console.log(`${symbol} filtered: invalid price $${stock.close}`)
+        // Filter out warrants and rights - EODHD API doesn't support negative matching
+        if (symbol.endsWith('W') || symbol.endsWith('R') || symbol.includes('-WT') || symbol.includes('.WS') || symbol.includes('.WD')) {
+          console.log(`${symbol} filtered: derivative instrument (warrant/right)`)
           continue
         }
         
-        if (stock.volume < 0) {
-          console.log(`${symbol} filtered: invalid volume ${stock.volume}`)
+        // Apply price and volume filters to remove penny stocks and low-quality candidates
+        if (stock.close < filters.minPrice!) {
+          console.log(`${symbol} filtered: price $${stock.close} < $${filters.minPrice}`)
+          continue
+        }
+        
+        if (stock.close > filters.maxPrice) {
+          console.log(`${symbol} filtered: price $${stock.close} > $${filters.maxPrice}`)
+          continue
+        }
+        
+        if (stock.volume < filters.minVolume) {
+          console.log(`${symbol} filtered: volume ${stock.volume} < ${filters.minVolume}`)
+          continue
+        }
+        
+        if (stock.close <= 0) {
+          console.log(`${symbol} filtered: invalid price $${stock.close}`)
           continue
         }
         
@@ -209,35 +222,67 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log('Premarket scan request:', body)
     
+    // Determine scanning mode based on market hours
+    const marketStatus = eodhd.getMarketHoursStatus()
+    const scanMode = marketStatus === 'premarket' ? 'premarket' : 
+                    marketStatus === 'regular' ? 'intraday' : 
+                    marketStatus === 'afterhours' ? 'afterhours' : 'extended'
+    
+    console.log(`Running ${scanMode} momentum scan during ${marketStatus} hours`)
+    
     // Extract strategy and filters from request
     const strategy = body.strategy || 'momentum'
     
-    // Relaxed baseline filters to get more candidates (targeting 10-15 stocks)
-    const baselineFilters: ScanFilters = strategy === 'momentum' ? {
-      // Momentum Strategy: Cast wider net for more opportunities
-      minChange: 0, // 0% minimum change
-      maxChange: 100, // 100% maximum change
-      minVolume: 50000, // Reduced to 50K for more premarket candidates
-      maxPrice: 25, // Increased to $25 for more options
-      minPrice: 0.50, // Minimum $0.50 to include more stocks
-      minRelativeVolume: 1.0, // Reduced for more candidates
-      minScore: 0, // No score filter - quality handled in processing
-      minMarketCap: 50000000, // Reduced to $50M for more options
-      maxMarketCap: 0, // No upper limit
-      maxFloat: 0 // No float restriction for momentum
-    } : {
-      // Breakout Strategy: Cast wider net for opportunities
-      minChange: 2, // Reduced to 2%+ for more candidates
-      maxChange: 100, // No upper limit
-      minVolume: 25000, // Minimum 25K volume for premarket
-      maxPrice: 30, // Increased to $30 for more options
-      minPrice: 0.50, // Minimum $0.50 to include more stocks
-      minRelativeVolume: 1.5, // Reduced to 1.5x for more candidates
-      minScore: 0, // No score filter
-      minMarketCap: 0, // $0M market cap (no filter)
-      maxMarketCap: 0, // $0B market cap (no filter)
-      maxFloat: 50000000 // Increased to <50M shares for more options
-    }
+    // Adaptive filters based on market session and strategy
+    const baselineFilters: ScanFilters = scanMode === 'premarket' ? 
+      // PREMARKET MODE: Focus on overnight movers with live data potential
+      (strategy === 'momentum' ? {
+        minChange: 5, // 5%+ premarket change for better live data coverage
+        maxChange: 100,
+        minVolume: 500000, // Higher volume for live WebSocket feeds
+        maxPrice: 50, // Increased to capture more liquid stocks
+        minPrice: 2.00, // Higher minimum to avoid penny stocks
+        minRelativeVolume: 2.0, // Higher relative volume for premarket
+        minScore: 0,
+        minMarketCap: 200000000, // $200M+ for better live data coverage
+        maxMarketCap: 0,
+        maxFloat: 0
+      } : {
+        minChange: 5, // 5%+ for breakout strategy
+        maxChange: 100,
+        minVolume: 25000,
+        maxPrice: 20,
+        minPrice: 1.00,
+        minRelativeVolume: 2.0, // Even higher for breakouts
+        minScore: 0,
+        minMarketCap: 0,
+        maxMarketCap: 0,
+        maxFloat: 50000000
+      }) :
+      // REGULAR HOURS MODE: Focus on intraday momentum
+      (strategy === 'momentum' ? {
+        minChange: 2, // 2%+ intraday change
+        maxChange: 100,
+        minVolume: 100000, // Higher volume during regular hours
+        maxPrice: 20, // Focus on momentum stocks under $20
+        minPrice: 1.00,
+        minRelativeVolume: 1.2, // Lower threshold for regular hours
+        minScore: 0,
+        minMarketCap: 100000000, // $100M+ for regular hours
+        maxMarketCap: 0,
+        maxFloat: 0
+      } : {
+        minChange: 3, // 3%+ for breakout during regular hours
+        maxChange: 100,
+        minVolume: 200000, // Higher volume for breakouts
+        maxPrice: 20,
+        minPrice: 2.00, // Higher minimum for regular hours breakouts
+        minRelativeVolume: 1.5,
+        minScore: 0,
+        minMarketCap: 50000000,
+        maxMarketCap: 0,
+        maxFloat: 100000000
+      })
     
     // Frontend refinement filters (applied on top of baseline)
     const refinementFilters: ScanFilters = {
@@ -261,84 +306,61 @@ export async function POST(request: NextRequest) {
     const momentumStocks = await getMomentumStocks(strategy, filters)
     console.log(`Processing ${momentumStocks.length} momentum stocks from EODHD`)
     
-    const results: PremarketStock[] = []
+    // Process stocks in parallel for speed - limit to top 10 for Vercel timeout constraints
+    const topStocks = momentumStocks.slice(0, 10)
+    console.log(`Processing top ${topStocks.length} stocks in parallel for speed`)
     
-    // Process fewer stocks but faster - focus on the best candidates
-    const batchSize = 1 // Process one at a time for maximum freshness
-    const processedStocks: PremarketStock[] = []
-    
-    for (let i = 0; i < momentumStocks.length; i += batchSize) {
-      const batch = momentumStocks.slice(i, i + batchSize)
-      console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(momentumStocks.length/batchSize)} (${batch.length} stocks)`)
-      
-      for (const stock of batch) {
-        try {
-          const symbol = stock.code.replace('.US', '')
-          
-          // Get enhanced data including technicals and news - pass stock data to avoid extra API call
-          const enhancedData = await getEnhancedStockData(symbol, stock)
-          if (!enhancedData) continue
+    const stockPromises = topStocks.map(async (stock) => {
+      try {
+        const symbol = stock.code.replace('.US', '')
         
-        // Fetch news data for better trading insights
-        let newsContext: { count: number; sentiment: number; topCatalyst?: string; recentCount: number } | undefined = undefined
-        try {
-          const newsData = await eodhd.getStockNews(symbol, 10)
-          if (newsData && newsData.length > 0) {
-            // Calculate recent news (last 24 hours)
-            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
-            const recentNews = newsData.filter((news: any) => new Date(news.date) > oneDayAgo)
-            
-            // Simple sentiment analysis based on keywords
-            let totalSentiment = 0
-            let sentimentCount = 0
-            
-            newsData.forEach((news: any) => {
-              const text = (news.title + ' ' + (news.content || '')).toLowerCase()
-              let sentiment = 0
-              
-              // Positive keywords
-              if (text.includes('beat') || text.includes('exceed') || text.includes('strong') || 
-                  text.includes('growth') || text.includes('positive') || text.includes('upgrade') ||
-                  text.includes('bullish') || text.includes('buy') || text.includes('outperform')) {
-                sentiment += 1
-              }
-              
-              // Negative keywords
-              if (text.includes('miss') || text.includes('weak') || text.includes('decline') ||
-                  text.includes('negative') || text.includes('downgrade') || text.includes('bearish') ||
-                  text.includes('sell') || text.includes('underperform') || text.includes('loss')) {
-                sentiment -= 1
-              }
-              
-              totalSentiment += sentiment
-              sentimentCount++
-            })
-            
-            const avgSentiment = sentimentCount > 0 ? totalSentiment / sentimentCount : 0
-            
-            newsContext = {
-              count: newsData.length,
-              sentiment: avgSentiment,
-              topCatalyst: newsData[0]?.title?.substring(0, 100),
-              recentCount: recentNews.length
-            }
-          }
-        } catch (newsError) {
-          console.log(`Could not fetch news for ${symbol}:`, newsError)
-          // Continue without news data
+        // Skip expensive API calls for speed - use only the screener data
+        // This eliminates news and technical data fetching that causes timeouts
+        
+        // Skip stocks declining more than 20% - focus on momentum plays
+        if (stock.change_p < -20) {
+          console.log(`${symbol} filtered: declining ${stock.change_p.toFixed(1)}% (momentum focus)`)
+          return null
         }
         
-        // Calculate final score with technicals
-        const score = calculateScore(stock, enhancedData.technicals || undefined, strategy)
+        // Calculate score with basic data only
+        const score = calculateScore(stock, undefined, strategy)
         const signal = getSignal(score, strategy)
-        
-        // Format market cap - use fallback since we don't have fundamentals
-        const marketCapFormatted = 'Unknown' // Skip market cap for now to reduce API calls
         
         // Calculate relative volume estimate
         const estimatedRelVol = stock.volume > 0 ? Math.min(stock.volume / 1000000, 10) : 1.5
         
-        results.push({
+        // Get news data with timeout protection
+        let newsData = undefined
+        try {
+          const newsPromise = eodhd.getStockNews(symbol, 3) // Limit to 3 articles for speed
+          const newsTimeout = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('news timeout')), 2000) // 2 second timeout
+          )
+          const news = await Promise.race([newsPromise, newsTimeout]) as any[]
+          
+          if (news && news.length > 0) {
+            const recentNews = news.filter(article => {
+              const articleDate = new Date(article.date)
+              const hoursSinceArticle = (Date.now() - articleDate.getTime()) / (1000 * 60 * 60)
+              return hoursSinceArticle <= 24 // Only articles from last 24 hours
+            })
+            
+            if (recentNews.length > 0) {
+              newsData = {
+                count: news.length,
+                sentiment: 0, // Simplified - no sentiment analysis for speed
+                topCatalyst: 'General', // Simplified catalyst
+                recentCount: recentNews.length
+              }
+            }
+          }
+        } catch (error) {
+          // Skip news if it times out or fails - don't let it break the scan
+          console.log(`${symbol}: Skipping news due to timeout/error`)
+        }
+        
+        return {
           symbol: stock.code.replace('.US', ''),
           price: stock.close,
           change: stock.change,
@@ -348,38 +370,35 @@ export async function POST(request: NextRequest) {
           score,
           signal,
           strategy,
-          marketCap: marketCapFormatted,
+          marketCap: 'Unknown', // Skip market cap to reduce API calls
           lastUpdated: new Date(stock.timestamp * 1000).toISOString(),
-          news: newsContext
-        })
+          news: newsData
+        } as PremarketStock
         
       } catch (error) {
         console.error(`Error processing stock:`, error)
+        return null
       }
-    }
-      
-      // Shorter delay since we're processing fewer stocks
-      if (i + batchSize < momentumStocks.length) {
-        console.log('Waiting 3 seconds before next batch...')
-        await new Promise(resolve => setTimeout(resolve, 3000)) // Reduced to 3 seconds
-      }
-    }
+    })
     
-    // Sort by score descending
-    results.sort((a, b) => b.score - a.score)
+    // Wait for all stocks to process in parallel
+    const processedResults = await Promise.allSettled(stockPromises)
     
-    console.log(`🎯 Quality-focused scan completed: ${results.length} high-grade stocks found (targeting 3-5 excellent opportunities)`)
+    // Filter successful results
+    const stocks = processedResults
+      .filter(result => result.status === 'fulfilled' && result.value !== null)
+      .map(result => (result as PromiseFulfilledResult<PremarketStock>).value)
+    
+    console.log(`🎯 ${scanMode} momentum scan completed: ${stocks.length} stocks found during ${marketStatus} hours`)
     
     return NextResponse.json({
-      stocks: results,
+      stocks,
       scanTime: new Date().toISOString(),
-      totalScanned: momentumStocks.length,
-      found: results.length,
-      source: 'EODHD Curated Active Stocks',
-      marketStatus: eodhd.getMarketHoursStatus(),
-      isLiveData: true,
-      discoveryMethod: 'curated_quality_focused',
-      strategy: 'quality_over_quantity'
+      filters: refinementFilters,
+      strategy,
+      scanMode,
+      marketStatus,
+      count: stocks.length
     })
     
   } catch (error) {

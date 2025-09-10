@@ -18,14 +18,12 @@ const workflowSteps = [
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
-  // Force dark mode always
+  // Dark mode is now handled in layout.tsx - no need to force it here
   useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty('--background', '#111827');
-    root.style.setProperty('--foreground', '#f9fafb');
-    root.classList.add('dark');
-    document.body.style.backgroundColor = '#111827';
-    document.body.style.color = '#f9fafb';
+    // Ensure dark mode persists on navigation
+    if (!document.documentElement.classList.contains('dark')) {
+      document.documentElement.classList.add('dark');
+    }
   }, []);
 
   const navigateToStep = (path: string) => {

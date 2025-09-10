@@ -212,7 +212,7 @@ class EODHDClient {
           // Subscribe to all symbols
           symbols.forEach(symbol => wsManager.subscribe(symbol, callback));
           
-          // Wait 3 seconds to collect live data
+          // Wait 8 seconds to collect live data (increased for premarket)
           setTimeout(() => {
             // Unsubscribe and return collected data
             symbols.forEach(symbol => wsManager.unsubscribe(symbol, callback));
@@ -221,8 +221,9 @@ class EODHDClient {
               this.convertWebSocketToRealTimeData(wsData)
             );
             
+            console.log(`📊 WebSocket collected ${results.length}/${symbols.length} live quotes after 8s wait`);
             resolve(results);
-          }, 3000);
+          }, 8000);
         });
         
         const wsResults = await collectWebSocketData;
@@ -232,7 +233,21 @@ class EODHDClient {
           return wsResults;
         }
         
-        console.log('No WebSocket data received, trying intraday historical API...');
+        console.log('No WebSocket data received, trying real-time API for fresher data...');
+        
+        // During premarket, try real-time API first for potentially fresher data
+        if (marketStatus === 'premarket') {
+          try {
+            console.log('🚀 Attempting direct real-time API for premarket data...');
+            const realtimeData = await this.getRealTimeQuotes(symbols);
+            if (realtimeData.length > 0) {
+              console.log(`✅ Got ${realtimeData.length} quotes from real-time API (premarket)`);
+              return realtimeData;
+            }
+          } catch (error) {
+            console.log('Real-time API failed, falling back to intraday...');
+          }
+        }
         
         // Try intraday historical API as secondary option (includes pre-market)
         const intradayPromises = symbols.map(symbol => this.getLatestPremarketPrice(symbol));
@@ -423,9 +438,9 @@ class EODHDClient {
   public isLiveDataFresh(): boolean {
     const marketStatus = this.getMarketHoursStatus();
     
-    // Only use WebSocket during regular market hours when data is most reliable
-    // Premarket WebSocket data is often incomplete/delayed
-    return marketStatus === 'regular';
+    // Use WebSocket during both premarket and regular hours for live data
+    // Premarket data is available and fresh during 4:00-9:30 AM ET
+    return marketStatus === 'premarket' || marketStatus === 'regular';
   }
 
   // Get intraday historical data (includes pre-market, delayed ~2-3 hours)
@@ -664,107 +679,59 @@ class EODHDClient {
       if (wsData.length > 0) {
         liveData.push(...wsData);
       } else {
-        console.log('No WebSocket data received, trying intraday historical API...');
+        console.log('No WebSocket data received, using real-time API for live prices...');
         
-        // Use intraday API as fallback for fresher data
-        const intradayBatchSize = 10;
-        for (let i = 0; i < symbols.length; i += intradayBatchSize) {
-          const batch = symbols.slice(i, i + intradayBatchSize);
+        // Use real-time API for current live prices instead of historical intraday data
+        const realTimeBatchSize = 5;
+        for (let i = 0; i < symbols.length; i += realTimeBatchSize) {
+          const batch = symbols.slice(i, i + realTimeBatchSize);
           
-          const intradayPromises = batch.map(async symbol => {
+          const realTimePromises = batch.map(async symbol => {
             try {
               const cleanSymbol = symbol.replace('.US', '');
-              const intradayData = await this.getIntradayData(cleanSymbol, '1m');
+              console.log(`📊 Fetching live real-time data for ${cleanSymbol}...`);
               
-              if (intradayData.length > 0) {
-                const latest = intradayData[intradayData.length - 1];
-                
-                // Calculate live premarket data with proper timestamps
-                let cumulativeVolume = 0;
-                let previousClose = toNumber(latest.close);
-                let currentPrice = toNumber(latest.close);
-                
-                // Get current time and create ET-based premarket window
-                const now = new Date();
-                
-                // Create today's premarket window in UTC (4:00 AM - 9:30 AM ET)
-                // Use explicit UTC times: 4:00 AM ET = 8:00 AM UTC (EDT) or 9:00 AM UTC (EST)
-                const todayUTC = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-                const isDST = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' }).includes('EDT');
-                const today4AM_UTC = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate(), isDST ? 8 : 9, 0, 0)); // 4:00 AM ET
-                const today930AM_UTC = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate(), isDST ? 13 : 14, 30, 0)); // 9:30 AM ET
-                
-                console.log(`📊 Processing ${cleanSymbol}: Premarket window: ${today4AM_UTC.toISOString()} - ${today930AM_UTC.toISOString()} (4:00-9:30 AM ET)`);
-                
-                // Find most recent data and calculate premarket metrics
-                let mostRecentData = null;
-                let yesterdayClose = null;
-                
-                for (let i = intradayData.length - 1; i >= 0; i--) {
-                  const dataPoint = intradayData[i];
-                  const dataTime = new Date(dataPoint.datetime);
-                  
-                  // Track most recent data point
-                  if (!mostRecentData || dataTime > new Date(mostRecentData.datetime)) {
-                    mostRecentData = dataPoint;
-                  }
-                  
-                  // Sum up TODAY's premarket volume (4 AM - 9:30 AM ET)
-                  if (dataTime >= today4AM_UTC && dataTime < today930AM_UTC) {
-                    cumulativeVolume += toNumber(dataPoint.volume);
-                  }
-                  
-                  // Find yesterday's close (last data point before today 4 AM)
-                  if (dataTime < today4AM_UTC && !yesterdayClose) {
-                    yesterdayClose = toNumber(dataPoint.close);
-                  }
-                }
-                
-                // Use most recent data for current price
-                if (mostRecentData) {
-                  currentPrice = toNumber(mostRecentData.close);
-                  const mostRecentTime = new Date(mostRecentData.datetime);
-                  console.log(`📊 ${cleanSymbol}: Most recent data from ${mostRecentTime.toISOString()}, Price: $${currentPrice}`);
-                }
-                
-                // Calculate change from yesterday's close
-                previousClose = yesterdayClose || currentPrice;
+              // Use real-time quote API for current live prices (same as trade analyzer)
+              const realTimeData = await this.getRealTimeQuote(cleanSymbol);
+              
+              if (realTimeData) {
+                const currentPrice = toNumber(realTimeData.close);
+                const previousClose = toNumber(realTimeData.previousClose);
                 const change = currentPrice - previousClose;
                 const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
                 
-                console.log(`📊 ${cleanSymbol}: Volume: ${cumulativeVolume}, Change: ${changePercent.toFixed(2)}% (${currentPrice} vs ${previousClose})`);
+                console.log(`📊 ${cleanSymbol}: Live price $${currentPrice}, prev close $${previousClose}, change ${changePercent.toFixed(2)}%`);
                 
                 return {
                   code: symbol,
-                  timestamp: mostRecentData ? new Date(mostRecentData.datetime).getTime() / 1000 : new Date().getTime() / 1000,
-                  gmtoffset: 0,
-                  open: toNumber(latest.open),
-                  high: toNumber(latest.high),
-                  low: toNumber(latest.low),
+                  timestamp: new Date().getTime() / 1000,
+                  open: currentPrice,
+                  high: currentPrice,
+                  low: currentPrice,
                   close: currentPrice,
-                  volume: Math.max(cumulativeVolume, toNumber(latest.volume)), // Use cumulative premarket volume
+                  volume: toNumber(realTimeData.volume) || 0,
                   previousClose: previousClose,
                   change: change,
                   change_p: changePercent
                 };
               }
+              
               return null;
             } catch (error) {
-              console.error(`Error getting intraday data for ${symbol}:`, error);
+              console.error(`❌ Error fetching real-time data for ${symbol}:`, error);
               return null;
             }
           });
           
-          const intradayResults = await Promise.allSettled(intradayPromises);
-          const validIntradayData = intradayResults
-            .filter(result => result.status === 'fulfilled' && result.value)
+          const realTimeResults = await Promise.allSettled(realTimePromises);
+          const validRealTimeData = realTimeResults
+            .filter(result => result.status === 'fulfilled' && result.value !== null)
             .map(result => (result as PromiseFulfilledResult<any>).value);
           
-          console.log(`✅ Got ${validIntradayData.length} quotes from intraday API (includes pre-market)`);
-          liveData.push(...validIntradayData);
+          liveData.push(...validRealTimeData);
           
-          // Rate limiting delay
-          if (i + intradayBatchSize < symbols.length) {
+          // Rate limiting between batches
+          if (i + realTimeBatchSize < symbols.length) {
             await new Promise(resolve => setTimeout(resolve, 200));
           }
         }
@@ -805,8 +772,23 @@ class EODHDClient {
                changePercent >= 0.1; // At least 0.1% movement (very lenient)
       });
       
-      // Sort by absolute change percentage to prioritize most active
-      liveData.sort((a, b) => Math.abs(b.change_p || 0) - Math.abs(a.change_p || 0));
+      // Sort by positive change percentage first, then by absolute change
+      liveData.sort((a, b) => {
+        const aChange = a.change_p || 0;
+        const bChange = b.change_p || 0;
+        
+        // Prioritize positive momentum stocks
+        if (aChange > 0 && bChange <= 0) return -1;
+        if (bChange > 0 && aChange <= 0) return 1;
+        
+        // If both positive, sort by highest gain
+        if (aChange > 0 && bChange > 0) return bChange - aChange;
+        
+        // If both negative, sort by smallest decline (less negative)
+        if (aChange <= 0 && bChange <= 0) return bChange - aChange;
+        
+        return 0;
+      });
       
       // Return top candidates for further analysis
       const topCandidates = liveData.slice(0, 20);
@@ -1014,12 +996,14 @@ function calculateMomentumScore(data: EODHDRealTimeData, technicals?: EODHDTechn
   else if (volume > 500000) score += 10;
   else score += 5;
 
-  // 3. Price Action (20 points max) - Less emphasis on daily change
-  if (changePercent > 5) score += 20;
-  else if (changePercent > 2) score += 15;
-  else if (changePercent > 0) score += 10;
-  else if (changePercent > -2) score += 5;
-  else score -= 10; // Penalty for significant decline
+  // 3. Price Action (30 points max) - Strong emphasis on positive momentum
+  if (changePercent > 10) score += 30; // Strong gains
+  else if (changePercent > 5) score += 25;
+  else if (changePercent > 2) score += 20;
+  else if (changePercent > 0) score += 15; // Any positive gain
+  else if (changePercent > -5) score -= 10; // Minor decline penalty
+  else if (changePercent > -15) score -= 30; // Major decline penalty
+  else score -= 50; // Severe decline penalty (>15% down)
 
   // 4. Price Range (10 points max)
   if (price >= 2 && price <= 15) score += 10;
