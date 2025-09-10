@@ -96,6 +96,36 @@ export default function PremarketScanner() {
   const [showDecliningStocks, setShowDecliningStocks] = useState(true)
   const [hideHighRiskStocks, setHideHighRiskStocks] = useState(false)
 
+  // Check if cached data is from current trading session
+  const isDataFresh = (lastScanTime: string) => {
+    try {
+      const scanDate = new Date(lastScanTime)
+      const now = new Date()
+      const etTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}))
+      
+      // Check if scan is from today (ET timezone)
+      const scanDateET = new Date(scanDate.toLocaleString("en-US", {timeZone: "America/New_York"}))
+      const isSameDay = scanDateET.toDateString() === etTime.toDateString()
+      
+      if (!isSameDay) {
+        console.log('Cached data is from a different day, clearing stale data')
+        return false
+      }
+      
+      // Extend cache time to 8 hours to persist data longer during trading session
+      const hoursDiff = (now.getTime() - scanDate.getTime()) / (1000 * 60 * 60)
+      if (hoursDiff > 8) {
+        console.log(`Cached data is ${hoursDiff.toFixed(1)} hours old, clearing stale data`)
+        return false
+      }
+      
+      return true
+    } catch (error) {
+      console.error('Error checking data freshness:', error)
+      return false
+    }
+  }
+
   // Load persisted data on component mount
   useEffect(() => {
     const loadPersistedData = () => {
@@ -104,13 +134,19 @@ export default function PremarketScanner() {
         const savedLastScan = localStorage.getItem('premarket-scanner-last-scan')
         const savedStrategy = localStorage.getItem('premarket-scanner-strategy')
         
-        if (savedStocks) {
-          const parsedStocks = JSON.parse(savedStocks)
-          setStocks(parsedStocks)
-        }
-        
-        if (savedLastScan) {
+        // Check data freshness before loading
+        if (savedLastScan && isDataFresh(savedLastScan)) {
+          if (savedStocks) {
+            const parsedStocks = JSON.parse(savedStocks)
+            setStocks(parsedStocks)
+            console.log(`Loaded ${parsedStocks.length} cached stocks from fresh scan`)
+          }
           setLastScan(savedLastScan)
+        } else {
+          // Clear stale data
+          console.log('Clearing stale cached data')
+          localStorage.removeItem('premarket-scanner-stocks')
+          localStorage.removeItem('premarket-scanner-last-scan')
         }
         
         if (savedStrategy && (savedStrategy === 'momentum' || savedStrategy === 'breakout')) {
@@ -195,7 +231,7 @@ export default function PremarketScanner() {
           intradayChange: stock.changePercent
         }))
         setStocks(processedStocks)
-        const scanTime = new Date().toLocaleTimeString()
+        const scanTime = new Date().toISOString()
         setLastScan(scanTime)
         setRetryCount(0)
         setError(null)
@@ -232,7 +268,7 @@ export default function PremarketScanner() {
   const handleStrategyChange = (strategy: TradingStrategy) => {
     setSelectedStrategy(strategy)
     setFilters(strategyFilters[strategy])
-    setStocks([]) // Clear previous results
+    // Don't clear cached results when switching strategies - let user keep their data
     
     // Keep all filters disabled by default - user must explicitly enable them
     // This ensures all stocks are shown initially without any filtering
@@ -265,9 +301,53 @@ export default function PremarketScanner() {
     return activeFilters
   }
 
-  // Filter stocks based on risk assessment
+  // Filter stocks based on enabled filters and risk assessment
   const getFilteredStocks = () => {
     let filteredStocks = stocks
+    
+    // Apply enabled filters to cached results
+    if (enabledFilters.minChange && filters.minChange > 0) {
+      filteredStocks = filteredStocks.filter(stock => stock.changePercent >= filters.minChange)
+    }
+    
+    if (enabledFilters.maxChange && filters.maxChange > 0) {
+      filteredStocks = filteredStocks.filter(stock => stock.changePercent <= filters.maxChange)
+    }
+    
+    if (enabledFilters.minVolume && filters.minVolume > 0) {
+      filteredStocks = filteredStocks.filter(stock => stock.volume >= filters.minVolume)
+    }
+    
+    if (enabledFilters.maxPrice && filters.maxPrice > 0) {
+      filteredStocks = filteredStocks.filter(stock => stock.price <= filters.maxPrice)
+    }
+    
+    if (enabledFilters.minPrice && filters.minPrice && filters.minPrice > 0) {
+      filteredStocks = filteredStocks.filter(stock => stock.price >= (filters.minPrice || 0))
+    }
+    
+    if (enabledFilters.minRelativeVolume && filters.minRelativeVolume > 0) {
+      filteredStocks = filteredStocks.filter(stock => stock.relativeVolume >= filters.minRelativeVolume)
+    }
+    
+    if (enabledFilters.minScore && filters.minScore > 0) {
+      filteredStocks = filteredStocks.filter(stock => stock.score >= filters.minScore)
+    }
+    
+    // Market cap filtering (assuming marketCap is a string like "$1.2B" or "$300M")
+    if (enabledFilters.minMarketCap && filters.minMarketCap && filters.minMarketCap > 0) {
+      filteredStocks = filteredStocks.filter(stock => {
+        const marketCapValue = parseMarketCap(stock.marketCap)
+        return marketCapValue >= (filters.minMarketCap || 0)
+      })
+    }
+    
+    if (enabledFilters.maxMarketCap && filters.maxMarketCap && filters.maxMarketCap > 0) {
+      filteredStocks = filteredStocks.filter(stock => {
+        const marketCapValue = parseMarketCap(stock.marketCap)
+        return marketCapValue <= (filters.maxMarketCap || 0)
+      })
+    }
     
     // Filter declining stocks if option is disabled
     if (!showDecliningStocks) {
@@ -286,6 +366,26 @@ export default function PremarketScanner() {
     }
     
     return filteredStocks
+  }
+
+  // Helper function to parse market cap strings like "$1.2B" or "$300M"
+  const parseMarketCap = (marketCapStr: string): number => {
+    if (!marketCapStr) return 0
+    
+    const cleanStr = marketCapStr.replace(/[$,]/g, '').toUpperCase()
+    const numMatch = cleanStr.match(/^([\d.]+)([BMK]?)/)
+    
+    if (!numMatch) return 0
+    
+    const num = parseFloat(numMatch[1])
+    const suffix = numMatch[2]
+    
+    switch (suffix) {
+      case 'B': return num * 1000000000
+      case 'M': return num * 1000000
+      case 'K': return num * 1000
+      default: return num
+    }
   }
 
   // Get risk warning for a stock
@@ -329,25 +429,36 @@ export default function PremarketScanner() {
     }
   }
 
-  const isPremarketHours = () => {
+  const getMarketStatus = () => {
     const now = new Date()
-    const nyTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}))
-    const hour = nyTime.getHours()
-    const minute = nyTime.getMinutes()
+    const etTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}))
+    const timeInMinutes = etTime.getHours() * 60 + etTime.getMinutes()
     
-    // Market is open Monday-Friday
-    const day = nyTime.getDay()
-    if (day === 0 || day === 6) return false // Weekend
+    // Skip weekends
+    const dayOfWeek = etTime.getDay() // 0 = Sunday, 6 = Saturday
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return { status: 'closed', isOpen: false }
+    }
     
-    // Combined trading hours: 4:00 AM - 8:00 PM ET
-    // Premarket: 4:00 AM - 9:30 AM ET
-    // Regular market: 9:30 AM - 4:00 PM ET  
-    // Extended hours: 4:00 PM - 8:00 PM ET
-    if (hour >= 4 && hour < 20) return true
-    if (hour === 20 && minute === 0) return true // Include exactly 8:00 PM
+    // Premarket: 4:00 AM - 9:30 AM ET (240-570 minutes)
+    if (timeInMinutes >= 240 && timeInMinutes < 570) {
+      return { status: 'premarket', isOpen: true }
+    }
     
-    return false
+    // Regular hours: 9:30 AM - 4:00 PM ET (570-960 minutes)
+    if (timeInMinutes >= 570 && timeInMinutes < 960) {
+      return { status: 'regular', isOpen: true }
+    }
+    
+    // After hours: 4:00 PM - 8:00 PM ET (960-1200 minutes)
+    if (timeInMinutes >= 960 && timeInMinutes < 1200) {
+      return { status: 'afterhours', isOpen: true }
+    }
+    
+    return { status: 'closed', isOpen: false }
   }
+
+  const isPremarketHours = () => getMarketStatus().isOpen
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${
@@ -375,7 +486,13 @@ export default function PremarketScanner() {
                 }`}></div>
                 <div>
                   <div className="font-bold text-lg">
-                    {isPremarketHours() ? 'MARKET OPEN' : 'MARKET CLOSED'}
+                    {(() => {
+                      const marketStatus = getMarketStatus()
+                      if (marketStatus.status === 'premarket') return 'PREMARKET OPEN'
+                      if (marketStatus.status === 'regular') return 'MARKET OPEN'
+                      if (marketStatus.status === 'afterhours') return 'AFTER HOURS'
+                      return 'MARKET CLOSED'
+                    })()}
                   </div>
                   <div className="text-sm opacity-90">
                     {new Date().toLocaleTimeString('en-US', { 
@@ -385,6 +502,22 @@ export default function PremarketScanner() {
                       timeZoneName: 'short'
                     })}
                   </div>
+                  {stocks.length > 0 && (() => {
+                    const now = Date.now()
+                    const staleStocks = stocks.filter(stock => {
+                      if (!stock.lastUpdated) return false
+                      const dataAge = (now - new Date(stock.lastUpdated).getTime()) / (1000 * 60 * 60)
+                      return dataAge > 4
+                    })
+                    if (staleStocks.length > 0) {
+                      return (
+                        <div className="text-xs mt-1 px-2 py-1 bg-yellow-500/20 text-yellow-200 rounded">
+                          ⚠️ {staleStocks.length} stocks have stale data (&gt;4h old)
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
                   {stocks.length > 0 && lastScan && (
                     <div className="text-xs opacity-75 mt-1">
                       📊 {stocks.length} stocks cached from {lastScan}

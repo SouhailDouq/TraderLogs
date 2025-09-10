@@ -1,4 +1,5 @@
-import WebSocket from 'ws';
+// Use native WebSocket API instead of 'ws' library for Vercel compatibility
+// The 'ws' library causes "t.mask is not a function" errors in serverless environments
 
 interface WebSocketMessage {
   s: string;  // Symbol/ticker
@@ -15,7 +16,7 @@ interface SubscriptionCallback {
 }
 
 class EODHDWebSocketManager {
-  private ws: WebSocket | null = null;
+  private ws: globalThis.WebSocket | null = null;
   private subscriptions = new Map<string, Set<SubscriptionCallback>>();
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -31,33 +32,203 @@ class EODHDWebSocketManager {
 
   // Connect to EODHD WebSocket
   async connect(): Promise<void> {
-    // WebSocket disabled due to API limitations and error spam
-    return Promise.resolve();
+    if (this.isConnecting || this.isConnected()) {
+      return;
+    }
+
+    // Check if WebSocket is available (not in serverless environment)
+    if (typeof globalThis.WebSocket === 'undefined') {
+      console.log('⚠️ WebSocket not available in serverless environment, using REST API fallback');
+      this.isConnecting = false;
+      throw new Error('WebSocket not supported in serverless environment');
+    }
+
+    this.isConnecting = true;
+    
+    try {
+      // EODHD WebSocket endpoint for live trade data (includes pre-market)
+      const wsUrl = `wss://ws.eodhistoricaldata.com/ws/us?api_token=${this.apiToken}`;
+      console.log('🔌 Connecting to EODHD WebSocket for live trade data (pre-market supported)...');
+      
+      this.ws = new globalThis.WebSocket(wsUrl);
+
+      this.ws.onopen = () => {
+        console.log('✅ EODHD WebSocket connected successfully');
+        this.isConnecting = false;
+        this.reconnectAttempts = 0;
+        this.startHeartbeat();
+        
+        // Re-subscribe to any existing subscriptions after reconnection (limit to 5)
+        const symbolsToResubscribe = Array.from(this.subscriptions.keys()).slice(0, 5);
+        if (symbolsToResubscribe.length > 0) {
+          const cleanSymbols = symbolsToResubscribe.map(s => s.replace('.US', ''));
+          const resubscribeMessage = JSON.stringify({
+            "action": "subscribe",
+            "symbols": cleanSymbols.join(',')
+          });
+          this.ws!.send(resubscribeMessage);
+          console.log(`🔄 Re-subscribed to ${symbolsToResubscribe.length} symbols after connection`);
+        }
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.s && data.p) { // Valid trade message
+            console.log(`💰 Live trade: ${data.s} at $${data.p}`);
+            this.handleMessage(data);
+          } else if (data.status_code) {
+            if (data.status_code === 422) {
+              // Silently handle 422 errors - they're expected due to API limits
+              // The system gracefully falls back to intraday API
+            } else {
+              console.log(`📊 WebSocket status: ${data.status_code} - ${data.message || 'Connected'}`);
+            }
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+
+      this.ws.onclose = (event) => {
+        console.log(`WebSocket closed: ${event.code} - ${event.reason}`);
+        this.isConnecting = false;
+        this.stopHeartbeat();
+        
+        if (event.code !== 1000) { // Not a normal closure
+          this.handleReconnect();
+        }
+      };
+
+      this.ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        this.isConnecting = false;
+      };
+
+    } catch (error) {
+      console.error('Failed to connect to WebSocket:', error);
+      this.isConnecting = false;
+      throw error;
+    }
   }
 
   // Subscribe to symbol updates
   subscribe(symbol: string, callback: SubscriptionCallback): void {
-    // WebSocket disabled
+    if (!this.subscriptions.has(symbol)) {
+      this.subscriptions.set(symbol, new Set());
+    }
+    this.subscriptions.get(symbol)!.add(callback);
+
+    // Subscribe to symbol if WebSocket is connected
+    if (this.isConnected()) {
+      // EODHD WebSocket subscription format - proper JSON with action and symbols
+      const cleanSymbol = symbol.replace('.US', '');
+      const subscribeMessage = JSON.stringify({
+        "action": "subscribe",
+        "symbols": cleanSymbol
+      });
+      this.ws!.send(subscribeMessage);
+      console.log(`📡 Subscribed to live pre-market updates for ${symbol}`);
+    }
   }
 
   // Unsubscribe from symbol updates
   unsubscribe(symbol: string, callback: SubscriptionCallback): void {
-    // WebSocket disabled
+    const callbacks = this.subscriptions.get(symbol);
+    if (callbacks) {
+      callbacks.delete(callback);
+      if (callbacks.size === 0) {
+        this.subscriptions.delete(symbol);
+        
+        // Unsubscribe from WebSocket if connected
+        if (this.isConnected()) {
+          const unsubscribeMessage = JSON.stringify({
+            "action": "unsubscribe",
+            "symbols": symbol.replace('.US', '')
+          });
+          this.ws!.send(unsubscribeMessage);
+        }
+      }
+    }
   }
 
-  // Subscribe to multiple symbols with batching to avoid API limits
+  // Subscribe to multiple symbols with proper batching to avoid API limits
   subscribeMultiple(symbols: string[], callback: SubscriptionCallback): void {
-    // WebSocket disabled
+    // Limit to 5 symbols max to avoid API limits
+    const limitedSymbols = symbols.slice(0, 5);
+    
+    limitedSymbols.forEach(symbol => this.subscribe(symbol, callback));
+    
+    // Send batch subscription with proper JSON format
+    if (this.isConnected() && limitedSymbols.length > 0) {
+      const cleanSymbols = limitedSymbols.map(s => s.replace('.US', ''));
+      const batchSubscribeMessage = JSON.stringify({
+        "action": "subscribe",
+        "symbols": cleanSymbols.join(',')
+      });
+      this.ws!.send(batchSubscribeMessage);
+      console.log(`📡 Batch subscribed to ${limitedSymbols.length} symbols for live pre-market data`);
+    }
   }
 
   // Get live quote for single symbol (Promise-based)
-  async getLiveQuote(symbol: string, timeout = 5000): Promise<WebSocketMessage> {
-    throw new Error('WebSocket disabled - use REST API instead');
+  async getLiveQuote(symbol: string, timeout = 2000): Promise<WebSocketMessage> {
+    return new Promise(async (resolve, reject) => {
+      // Wait for connection if not ready
+      if (!this.isConnected()) {
+        try {
+          await this.connect();
+          // Give connection time to stabilize
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (error) {
+          reject(new Error('Failed to establish WebSocket connection'));
+          return;
+        }
+      }
+
+      const timeoutId = setTimeout(() => {
+        this.unsubscribe(symbol, callback);
+        reject(new Error(`Timeout waiting for ${symbol} quote`));
+      }, timeout);
+
+      const callback = (data: WebSocketMessage) => {
+        clearTimeout(timeoutId);
+        this.unsubscribe(symbol, callback);
+        resolve(data);
+      };
+
+      this.subscribe(symbol, callback);
+    });
   }
 
-  // Get live quotes for multiple symbols
-  async getLiveQuotes(symbols: string[], timeout = 15000): Promise<WebSocketMessage[]> {
-    throw new Error('WebSocket disabled - use REST API instead');
+  // Get live quotes for multiple symbols with proper error handling
+  async getLiveQuotes(symbols: string[], timeout = 8000): Promise<WebSocketMessage[]> {
+    if (!this.isConnected()) {
+      throw new Error('WebSocket not connected');
+    }
+    
+    // Limit to 3 symbols max to avoid API limits and improve success rate
+    const limitedSymbols = symbols.slice(0, 3);
+    const results: WebSocketMessage[] = [];
+    
+    const promises = limitedSymbols.map(symbol => 
+      this.getLiveQuote(symbol, Math.min(2000, timeout / limitedSymbols.length))
+        .catch(err => {
+          console.log(`No live data for ${symbol}: ${err.message}`);
+          return null;
+        })
+    );
+    
+    const settled = await Promise.allSettled(promises);
+    
+    for (const result of settled) {
+      if (result.status === 'fulfilled' && result.value) {
+        results.push(result.value);
+      }
+    }
+    
+    return results;
   }
 
   // Handle incoming messages
@@ -95,7 +266,7 @@ class EODHDWebSocketManager {
   // Start heartbeat to keep connection alive
   private startHeartbeat(): void {
     this.heartbeatInterval = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
+      if (this.ws?.readyState === globalThis.WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ action: 'ping' }));
       }
     }, 30000); // Ping every 30 seconds
@@ -107,6 +278,21 @@ class EODHDWebSocketManager {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+  }
+
+  // Unsubscribe from all symbols and clear subscriptions
+  unsubscribeAll(): void {
+    if (this.isConnected() && this.subscriptions.size > 0) {
+      const allSymbols = Array.from(this.subscriptions.keys()).map(s => s.replace('.US', ''));
+      const unsubscribeMessage = JSON.stringify({
+        "action": "unsubscribe",
+        "symbols": allSymbols.join(',')
+      });
+      this.ws!.send(unsubscribeMessage);
+      console.log(`📡 Unsubscribed from ${allSymbols.length} symbols`);
+    }
+    
+    this.subscriptions.clear();
   }
 
   // Disconnect and cleanup
@@ -125,7 +311,7 @@ class EODHDWebSocketManager {
 
   // Get connection status
   isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.ws?.readyState === globalThis.WebSocket.OPEN;
   }
 
   // Get subscription count
@@ -161,9 +347,64 @@ export function getWebSocketManager(): EODHDWebSocketManager {
     if (!apiToken) {
       throw new Error('EODHD_API_KEY environment variable is required for WebSocket connection');
     }
+    
+    // Check if we're in a serverless environment (Vercel)
+    if (typeof globalThis.WebSocket === 'undefined') {
+      console.log('⚠️ WebSocket not available in serverless environment, creating stub manager');
+      // Return a stub manager that always fails gracefully
+      return new ServerlessWebSocketManager();
+    }
+    
     wsManager = new EODHDWebSocketManager(apiToken);
   }
   return wsManager;
+}
+
+// Stub WebSocket manager for serverless environments
+class ServerlessWebSocketManager extends EODHDWebSocketManager {
+  constructor() {
+    super(''); // Empty token since we won't use it
+  }
+
+  async connect(): Promise<void> {
+    throw new Error('WebSocket not supported in serverless environment');
+  }
+
+  subscribe(): void {
+    // No-op
+  }
+
+  unsubscribe(): void {
+    // No-op
+  }
+
+  subscribeMultiple(): void {
+    // No-op
+  }
+
+  async getLiveQuote(): Promise<any> {
+    throw new Error('WebSocket not supported in serverless environment');
+  }
+
+  async getLiveQuotes(): Promise<any[]> {
+    throw new Error('WebSocket not supported in serverless environment');
+  }
+
+  isConnected(): boolean {
+    return false;
+  }
+
+  disconnect(): void {
+    // No-op
+  }
+
+  getSubscriptionCount(): number {
+    return 0;
+  }
+
+  unsubscribeAll(): void {
+    // No-op
+  }
 }
 
 export { EODHDWebSocketManager };

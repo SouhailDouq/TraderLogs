@@ -128,43 +128,23 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
     
     const qualifiedStocks: { stock: EODHDRealTimeData; score: number }[] = []
     
-    // Process fewer candidates but with higher quality focus
-    for (const stock of premarketMovers.slice(0, 10)) {
+    // Process all candidates - no backend limiting, let frontend filter
+    for (const stock of premarketMovers) {
       try {
         const symbol = stock.code.replace('.US', '')
         console.log(`Analyzing fresh candidate ${symbol}: $${stock.close}, vol: ${stock.volume}, change: ${stock.change_p}%`)
         
-        // Apply filters only if they have values > 0 (indicating they're enabled)
+        // Skip backend filtering - let frontend handle all filtering for better user control
+        // Only apply basic sanity checks to avoid obvious junk data
         
-        // 1. Price range check
-        if (filters.maxPrice > 0 && stock.close > filters.maxPrice) {
-          console.log(`${symbol} filtered: price $${stock.close} > $${filters.maxPrice}`)
+        // Basic sanity checks only
+        if (stock.close <= 0) {
+          console.log(`${symbol} filtered: invalid price $${stock.close}`)
           continue
         }
         
-        // Check minimum price for breakout strategy
-        if (filters.minPrice && filters.minPrice > 0 && stock.close < filters.minPrice) {
-          console.log(`${symbol} filtered: price $${stock.close} < $${filters.minPrice}`)
-          continue
-        }
-        
-        // 2. Volume check
-        if (filters.minVolume > 0 && stock.volume < filters.minVolume) {
-          console.log(`${symbol} filtered: volume ${stock.volume} < ${filters.minVolume}`)
-          continue
-        }
-        
-        // 3. Change percentage check
-        const changePercent = stock.change_p || 0
-        
-        // Only apply change filter if minChange > 0
-        if (filters.minChange > 0 && changePercent < filters.minChange) {
-          console.log(`${symbol} filtered: change ${changePercent}% below minimum ${filters.minChange}%`)
-          continue
-        }
-        
-        if (filters.maxChange > 0 && changePercent > filters.maxChange) {
-          console.log(`${symbol} filtered: change ${changePercent}% above maximum ${filters.maxChange}%`)
+        if (stock.volume < 0) {
+          console.log(`${symbol} filtered: invalid volume ${stock.volume}`)
           continue
         }
         
@@ -198,12 +178,8 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
         const score = calculateScore(stock, technicals || undefined, strategy)
         const signal = getSignal(score, strategy)
         
-        // Apply higher quality threshold for both strategies
-        const qualityThreshold = strategy === 'momentum' ? 40 : 50
-        if (score < qualityThreshold) {
-          console.log(`${symbol} filtered: score ${score} below quality threshold ${qualityThreshold}`)
-          continue
-        }
+        // No score filtering - let frontend handle quality filtering
+        // This ensures all candidates are available for user filtering
         
         qualifiedStocks.push({ stock, score })
         console.log(`${symbol} qualified with score: ${score}`)
@@ -213,9 +189,9 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
       }
     }
     
-    // Sort by score and return only top 5 candidates for quality
+    // Return all qualified stocks - no backend limiting for frontend flexibility
     qualifiedStocks.sort((a, b) => b.score - a.score)
-    const topStocks = qualifiedStocks.slice(0, 5).map(item => item.stock)
+    const topStocks = qualifiedStocks.map(item => item.stock)
     
     console.log(`🎯 Top ${topStocks.length} high-quality momentum stocks qualified (quality over quantity)`)
     return topStocks
@@ -236,31 +212,31 @@ export async function POST(request: NextRequest) {
     // Extract strategy and filters from request
     const strategy = body.strategy || 'momentum'
     
-    // Optimized baseline filters for quality (targeting 3-5 excellent stocks)
+    // Relaxed baseline filters to get more candidates (targeting 10-15 stocks)
     const baselineFilters: ScanFilters = strategy === 'momentum' ? {
-      // Momentum Strategy: Focus on high-quality setups
+      // Momentum Strategy: Cast wider net for more opportunities
       minChange: 0, // 0% minimum change
       maxChange: 100, // 100% maximum change
-      minVolume: 500000, // Reduced to 500K for more candidates
-      maxPrice: 15, // Increased to $15 for more options
-      minPrice: 1.00, // Minimum $1 to avoid penny stocks
-      minRelativeVolume: 1.2, // Slightly reduced for more candidates
+      minVolume: 50000, // Reduced to 50K for more premarket candidates
+      maxPrice: 25, // Increased to $25 for more options
+      minPrice: 0.50, // Minimum $0.50 to include more stocks
+      minRelativeVolume: 1.0, // Reduced for more candidates
       minScore: 0, // No score filter - quality handled in processing
-      minMarketCap: 100000000, // Reduced to $100M for more options
+      minMarketCap: 50000000, // Reduced to $50M for more options
       maxMarketCap: 0, // No upper limit
       maxFloat: 0 // No float restriction for momentum
     } : {
-      // Breakout Strategy: Focus on news catalysts
-      minChange: 5, // Reduced to 5%+ for more candidates
+      // Breakout Strategy: Cast wider net for opportunities
+      minChange: 2, // Reduced to 2%+ for more candidates
       maxChange: 100, // No upper limit
-      minVolume: 0, // No minimum volume requirement
-      maxPrice: 25, // Increased to $25 for more options
-      minPrice: 1.00, // Minimum $1 to avoid penny stocks
-      minRelativeVolume: 2.0, // Reduced to 2x for more candidates
+      minVolume: 25000, // Minimum 25K volume for premarket
+      maxPrice: 30, // Increased to $30 for more options
+      minPrice: 0.50, // Minimum $0.50 to include more stocks
+      minRelativeVolume: 1.5, // Reduced to 1.5x for more candidates
       minScore: 0, // No score filter
       minMarketCap: 0, // $0M market cap (no filter)
       maxMarketCap: 0, // $0B market cap (no filter)
-      maxFloat: 20000000 // Increased to <20M shares for more options
+      maxFloat: 50000000 // Increased to <50M shares for more options
     }
     
     // Frontend refinement filters (applied on top of baseline)
@@ -373,7 +349,7 @@ export async function POST(request: NextRequest) {
           signal,
           strategy,
           marketCap: marketCapFormatted,
-          lastUpdated: new Date().toISOString(),
+          lastUpdated: new Date(stock.timestamp * 1000).toISOString(),
           news: newsContext
         })
         

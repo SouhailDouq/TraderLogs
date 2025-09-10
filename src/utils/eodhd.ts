@@ -2,6 +2,7 @@
 // Documentation: https://eodhd.com/financial-apis/
 
 import { getWebSocketManager, type WebSocketMessage } from './websocket';
+import { yahooFinance } from './yahoo-finance';
 
 // Helper function to safely convert API values to numbers
 function toNumber(value: string | number | null | undefined): number {
@@ -108,6 +109,7 @@ export interface EODHDEarningsEvent {
 class EODHDClient {
   private apiKey: string;
   private baseUrl = 'https://eodhd.com/api';
+  private wsManager?: ReturnType<typeof getWebSocketManager>;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -151,13 +153,16 @@ class EODHDClient {
         const wsManager = getWebSocketManager();
         await wsManager.connect();
         
-        const wsData = await wsManager.getLiveQuote(symbol, 5000);
+        // Wait a bit for connection to stabilize
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const wsData = await wsManager.getLiveQuote(symbol, 1000);
         const convertedData = this.convertWebSocketToRealTimeData(wsData);
         
-        console.log(`WebSocket live data for ${symbol}: ${new Date().toISOString()} (real-time)`);
+        console.log(`💰 Live trade: ${symbol} at $${convertedData.close}`);
         return convertedData;
       } catch (error) {
-        console.log(`WebSocket failed for ${symbol}, falling back to REST API:`, error);
+        // Silently fall back to REST API - WebSocket timeouts are expected for many symbols
       }
     }
     
@@ -179,9 +184,78 @@ class EODHDClient {
   async getRealTimeQuotes(symbols: string[]): Promise<EODHDRealTimeData[]> {
     if (symbols.length === 0) return [];
     
-    // Use REST API exclusively (WebSocket has too many API limits)
+    // Try WebSocket first for live data during market hours
+    const marketStatus = this.getMarketHoursStatus();
+    const isMarketHours = ['premarket', 'regular', 'afterhours'].includes(marketStatus);
     
-    // Use REST API for reliable data
+    if (isMarketHours) {
+      try {
+        console.log(`🔄 Attempting WebSocket for live ${marketStatus} data...`);
+        const wsManager = getWebSocketManager();
+        await wsManager.connect();
+        
+        // Use batch subscription for better WebSocket performance
+        const liveData: EODHDRealTimeData[] = [];
+        
+        // Create a promise that collects WebSocket data for a reasonable time
+        const collectWebSocketData = new Promise<EODHDRealTimeData[]>((resolve) => {
+          const collectedData = new Map<string, WebSocketMessage>();
+          
+          const callback = (data: WebSocketMessage) => {
+            const symbolKey = `${data.s}.US`;
+            if (symbols.includes(symbolKey)) {
+              collectedData.set(symbolKey, data);
+              console.log(`📊 Collected live data for ${data.s}: $${data.p}`);
+            }
+          };
+          
+          // Subscribe to all symbols
+          symbols.forEach(symbol => wsManager.subscribe(symbol, callback));
+          
+          // Wait 3 seconds to collect live data
+          setTimeout(() => {
+            // Unsubscribe and return collected data
+            symbols.forEach(symbol => wsManager.unsubscribe(symbol, callback));
+            
+            const results = Array.from(collectedData.values()).map(wsData => 
+              this.convertWebSocketToRealTimeData(wsData)
+            );
+            
+            resolve(results);
+          }, 3000);
+        });
+        
+        const wsResults = await collectWebSocketData;
+        
+        if (wsResults.length > 0) {
+          console.log(`✅ Got ${wsResults.length} live quotes from WebSocket (real-time pre-market)`);
+          return wsResults;
+        }
+        
+        console.log('No WebSocket data received, trying intraday historical API...');
+        
+        // Try intraday historical API as secondary option (includes pre-market)
+        const intradayPromises = symbols.map(symbol => this.getLatestPremarketPrice(symbol));
+        const intradayResults = await Promise.allSettled(intradayPromises);
+        
+        const intradayData = intradayResults
+          .filter((result): result is PromiseFulfilledResult<EODHDRealTimeData | null> => 
+            result.status === 'fulfilled' && result.value !== null)
+          .map(result => result.value!);
+        
+        if (intradayData.length > 0) {
+          console.log(`✅ Got ${intradayData.length} quotes from intraday API (includes pre-market)`);
+          return intradayData;
+        }
+        
+      } catch (error) {
+        console.warn('WebSocket and intraday APIs failed, falling back to REST API:', error);
+      }
+    }
+    
+    // Fallback to REST API
+    console.log('📡 Using REST API for quotes...');
+    
     // For EODHD real-time API, we need to use the correct format:
     // /real-time/SYMBOL.US?s=OTHER1.US,OTHER2.US for multiple symbols
     // Remove any existing .US suffix to avoid double suffixes
@@ -216,6 +290,26 @@ class EODHDClient {
       change: toNumber(d.change),
       change_p: toNumber(d.change_p)
     }));
+    
+    // Check for stale data by examining timestamps
+    const now = Date.now() / 1000; // Current time in seconds
+    const staleDataWarnings: string[] = [];
+    
+    processedData.forEach(d => {
+      if (d.timestamp) {
+        const dataAge = (now - d.timestamp) / 3600; // Age in hours
+        if (dataAge > 24) {
+          staleDataWarnings.push(`${d.code}: ${dataAge.toFixed(1)}h old`);
+        } else if (dataAge > 4) {
+          console.warn(`⚠️ ${d.code} data is ${dataAge.toFixed(1)} hours old - may be stale`);
+        }
+      }
+    });
+    
+    if (staleDataWarnings.length > 0) {
+      console.error(`🚨 STALE DATA DETECTED: ${staleDataWarnings.join(', ')}`);
+      console.log('💡 Consider switching to Yahoo Finance API for fresh premarket data');
+    }
     
     const validData = processedData.filter(d => d.close > 0 && !isNaN(d.close));
     console.log(`📊 Retrieved ${validData.length}/${processedData.length} valid stock quotes from REST API`);
@@ -325,10 +419,82 @@ class EODHDClient {
     return 'closed';
   }
 
-  // Check if live data is expected to be fresh
-  isLiveDataFresh(): boolean {
-    const status = this.getMarketHoursStatus();
-    return ['premarket', 'regular', 'afterhours'].includes(status);
+  // Check if we should attempt live data (market hours or premarket)
+  public isLiveDataFresh(): boolean {
+    const marketStatus = this.getMarketHoursStatus();
+    
+    // Only use WebSocket during regular market hours when data is most reliable
+    // Premarket WebSocket data is often incomplete/delayed
+    return marketStatus === 'regular';
+  }
+
+  // Get intraday historical data (includes pre-market, delayed ~2-3 hours)
+  async getIntradayData(symbol: string, interval = '1m'): Promise<any[]> {
+    try {
+      const cleanSymbol = symbol.replace('.US', '');
+      
+      // EODHD expects Unix timestamps for from/to parameters
+      // Use ET timezone for proper market data alignment
+      const now = new Date();
+      const etNow = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
+      
+      // Start from yesterday 4 PM ET to capture overnight and premarket data
+      const etStartOfDay = new Date(etNow);
+      etStartOfDay.setDate(etStartOfDay.getDate() - 1); // Go back 1 day
+      etStartOfDay.setHours(16, 0, 0, 0); // 4 PM ET previous day
+      
+      const fromTimestamp = Math.floor(etStartOfDay.getTime() / 1000);
+      const toTimestamp = Math.floor(now.getTime() / 1000);
+      
+      console.log(`📊 Fetching intraday data for ${cleanSymbol} from ${etStartOfDay.toISOString()} to ${now.toISOString()} (ET timezone aligned)`);
+      
+      const data = await this.makeRequest(`/intraday/${cleanSymbol}.US`, {
+        interval,
+        from: fromTimestamp,
+        to: toTimestamp,
+        fmt: 'json'
+      });
+      
+      if (Array.isArray(data)) {
+        console.log(`✅ Retrieved ${data.length} intraday data points for ${cleanSymbol}`);
+        return data;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error(`Error fetching intraday data for ${symbol}:`, error);
+      return [];
+    }
+  }
+
+  // Get latest pre-market price from intraday data
+  async getLatestPremarketPrice(symbol: string): Promise<EODHDRealTimeData | null> {
+    try {
+      const intradayData = await this.getIntradayData(symbol, '1m');
+      
+      if (intradayData.length === 0) return null;
+      
+      // Get the most recent data point
+      const latest = intradayData[intradayData.length - 1];
+      
+      // Convert to EODHDRealTimeData format
+      return {
+        code: `${symbol.replace('.US', '')}.US`,
+        timestamp: new Date(latest.datetime).getTime() / 1000,
+        gmtoffset: 0,
+        open: toNumber(latest.open),
+        high: toNumber(latest.high),
+        low: toNumber(latest.low),
+        close: toNumber(latest.close),
+        volume: toNumber(latest.volume),
+        previousClose: toNumber(latest.close), // Will be enriched later
+        change: 0, // Will be calculated
+        change_p: 0 // Will be calculated
+      };
+    } catch (error) {
+      console.error(`Error getting latest premarket price for ${symbol}:`, error);
+      return null;
+    }
   }
 
   // Get next market open time
@@ -443,39 +609,201 @@ class EODHDClient {
         return [];
       }
       
-      // Get live quotes for discovered candidates
+      // Get live quotes for discovered candidates with improved error handling
       const liveData: EODHDRealTimeData[] = [];
-      const batchSize = 10;
+      const batchSize = 5; // Reduced batch size to avoid API limits
       
-      for (let i = 0; i < symbols.length; i += batchSize) {
-        const batch = symbols.slice(i, i + batchSize);
+      // Try WebSocket first for fresh data, then fallback to REST API
+      this.wsManager = getWebSocketManager();
+      let wsData: EODHDRealTimeData[] = [];
+      
+      try {
+        await this.wsManager.connect();
+        console.log('🔄 Attempting WebSocket for live premarket data...');
         
-        try {
-          const batchData = await this.getRealTimeQuotes(batch);
-          if (Array.isArray(batchData)) {
-            // Apply quality filters to fresh data
-            const qualified = batchData.filter(stock => {
-              const price = stock.close;
-              const volume = stock.volume;
-              const changePercent = Math.abs(stock.change_p);
+        // Subscribe to symbols in smaller batches to avoid limits
+        const wsSymbols = symbols.slice(0, 5); // Limit to 5 symbols for WebSocket
+        const wsPromises: Promise<any>[] = [];
+        
+        for (const symbol of wsSymbols) {
+          wsPromises.push(
+            this.wsManager.getLiveQuote(symbol, 1500).catch((err: Error) => {
+              console.log(`No WebSocket data for ${symbol}:`, err.message);
+              return null;
+            })
+          );
+        }
+        
+        const wsResults = await Promise.allSettled(wsPromises);
+        const validWsData = wsResults
+          .filter(result => result.status === 'fulfilled' && result.value)
+          .map(result => (result as PromiseFulfilledResult<any>).value);
+        
+        console.log(`✅ Got ${validWsData.length} live quotes from WebSocket (real-time pre-market)`);
+        
+        // Convert WebSocket data to EODHD format
+        wsData = validWsData.map(ws => ({
+          code: `${ws.s}.US`,
+          timestamp: Math.floor(ws.t / 1000),
+          gmtoffset: 0,
+          open: ws.p,
+          high: ws.p,
+          low: ws.p,
+          close: ws.p,
+          volume: ws.v || 0,
+          previousClose: ws.p,
+          change: 0,
+          change_p: 0
+        }));
+        
+      } catch (wsError) {
+        console.log('WebSocket unavailable, using REST API fallback:', wsError instanceof Error ? wsError.message : 'Unknown error');
+      }
+      
+      // If WebSocket provided data, use it; otherwise fallback to intraday API
+      if (wsData.length > 0) {
+        liveData.push(...wsData);
+      } else {
+        console.log('No WebSocket data received, trying intraday historical API...');
+        
+        // Use intraday API as fallback for fresher data
+        const intradayBatchSize = 10;
+        for (let i = 0; i < symbols.length; i += intradayBatchSize) {
+          const batch = symbols.slice(i, i + intradayBatchSize);
+          
+          const intradayPromises = batch.map(async symbol => {
+            try {
+              const cleanSymbol = symbol.replace('.US', '');
+              const intradayData = await this.getIntradayData(cleanSymbol, '1m');
               
-              return price >= 1 && // Minimum $1
-                     price <= (params.maxPrice || 25) &&
-                     volume >= (params.minVolume || 200000) &&
-                     changePercent >= 0.5; // At least 0.5% movement for more candidates
-            });
-            
-            liveData.push(...qualified);
-          }
+              if (intradayData.length > 0) {
+                const latest = intradayData[intradayData.length - 1];
+                
+                // Calculate live premarket data with proper timestamps
+                let cumulativeVolume = 0;
+                let previousClose = toNumber(latest.close);
+                let currentPrice = toNumber(latest.close);
+                
+                // Get current time and create ET-based premarket window
+                const now = new Date();
+                
+                // Create today's premarket window in UTC (4:00 AM - 9:30 AM ET)
+                // Use explicit UTC times: 4:00 AM ET = 8:00 AM UTC (EDT) or 9:00 AM UTC (EST)
+                const todayUTC = new Date(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+                const isDST = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' }).includes('EDT');
+                const today4AM_UTC = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate(), isDST ? 8 : 9, 0, 0)); // 4:00 AM ET
+                const today930AM_UTC = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate(), isDST ? 13 : 14, 30, 0)); // 9:30 AM ET
+                
+                console.log(`📊 Processing ${cleanSymbol}: Premarket window: ${today4AM_UTC.toISOString()} - ${today930AM_UTC.toISOString()} (4:00-9:30 AM ET)`);
+                
+                // Find most recent data and calculate premarket metrics
+                let mostRecentData = null;
+                let yesterdayClose = null;
+                
+                for (let i = intradayData.length - 1; i >= 0; i--) {
+                  const dataPoint = intradayData[i];
+                  const dataTime = new Date(dataPoint.datetime);
+                  
+                  // Track most recent data point
+                  if (!mostRecentData || dataTime > new Date(mostRecentData.datetime)) {
+                    mostRecentData = dataPoint;
+                  }
+                  
+                  // Sum up TODAY's premarket volume (4 AM - 9:30 AM ET)
+                  if (dataTime >= today4AM_UTC && dataTime < today930AM_UTC) {
+                    cumulativeVolume += toNumber(dataPoint.volume);
+                  }
+                  
+                  // Find yesterday's close (last data point before today 4 AM)
+                  if (dataTime < today4AM_UTC && !yesterdayClose) {
+                    yesterdayClose = toNumber(dataPoint.close);
+                  }
+                }
+                
+                // Use most recent data for current price
+                if (mostRecentData) {
+                  currentPrice = toNumber(mostRecentData.close);
+                  const mostRecentTime = new Date(mostRecentData.datetime);
+                  console.log(`📊 ${cleanSymbol}: Most recent data from ${mostRecentTime.toISOString()}, Price: $${currentPrice}`);
+                }
+                
+                // Calculate change from yesterday's close
+                previousClose = yesterdayClose || currentPrice;
+                const change = currentPrice - previousClose;
+                const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+                
+                console.log(`📊 ${cleanSymbol}: Volume: ${cumulativeVolume}, Change: ${changePercent.toFixed(2)}% (${currentPrice} vs ${previousClose})`);
+                
+                return {
+                  code: symbol,
+                  timestamp: mostRecentData ? new Date(mostRecentData.datetime).getTime() / 1000 : new Date().getTime() / 1000,
+                  gmtoffset: 0,
+                  open: toNumber(latest.open),
+                  high: toNumber(latest.high),
+                  low: toNumber(latest.low),
+                  close: currentPrice,
+                  volume: Math.max(cumulativeVolume, toNumber(latest.volume)), // Use cumulative premarket volume
+                  previousClose: previousClose,
+                  change: change,
+                  change_p: changePercent
+                };
+              }
+              return null;
+            } catch (error) {
+              console.error(`Error getting intraday data for ${symbol}:`, error);
+              return null;
+            }
+          });
+          
+          const intradayResults = await Promise.allSettled(intradayPromises);
+          const validIntradayData = intradayResults
+            .filter(result => result.status === 'fulfilled' && result.value)
+            .map(result => (result as PromiseFulfilledResult<any>).value);
+          
+          console.log(`✅ Got ${validIntradayData.length} quotes from intraday API (includes pre-market)`);
+          liveData.push(...validIntradayData);
           
           // Rate limiting delay
-          if (i + batchSize < symbols.length) {
-            await new Promise(resolve => setTimeout(resolve, 300));
+          if (i + intradayBatchSize < symbols.length) {
+            await new Promise(resolve => setTimeout(resolve, 200));
           }
-        } catch (error) {
-          console.error(`Error fetching live data for batch:`, error);
         }
       }
+      
+      // If still no data, fallback to REST API
+      if (liveData.length === 0) {
+        console.log('📡 Using REST API for quotes...');
+        
+        for (let i = 0; i < symbols.length; i += batchSize) {
+          const batch = symbols.slice(i, i + batchSize);
+          
+          try {
+            const batchData = await this.getRealTimeQuotes(batch);
+            if (Array.isArray(batchData)) {
+              liveData.push(...batchData);
+            }
+            
+            // Rate limiting delay
+            if (i + batchSize < symbols.length) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+          } catch (error) {
+            console.error(`Error fetching REST data for batch:`, error);
+          }
+        }
+      }
+      
+      // Apply relaxed quality filters to get more candidates
+      const qualified = liveData.filter(stock => {
+        const price = stock.close;
+        const volume = stock.volume;
+        const changePercent = Math.abs(stock.change_p || 0);
+        
+        return price >= 0.5 && // Minimum $0.50 (more lenient)
+               price <= (params.maxPrice || 30) &&
+               volume >= (params.minVolume || 100000) && // Reduced minimum volume
+               changePercent >= 0.1; // At least 0.1% movement (very lenient)
+      });
       
       // Sort by absolute change percentage to prioritize most active
       liveData.sort((a, b) => Math.abs(b.change_p || 0) - Math.abs(a.change_p || 0));
@@ -488,6 +816,14 @@ class EODHDClient {
         console.log('Today\'s top movers:', topCandidates.slice(0, 5).map(s => 
           `${s.code.replace('.US', '')}: ${s.change_p?.toFixed(2)}%`
         ).join(', '));
+      }
+      
+      // Clean up WebSocket subscriptions after scan completes
+      if (this.wsManager) {
+        setTimeout(() => {
+          this.wsManager?.unsubscribeAll();
+          console.log('🧹 Cleaned up WebSocket subscriptions after scan');
+        }, 2000); // Give 2 seconds for any final data
       }
       
       return topCandidates;
