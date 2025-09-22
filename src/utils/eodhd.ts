@@ -159,14 +159,31 @@ class EODHDClient {
         const wsData = await wsManager.getLiveQuote(symbol, 1000);
         const convertedData = this.convertWebSocketToRealTimeData(wsData);
         
-        console.log(`💰 Live trade: ${symbol} at $${convertedData.close}`);
+        // Get daily volume from REST API to supplement WebSocket price data
+        try {
+          const restData = await this.makeRequest(`/real-time/${symbol}.US`);
+          if (restData?.volume) {
+            convertedData.volume = toNumber(restData.volume);
+            convertedData.previousClose = toNumber(restData.previousClose) || convertedData.close;
+            convertedData.change = convertedData.close - convertedData.previousClose;
+            convertedData.change_p = convertedData.previousClose > 0 ? 
+              ((convertedData.change / convertedData.previousClose) * 100) : 0;
+          }
+        } catch (error) {
+          // If REST API fails, continue with WebSocket data only
+        }
+        
+        console.log(`💰 Live trade: ${symbol} at $${convertedData.close} (vol: ${convertedData.volume})`);
         return convertedData;
       } catch (error) {
-        // Silently fall back to REST API - WebSocket timeouts are expected for many symbols
+        // Silently fall back to next option
       }
     }
     
-    // Fallback to REST API
+    // Skip Yahoo Finance for now due to 401 errors - focus on WebSocket + EODHD
+    // Yahoo Finance is currently blocked with 401 Unauthorized errors
+    
+    // Final fallback to EODHD REST API
     const data = await this.makeRequest(`/real-time/${symbol}.US`);
     
     // Log timestamp for debugging data freshness
@@ -175,6 +192,12 @@ class EODHDClient {
       const now = new Date();
       const ageMinutes = Math.round((now.getTime() - dataTime.getTime()) / (1000 * 60));
       console.log(`REST API data for ${symbol}: ${dataTime.toISOString()} (${ageMinutes} min old)`);
+      
+      // Warn if data is very stale during market hours
+      const marketStatus = this.getMarketHoursStatus();
+      if (ageMinutes > 5 && ['premarket', 'regular', 'afterhours'].includes(marketStatus)) {
+        console.log(`🚨 STALE DATA WARNING: ${symbol} data is ${ageMinutes} minutes old during ${marketStatus} hours`);
+      }
     }
     
     return data;
@@ -222,7 +245,14 @@ class EODHDClient {
             );
             
             console.log(`📊 WebSocket collected ${results.length}/${symbols.length} live quotes after 8s wait`);
-            resolve(results);
+            
+            // Enhance WebSocket data with daily volumes from REST API
+            this.enhanceWithDailyVolumes(results).then(enhancedResults => {
+              resolve(enhancedResults);
+            }).catch(() => {
+              // If volume enhancement fails, return WebSocket data as-is
+              resolve(results);
+            });
           }, 8000);
         });
         
@@ -233,7 +263,7 @@ class EODHDClient {
           return wsResults;
         }
         
-        console.log('No WebSocket data received, trying real-time API for fresher data...');
+        console.log('No WebSocket data received, using real-time API for live prices...');
         
         // During premarket, try real-time API first for potentially fresher data
         if (marketStatus === 'premarket') {
@@ -342,10 +372,61 @@ class EODHDClient {
       high: toNumber(wsData.p),
       low: toNumber(wsData.p),
       close: toNumber(wsData.p),
-      volume: toNumber(wsData.v) || 0,
+      volume: 0, // WebSocket v is trade size, not daily volume - will be populated separately
       previousClose: toNumber(wsData.p), // Approximation
       change: 0, // Would need previous close to calculate
       change_p: 0 // Would need previous close to calculate
+    };
+  }
+
+  // Enhance WebSocket data with daily volumes from REST API
+  private async enhanceWithDailyVolumes(wsResults: EODHDRealTimeData[]): Promise<EODHDRealTimeData[]> {
+    const enhanced = [...wsResults];
+    
+    // Fetch volumes in batches to avoid API limits
+    for (const result of enhanced) {
+      try {
+        const symbol = result.code.replace('.US', '');
+        const restData = await this.makeRequest(`/real-time/${symbol}.US`);
+        
+        if (restData?.volume) {
+          result.volume = toNumber(restData.volume);
+          result.previousClose = toNumber(restData.previousClose) || result.close;
+          result.change = result.close - result.previousClose;
+          result.change_p = result.previousClose > 0 ? 
+            ((result.change / result.previousClose) * 100) : 0;
+          // Keep the WebSocket timestamp (live) instead of REST API timestamp (stale)
+          // result.timestamp stays as WebSocket timestamp for accurate freshness
+        }
+      } catch (error) {
+        // Continue with WebSocket data if REST API fails
+        console.log(`Could not enhance ${result.code} with daily volume`);
+      }
+    }
+    
+    return enhanced;
+  }
+
+  // Convert Yahoo Finance quote to EODHDRealTimeData format
+  private convertYahooToRealTimeData(yahooData: any): EODHDRealTimeData {
+    const currentPrice = yahooData.preMarketPrice || yahooData.regularMarketPrice || yahooData.postMarketPrice;
+    const currentChange = yahooData.preMarketChange || yahooData.regularMarketChange || 0;
+    const currentChangePercent = yahooData.preMarketChangePercent || yahooData.regularMarketChangePercent || 0;
+    const currentVolume = yahooData.preMarketVolume || yahooData.regularMarketVolume || 0;
+    const timestamp = yahooData.preMarketTime || yahooData.regularMarketTime || Date.now() / 1000;
+    
+    return {
+      code: `${yahooData.symbol}.US`,
+      timestamp: timestamp,
+      gmtoffset: 0,
+      open: toNumber(currentPrice),
+      high: toNumber(currentPrice),
+      low: toNumber(currentPrice),
+      close: toNumber(currentPrice),
+      volume: toNumber(currentVolume),
+      previousClose: toNumber(currentPrice - currentChange),
+      change: toNumber(currentChange),
+      change_p: toNumber(currentChangePercent)
     };
   }
 
@@ -656,20 +737,18 @@ class EODHDClient {
         
         console.log(`✅ Got ${validWsData.length} live quotes from WebSocket (real-time pre-market)`);
         
-        // Convert WebSocket data to EODHD format
-        wsData = validWsData.map(ws => ({
-          code: `${ws.s}.US`,
-          timestamp: Math.floor(ws.t / 1000),
-          gmtoffset: 0,
-          open: ws.p,
-          high: ws.p,
-          low: ws.p,
-          close: ws.p,
-          volume: ws.v || 0,
-          previousClose: ws.p,
-          change: 0,
-          change_p: 0
-        }));
+        // Convert WebSocket data to EODHD format using proper conversion method
+        const rawWsData = validWsData.map(ws => this.convertWebSocketToRealTimeData(ws));
+        
+        // Enhance with daily volumes and proper change calculations
+        console.log('📊 Enhancing WebSocket data with daily volumes and change calculations...');
+        wsData = await this.enhanceWithDailyVolumes(rawWsData);
+        
+        // Log enhanced data for debugging
+        wsData.forEach(stock => {
+          const symbol = stock.code.replace('.US', '');
+          console.log(`📈 Enhanced ${symbol}: $${stock.close}, vol: ${stock.volume.toLocaleString()}, change: ${stock.change_p?.toFixed(2)}%`);
+        });
         
       } catch (wsError) {
         console.log('WebSocket unavailable, using REST API fallback:', wsError instanceof Error ? wsError.message : 'Unknown error');

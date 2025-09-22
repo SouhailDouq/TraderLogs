@@ -173,7 +173,7 @@ class EODHDWebSocketManager {
   }
 
   // Get live quote for single symbol (Promise-based)
-  async getLiveQuote(symbol: string, timeout = 2000): Promise<WebSocketMessage> {
+  async getLiveQuote(symbol: string, timeout = 5000): Promise<WebSocketMessage> {
     return new Promise(async (resolve, reject) => {
       // Wait for connection if not ready
       if (!this.isConnected()) {
@@ -203,7 +203,7 @@ class EODHDWebSocketManager {
   }
 
   // Get live quotes for multiple symbols with proper error handling
-  async getLiveQuotes(symbols: string[], timeout = 8000): Promise<WebSocketMessage[]> {
+  async getLiveQuotes(symbols: string[], timeout = 15000): Promise<WebSocketMessage[]> {
     if (!this.isConnected()) {
       throw new Error('WebSocket not connected');
     }
@@ -213,7 +213,7 @@ class EODHDWebSocketManager {
     const results: WebSocketMessage[] = [];
     
     const promises = limitedSymbols.map(symbol => 
-      this.getLiveQuote(symbol, Math.min(2000, timeout / limitedSymbols.length))
+      this.getLiveQuote(symbol, Math.min(5000, timeout / limitedSymbols.length))
         .catch(err => {
           console.log(`No live data for ${symbol}: ${err.message}`);
           return null;
@@ -233,7 +233,13 @@ class EODHDWebSocketManager {
 
   // Handle incoming messages
   private handleMessage(data: WebSocketMessage): void {
-    const callbacks = this.subscriptions.get(data.s);
+    // Try both formats: "OPEN" and "OPEN.US"
+    const symbol = data.s;
+    const symbolWithSuffix = `${symbol}.US`;
+    
+    // Check for callbacks under both symbol formats
+    const callbacks = this.subscriptions.get(symbol) || this.subscriptions.get(symbolWithSuffix);
+    
     if (callbacks) {
       callbacks.forEach(callback => {
         try {

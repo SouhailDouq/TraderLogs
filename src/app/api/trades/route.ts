@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
         t.symbol === trade.symbol && 
         new Date(t.date) < new Date(trade.date)
       )
-      if (buyTrade) {
+      if (buyTrade && buyTrade.price !== null && trade.price !== null && trade.quantity !== null) {
         trade.profitLoss = (trade.price - buyTrade.price) * trade.quantity
       }
     }

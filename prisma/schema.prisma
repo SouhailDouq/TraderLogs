@@ -72,16 +72,16 @@ model Trade {
   userId       String   @db.ObjectId
   symbol       String
   type         String   // 'BUY' or 'SELL'
-  quantity     Float
-  price        Float
+  quantity     Float?
+  price        Float?
   date         DateTime
-  total        Float
+  total        Float?
   fees         Float?
   notes        String?
   currentPrice Float?
   profitLoss   Float?
   journal      Json?    // Journal entry with notes, tags, emotion, rating, etc.
-  source       String   // 'CSV' or 'API'
+  source       String?  // 'CSV' or 'API'
   sourceId     String?  // Original ID from source (e.g., Trading212 order ID)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

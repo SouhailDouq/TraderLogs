@@ -134,15 +134,25 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
         const symbol = stock.code.replace('.US', '')
         console.log(`Analyzing fresh candidate ${symbol}: $${stock.close}, vol: ${stock.volume}, change: ${stock.change_p}%`)
         
-        // Filter out warrants and rights - EODHD API doesn't support negative matching
-        if (symbol.endsWith('W') || symbol.endsWith('R') || symbol.includes('-WT') || symbol.includes('.WS') || symbol.includes('.WD')) {
+        // Filter out warrants and rights - use explicit patterns to avoid false positives
+        const isWarrantOrRight = (
+          symbol.includes('-WT') || // Explicit warrant suffix
+          symbol.includes('.WS') || // Warrant series
+          symbol.includes('.WD') || // Warrant series
+          symbol.endsWith('WS') ||  // Warrant series
+          symbol.endsWith('WT') ||  // Warrant suffix
+          /^[A-Z]{2,}W$/.test(symbol) && symbol.length > 4 // Multi-letter + W pattern (avoids single letters like W, RR)
+        )
+        
+        if (isWarrantOrRight) {
           console.log(`${symbol} filtered: derivative instrument (warrant/right)`)
           continue
         }
         
         // Apply price and volume filters to remove penny stocks and low-quality candidates
-        if (stock.close < filters.minPrice!) {
-          console.log(`${symbol} filtered: price $${stock.close} < $${filters.minPrice}`)
+        const minPriceThreshold = filters.minPrice && filters.minPrice > 0 ? filters.minPrice : 1.00 // Default to $1.00 minimum
+        if (stock.close < minPriceThreshold) {
+          console.log(`${symbol} filtered: price $${stock.close} < $${minPriceThreshold}`)
           continue
         }
         
@@ -187,15 +197,30 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
         const techData = await eodhd.getTechnicals(symbol)
         technicals = techData?.[0] || null
         
+        // Check data freshness and add warnings
+        // Convert timestamp to milliseconds if it's in seconds (Unix timestamp)
+        const timestampMs = stock.timestamp ? 
+          (stock.timestamp < 1e12 ? stock.timestamp * 1000 : stock.timestamp) : 
+          Date.now()
+        const dataAge = Date.now() - timestampMs
+        const isStaleData = dataAge > 5 * 60 * 1000 // 5 minutes
+        
+        if (isStaleData) {
+          console.log(`⚠️ ${symbol}: Data is ${Math.round(dataAge/60000)} minutes old - may not be reliable for live trading`)
+        }
+        
         // Calculate strategy-specific score
         const score = calculateScore(stock, technicals || undefined, strategy)
         const signal = getSignal(score, strategy)
         
-        // No score filtering - let frontend handle quality filtering
-        // This ensures all candidates are available for user filtering
+        // Apply minimum score filter to reduce noise
+        if (score < filters.minScore) {
+          console.log(`${symbol} filtered: score ${score} < ${filters.minScore}`)
+          continue
+        }
         
         qualifiedStocks.push({ stock, score })
-        console.log(`${symbol} qualified with score: ${score}`)
+        console.log(`${symbol} qualified with score: ${score}${isStaleData ? ' ⚠️ STALE DATA' : ''}`)
         
       } catch (error) {
         console.error(`Error processing stock:`, error)

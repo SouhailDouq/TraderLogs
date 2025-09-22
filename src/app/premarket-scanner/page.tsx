@@ -295,15 +295,15 @@ export default function PremarketScanner() {
   // Get active filters for API call
   const getActiveFilters = () => {
     const activeFilters: StrategyFilters = {
-      minChange: enabledFilters.minChange ? filters.minChange : 0,
-      maxChange: enabledFilters.maxChange ? filters.maxChange : 0,
-      minVolume: enabledFilters.minVolume ? filters.minVolume : 0,
-      maxPrice: enabledFilters.maxPrice ? filters.maxPrice : 0,
-      minRelativeVolume: enabledFilters.minRelativeVolume ? filters.minRelativeVolume : 0,
+      minChange: enabledFilters.minChange ? filters.minChange : 2, // Default 2% for momentum
+      maxChange: enabledFilters.maxChange ? filters.maxChange : 100,
+      minVolume: enabledFilters.minVolume ? filters.minVolume : 100000, // Default 100K volume
+      maxPrice: enabledFilters.maxPrice ? filters.maxPrice : 20, // Default $20 max
+      minRelativeVolume: enabledFilters.minRelativeVolume ? filters.minRelativeVolume : 1.2, // Default 1.2x rel vol
       minScore: enabledFilters.minScore ? filters.minScore : 0,
-      minMarketCap: enabledFilters.minMarketCap ? filters.minMarketCap : 0,
+      minMarketCap: enabledFilters.minMarketCap ? filters.minMarketCap : 100000000, // Default $100M min cap
       maxMarketCap: enabledFilters.maxMarketCap ? filters.maxMarketCap : 0,
-      minPrice: enabledFilters.minPrice ? filters.minPrice : 0,
+      minPrice: enabledFilters.minPrice ? filters.minPrice : 1, // Default $1 minimum (will be overridden by backend to $0.50)
       maxFloat: enabledFilters.maxFloat ? filters.maxFloat : 0
     }
     return activeFilters

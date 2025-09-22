@@ -20,16 +20,25 @@ export class TradeService {
 
   async getAllTrades(userId?: string) {
     console.log('Fetching all trades from DB for user:', userId)
-    const where = userId ? { userId } : {}
-    const trades = await prisma.trade.findMany({
-      where,
-      orderBy: { date: 'desc' }
-    })
-    console.log('Fetched trades:', trades)
-    
-    return {
-      trades,
-      source: 'DB'
+    try {
+      const where = userId ? { userId } : {}
+      const trades = await prisma.trade.findMany({
+        where,
+        orderBy: { date: 'desc' }
+      })
+      console.log('Fetched trades:', trades)
+      
+      return {
+        trades,
+        source: 'DB'
+      }
+    } catch (error) {
+      console.error('Error fetching trades:', error)
+      // Return empty array instead of throwing error to prevent UI crash
+      return {
+        trades: [],
+        source: 'DB'
+      }
     }
   }
 
@@ -67,7 +76,7 @@ export class TradeService {
             quantity: trade.quantity,
             price: trade.price,
             date: new Date(trade.date),
-            total: trade.quantity * trade.price,
+            total: (trade.quantity && trade.price) ? trade.quantity * trade.price : null,
             fees: trade.fees || null,
             notes: trade.notes || '',
             currentPrice: trade.currentPrice || null,
