@@ -74,6 +74,10 @@ interface StockData {
     source: string
     warnings: string[]
     reliability: 'high' | 'medium' | 'low'
+    technicalDataSource?: 'real' | 'estimated'
+    estimatedFields?: string[]
+    dataTimestamp?: string
+    cacheStatus?: 'cached' | 'fresh'
   }
   // Real-time intraday data
   intradayChange?: number
@@ -373,15 +377,30 @@ export default function TradeAnalyzer() {
       score += 10
     }
     
-    // Data quality assessment
+    // Enhanced data quality assessment with stability warnings
     const dataQuality = stockData.dataQuality
     if (dataQuality) {
+      // Check for estimated technical data that causes score volatility
+      if (dataQuality.technicalDataSource === 'estimated') {
+        warnings.push('⚠️ SCORE INSTABILITY: Technical indicators estimated - scores may vary significantly on refresh')
+        warnings.push('Estimated fields: ' + (dataQuality.estimatedFields || []).join(', '))
+        marketMultiplier *= 0.7 // Reduce confidence in estimated data
+        score -= 15 // Penalty for unreliable technicals
+      }
+      
       if (dataQuality.reliability === 'low') {
         warnings.push('Low data reliability - verify key metrics manually')
         marketMultiplier *= 0.8
-      } else if (dataQuality.reliability === 'high') {
-        signals.push('High quality real-time data available')
-        score += 5
+      } else if (dataQuality.reliability === 'high' && dataQuality.technicalDataSource === 'real') {
+        signals.push('High quality real-time data with real technical indicators')
+        score += 10
+      }
+      
+      // Cache status warning for trading decisions
+      if (dataQuality.cacheStatus === 'cached') {
+        signals.push('Using cached data - scores stable for trading decisions')
+      } else {
+        warnings.push('Fresh API data - score may differ from previous analysis')
       }
     }
 
@@ -563,12 +582,25 @@ export default function TradeAnalyzer() {
       score = 100
     }
     
+    // Enhanced volatility warnings for trading decisions
     if (marketMultiplier !== 1.0) {
       if (marketMultiplier > 1.0) {
-        signals.push(`Score boosted by favorable market conditions (${(marketMultiplier * 100).toFixed(0)}%) - Raw: ${rawScore}, Final: ${score}`)
+        signals.push(`Score boosted by market conditions (${(marketMultiplier * 100).toFixed(0)}%) - Raw: ${rawScore}, Final: ${score}`)
       } else {
-        warnings.push(`Score reduced by unfavorable market conditions (${(marketMultiplier * 100).toFixed(0)}%) - Raw: ${rawScore}, Final: ${score}`)
+        warnings.push(`Score reduced by market/data conditions (${(marketMultiplier * 100).toFixed(0)}%) - Raw: ${rawScore}, Final: ${score}`)
+        if (marketMultiplier < 0.6) {
+          warnings.push('🚨 MAJOR SCORE REDUCTION: This score is highly volatile - wait for stable data before trading')
+        }
       }
+    }
+    
+    // Overall stability assessment
+    const hasEstimatedData = dataQuality?.technicalDataSource === 'estimated'
+    const hasLowReliability = dataQuality?.reliability === 'low'
+    const hasHighVolatility = marketMultiplier < 0.7 || marketMultiplier > 1.3
+    
+    if (hasEstimatedData || hasLowReliability || hasHighVolatility) {
+      warnings.push('⚠️ TRADING CAUTION: Score reliability is compromised - consider manual verification before entry')
     }
     
     // Enhanced entry and exit levels with volatility adjustment
@@ -590,26 +622,35 @@ export default function TradeAnalyzer() {
     const rewardAmount = takeProfit1 - entryPrice
     const riskRewardRatio = riskAmount > 0 ? rewardAmount / riskAmount : 0
 
-    // Enhanced signal strength determination with market context
+    // Enhanced signal strength determination with data quality considerations
     let signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid'
     
-    // Adjust thresholds based on market conditions (but keep reasonable ranges)
-    const strongThreshold = marketContext?.marketCondition === 'volatile' ? 75 : 70
-    const moderateThreshold = marketContext?.marketCondition === 'volatile' ? 55 : 50
-    const weakThreshold = marketContext?.marketCondition === 'volatile' ? 35 : 30
+    // Adjust thresholds based on data quality and market conditions
+    const hasReliableData = dataQuality?.technicalDataSource === 'real' && dataQuality?.reliability === 'high'
+    const strongThreshold = hasReliableData ? 70 : 80  // Higher threshold for estimated data
+    const moderateThreshold = hasReliableData ? 50 : 65
+    const weakThreshold = hasReliableData ? 30 : 45
     
-    // For very high scores (85+), require extra confirmation in volatile markets
-    if (score >= 85 && marketContext?.marketCondition === 'volatile') {
-      signal = 'Moderate' // Downgrade from Strong in volatile conditions
-      warnings.push('High score in volatile market - downgraded to Moderate signal')
+    // Downgrade signals for unreliable data
+    if (score >= 85 && !hasReliableData) {
+      signal = 'Moderate' // Downgrade high scores with estimated data
+      warnings.push('High score with estimated technical data - downgraded for reliability')
     } else if (score >= strongThreshold) {
-      signal = 'Strong'
+      signal = hasReliableData ? 'Strong' : 'Moderate'
+      if (!hasReliableData && signal === 'Moderate') {
+        warnings.push('Strong score downgraded due to estimated technical indicators')
+      }
     } else if (score >= moderateThreshold) {
       signal = 'Moderate'
     } else if (score >= weakThreshold) {
       signal = 'Weak'
     } else {
       signal = 'Avoid'
+    }
+    
+    // Additional volatility warning for trading decisions
+    if (!hasReliableData) {
+      warnings.push('📊 DATA QUALITY: Score may change significantly on refresh due to estimated technical indicators')
     }
     
     // Additional risk warnings for high volatility

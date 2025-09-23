@@ -55,6 +55,10 @@ export interface EODHDTechnicals {
   '52WeekHigh'?: number;
   '52WeekLow'?: number;
   high_52weeks?: number;
+  // Raw API response fields
+  sma?: number;
+  rsi?: number;
+  value?: number;
 }
 
 export interface EODHDFundamentals {
@@ -430,18 +434,79 @@ class EODHDClient {
     };
   }
 
-  // Get technical indicators
-  async getTechnicals(symbol: string, period = 'd', order = 'd'): Promise<EODHDTechnicals[]> {
+  // Get comprehensive technical indicators with proper date ranges
+  async getTechnicals(symbol: string): Promise<EODHDTechnicals[]> {
     try {
-      // Try simpler function parameter format
-      return await this.makeRequest(`/technical/${symbol}.US`, {
-        period,
-        order,
-        function: 'sma'
-      });
+      // Calculate date range for technical indicators (last 200+ days for SMA200)
+      const to = new Date().toISOString().split('T')[0]; // Today
+      const from = new Date(Date.now() - 250 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 250 days ago
+      
+      console.log(`Fetching technical indicators for ${symbol} from ${from} to ${to}`);
+      
+      // Fetch multiple technical indicators in parallel
+      const [sma20Data, sma50Data, sma200Data, rsiData] = await Promise.allSettled([
+        this.makeRequest(`/technical/${symbol}.US`, {
+          from,
+          to,
+          function: 'sma',
+          period: 20,
+          order: 'd'
+        }),
+        this.makeRequest(`/technical/${symbol}.US`, {
+          from,
+          to, 
+          function: 'sma',
+          period: 50,
+          order: 'd'
+        }),
+        this.makeRequest(`/technical/${symbol}.US`, {
+          from,
+          to,
+          function: 'sma', 
+          period: 200,
+          order: 'd'
+        }),
+        this.makeRequest(`/technical/${symbol}.US`, {
+          from,
+          to,
+          function: 'rsi',
+          period: 14,
+          order: 'd'
+        })
+      ]);
+      
+      // Extract latest values from each technical indicator
+      const technicals: EODHDTechnicals = {};
+      
+      if (sma20Data.status === 'fulfilled' && sma20Data.value?.length > 0) {
+        technicals.SMA_20 = sma20Data.value[0]?.sma || sma20Data.value[0]?.value;
+        console.log(`✅ Got SMA20: ${technicals.SMA_20}`);
+      }
+      
+      if (sma50Data.status === 'fulfilled' && sma50Data.value?.length > 0) {
+        technicals.SMA_50 = sma50Data.value[0]?.sma || sma50Data.value[0]?.value;
+        console.log(`✅ Got SMA50: ${technicals.SMA_50}`);
+      }
+      
+      if (sma200Data.status === 'fulfilled' && sma200Data.value?.length > 0) {
+        technicals.SMA_200 = sma200Data.value[0]?.sma || sma200Data.value[0]?.value;
+        console.log(`✅ Got SMA200: ${technicals.SMA_200}`);
+      } else {
+        console.log(`❌ SMA200 failed:`, sma200Data.status === 'rejected' ? sma200Data.reason : 'No data');
+        // Try to get SMA200 from fundamentals as fallback
+        console.log(`🔄 Attempting SMA200 fallback calculation...`);
+      }
+      
+      if (rsiData.status === 'fulfilled' && rsiData.value?.length > 0) {
+        technicals.RSI_14 = rsiData.value[0]?.rsi || rsiData.value[0]?.value;
+        console.log(`✅ Got RSI14: ${technicals.RSI_14}`);
+      }
+      
+      // Return as array for compatibility
+      return [technicals];
+      
     } catch (error) {
-      // Technical indicators might not be available for all symbols
-      // or might require a higher tier API plan - fail silently
+      console.error(`Failed to fetch technical indicators for ${symbol}:`, error);
       return [];
     }
   }

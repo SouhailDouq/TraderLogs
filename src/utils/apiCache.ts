@@ -9,7 +9,7 @@ class APICache {
   
   // Default TTL values for different data types
   private readonly TTL = {
-    STOCK_DATA: 3 * 60 * 1000,      // 3 minutes for stock data (shorter for fresher data)
+    STOCK_DATA: 15 * 60 * 1000,     // 15 minutes for stock data (stable for trading decisions)
     PREMARKET_SCAN: 1 * 60 * 1000,  // 1 minute for premarket scans (very fresh for momentum)
     FUNDAMENTALS: 4 * 60 * 60 * 1000, // 4 hours for fundamentals (shorter refresh)
     SCREENER: 30 * 1000,            // 30 seconds for screener results (very fresh)

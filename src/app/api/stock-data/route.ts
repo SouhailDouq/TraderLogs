@@ -66,9 +66,19 @@ You can still analyze this stock by entering data manually.`,
     
     console.log('Successfully fetched EODHD data for', symbol)
     
-    // Extract technical indicators
+    // Extract technical indicators with better error handling
     const techData = technicals?.[0] || {}
     const fundData = fundamentals?.Highlights || {}
+    
+    // Log technical data availability for debugging
+    const hasTechnicals = techData && Object.keys(techData).length > 0
+    console.log(`Technical data for ${symbol}:`, {
+      available: hasTechnicals,
+      sma20: techData.SMA_20,
+      sma50: techData.SMA_50, 
+      sma200: techData.SMA_200,
+      rsi: techData.RSI_14
+    });
     
     // Calculate relative volume
     const avgVolume = fundData.SharesOutstanding ? 
@@ -90,11 +100,16 @@ You can still analyze this stock by entering data manually.`,
       marketCap: fundData.MarketCapitalization ? formatMarketCap(fundData.MarketCapitalization) : 'Unknown',
       pe: fundData.PERatio ? fundData.PERatio.toFixed(2) : '-',
       beta: fundData.Beta ? fundData.Beta.toFixed(2) : '-',
-      sma20: techData.EMA_20 ? techData.EMA_20.toFixed(2) : realTimeData.close.toFixed(2),
+      // Use real technical data when available, otherwise estimate
+      sma20: techData.SMA_20 ? techData.SMA_20.toFixed(2) : realTimeData.close.toFixed(2),
       sma50: techData.SMA_50 ? techData.SMA_50.toFixed(2) : realTimeData.close.toFixed(2),
       sma200: techData.SMA_200 ? techData.SMA_200.toFixed(2) : realTimeData.close.toFixed(2),
-      week52High: techData['52WeekHigh'] ? techData['52WeekHigh'].toFixed(2) : realTimeData.close.toFixed(2),
-      week52Low: techData['52WeekLow'] ? techData['52WeekLow'].toFixed(2) : realTimeData.close.toFixed(2),
+      week52High: (fundData?.['52WeekHigh'] || techData?.['52WeekHigh']) ? 
+        (fundData['52WeekHigh'] || techData['52WeekHigh'] || realTimeData.close).toFixed(2) : 
+        realTimeData.close.toFixed(2),
+      week52Low: (fundData?.['52WeekLow'] || techData?.['52WeekLow']) ? 
+        (fundData['52WeekLow'] || techData['52WeekLow'] || realTimeData.close).toFixed(2) : 
+        realTimeData.close.toFixed(2),
       rsi: techData.RSI_14 ? techData.RSI_14.toFixed(1) : '50.0',
       relVolume: relativeVolume.toFixed(2),
       
@@ -137,14 +152,23 @@ You can still analyze this stock by entering data manually.`,
         marketCondition: score >= 70 ? 'bullish' : score <= 40 ? 'bearish' : 'neutral'
       },
       
-      // Data quality info
+      // Data quality info with detailed source tracking
       dataQuality: {
         source: 'EODHD API',
         warnings: [],
-        reliability: 'high',
+        reliability: (techData.SMA_20 && techData.SMA_50 && techData.RSI_14) ? 'high' : 'medium',
         hasRealTime: true,
         hasTechnicals: !!techData,
-        hasFundamentals: !!fundData
+        hasFundamentals: !!fundData,
+        technicalDataSource: (techData.SMA_20 && techData.SMA_50 && techData.RSI_14) ? 'real' : 'estimated',
+        estimatedFields: [
+          ...(techData.SMA_20 ? [] : ['sma20']),
+          ...(techData.SMA_50 ? [] : ['sma50']),
+          ...(techData.SMA_200 ? [] : ['sma200']),
+          ...(techData.RSI_14 ? [] : ['rsi'])
+        ],
+        dataTimestamp: new Date().toISOString(),
+        cacheStatus: cached ? 'cached' : 'fresh'
       }
     }
 
