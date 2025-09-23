@@ -24,6 +24,23 @@ interface PremarketStock {
     topCatalyst?: string
     recentCount: number
   }
+  // Quality assessment
+  qualityTier?: 'premium' | 'standard' | 'caution'
+  warnings?: string[]
+  gapAnalysis?: {
+    gapPercent: number
+    isSignificant: boolean
+  }
+  momentumCriteria?: {
+    isNear20DayHigh: boolean
+    highProximity: number
+    isAboveSMAs: boolean
+    smaAlignment: string
+  }
+  timeUrgency?: {
+    timeWindow: string
+    urgencyMultiplier: number
+  }
 }
 
 type TradingStrategy = 'momentum' | 'breakout'
@@ -55,11 +72,11 @@ export default function PremarketScanner() {
   // Strategy-specific filter presets
   const strategyFilters: Record<TradingStrategy, StrategyFilters> = {
     momentum: {
-      // Based on Finviz momentum screener criteria
+      // Updated momentum screener criteria with expanded price range
       minChange: 0, // No minimum - we want new highs regardless of daily change
       maxChange: 100, // Allow big movers
       minVolume: 1000000, // >1M avg volume (matches sh_avgvol_o1000)
-      maxPrice: 10, // <$10 price (matches sh_price_u10)
+      maxPrice: 20, // <$20 price - EXPANDED from $10 for more opportunities
       minRelativeVolume: 1.5, // >1.5x relative volume (matches sh_relvol_o1.5)
       minScore: 0, // No score filter for momentum - let all stocks through
       minMarketCap: 300000000, // Small cap and over (matches cap_smallover ~$300M+)
@@ -1198,6 +1215,34 @@ export default function PremarketScanner() {
           
           {getFilteredStocks().length > 0 && (
             <>
+              {/* Quality Breakdown Summary */}
+              <div className="mb-6 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Quality Breakdown</h3>
+                <div className="flex flex-wrap gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-green-500 text-lg">🏆</span>
+                    <span className="font-medium text-green-700 dark:text-green-300">
+                      Premium: {getFilteredStocks().filter(s => s.qualityTier === 'premium').length}
+                    </span>
+                    <span className="text-xs text-gray-500">(All criteria met)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-yellow-500 text-lg">⚠️</span>
+                    <span className="font-medium text-yellow-700 dark:text-yellow-300">
+                      Standard: {getFilteredStocks().filter(s => s.qualityTier === 'standard').length}
+                    </span>
+                    <span className="text-xs text-gray-500">(Minor warnings)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-orange-500 text-lg">🚨</span>
+                    <span className="font-medium text-orange-700 dark:text-orange-300">
+                      Caution: {getFilteredStocks().filter(s => s.qualityTier === 'caution').length}
+                    </span>
+                    <span className="text-xs text-gray-500">(Multiple warnings)</span>
+                  </div>
+                </div>
+              </div>
+              
               {/* Desktop Table View */}
               <div className="hidden lg:block overflow-x-auto">
               <table className="w-full">
@@ -1217,18 +1262,31 @@ export default function PremarketScanner() {
                 <tbody>
                   {getFilteredStocks().map((stock, index) => {
                     const riskWarning = getRiskWarning(stock)
+                    const qualityTier = stock.qualityTier || 'caution'
                     return (
                     <tr key={stock.symbol} className={`border-t transition-all duration-200 ${
-                      riskWarning?.level === 'high' ? 
-                        (isDarkMode ? 'border-red-700 bg-red-900/10 hover:bg-red-900/20' : 'border-red-300 bg-red-50 hover:bg-red-100') :
-                      riskWarning?.level === 'medium' ?
+                      qualityTier === 'premium' ? 
+                        (isDarkMode ? 'border-green-700 bg-green-900/10 hover:bg-green-900/20' : 'border-green-300 bg-green-50 hover:bg-green-100') :
+                      qualityTier === 'standard' ?
                         (isDarkMode ? 'border-yellow-700 bg-yellow-900/10 hover:bg-yellow-900/20' : 'border-yellow-300 bg-yellow-50 hover:bg-yellow-100') :
-                      isDarkMode ? 'border-gray-700 hover:bg-gray-750' : 'border-gray-200 hover:bg-gray-50'
+                      qualityTier === 'caution' ?
+                        (isDarkMode ? 'border-orange-700 bg-orange-900/10 hover:bg-orange-900/20' : 'border-orange-300 bg-orange-50 hover:bg-orange-100') :
+                        (isDarkMode ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-200 hover:bg-gray-50')
                     }`}>
                       <td className="px-6 py-5">
                         <div className="flex flex-col lg:flex-row lg:items-center gap-3">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-xl text-blue-600">{stock.symbol}</span>
+                            {/* Quality Tier Indicator */}
+                            {qualityTier === 'premium' && (
+                              <span className="text-green-500 text-lg" title="Premium Quality - All criteria met">🏆</span>
+                            )}
+                            {qualityTier === 'standard' && (
+                              <span className="text-yellow-500 text-lg" title="Standard Quality - Minor warnings">⚠️</span>
+                            )}
+                            {qualityTier === 'caution' && (
+                              <span className="text-orange-500 text-lg" title="Caution - Multiple warnings">🚨</span>
+                            )}
                             {stock.priceAction === 'bearish' && (
                               <span className="text-red-500 text-lg" title="Bearish price action">📉</span>
                             )}
@@ -1239,10 +1297,20 @@ export default function PremarketScanner() {
                           {riskWarning && (
                             <div className={`px-2 py-1 rounded text-xs font-medium ${
                               riskWarning.level === 'high' ? 
-                                (isDarkMode ? 'bg-red-900/30 text-red-300' : 'bg-red-100 text-red-700') :
-                                (isDarkMode ? 'bg-yellow-900/30 text-yellow-300' : 'bg-yellow-100 text-yellow-700')
-                            }`} title={riskWarning.message}>
+                                'bg-red-100 text-red-800 border border-red-200' : 
+                                'bg-yellow-100 text-yellow-800 border border-yellow-200'
+                            }`}>
                               {riskWarning.level === 'high' ? '⚠️ HIGH RISK' : '⚠️ CAUTION'}
+                            </div>
+                          )}
+                          {/* Quality Warnings */}
+                          {stock.warnings && stock.warnings.length > 0 && (
+                            <div className="flex flex-col gap-1">
+                              {stock.warnings.map((warning, idx) => (
+                                <div key={idx} className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-2 py-1 rounded border border-orange-200 dark:border-orange-700">
+                                  {warning}
+                                </div>
+                              ))}
                             </div>
                           )}
                           <button
@@ -1367,19 +1435,24 @@ export default function PremarketScanner() {
             <div className="lg:hidden space-y-4 p-4">
               {getFilteredStocks().map((stock, index) => {
                 const riskWarning = getRiskWarning(stock)
+                const qualityTier = stock.qualityTier || 'caution'
                 return (
                 <div key={stock.symbol} className={`p-4 rounded-xl border shadow-lg ${
-                  riskWarning?.level === 'high' ? 
-                    (isDarkMode ? 'bg-red-900/10 border-red-700' : 'bg-red-50 border-red-300') :
-                  riskWarning?.level === 'medium' ?
+                  qualityTier === 'premium' ? 
+                    (isDarkMode ? 'bg-green-900/10 border-green-700' : 'bg-green-50 border-green-300') :
+                  qualityTier === 'standard' ?
                     (isDarkMode ? 'bg-yellow-900/10 border-yellow-700' : 'bg-yellow-50 border-yellow-300') :
-                  isDarkMode ? 'bg-gray-750 border-gray-600' : 'bg-white border-gray-200'
+                  qualityTier === 'caution' ?
+                    (isDarkMode ? 'bg-orange-900/10 border-orange-700' : 'bg-orange-50 border-orange-300') :
+                    (isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200')
                 }`}>
                   {riskWarning && (
                     <div className={`mb-3 p-2 rounded-lg text-xs font-medium ${
                       riskWarning.level === 'high' ? 
                         (isDarkMode ? 'bg-red-900/30 text-red-300' : 'bg-red-100 text-red-700') :
-                        (isDarkMode ? 'bg-yellow-900/30 text-yellow-300' : 'bg-yellow-100 text-yellow-700')
+                      riskWarning.level === 'medium' ?
+                        (isDarkMode ? 'bg-yellow-900/30 text-yellow-300' : 'bg-yellow-100 text-yellow-700') :
+                        (isDarkMode ? 'bg-orange-900/30 text-orange-300' : 'bg-orange-100 text-orange-700')
                     }`}>
                       {riskWarning.message}
                     </div>
@@ -1388,6 +1461,16 @@ export default function PremarketScanner() {
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-2xl text-blue-600">{stock.symbol}</span>
+                        {/* Quality Tier Indicator */}
+                        {qualityTier === 'premium' && (
+                          <span className="text-green-500 text-lg" title="Premium Quality - All criteria met">🏆</span>
+                        )}
+                        {qualityTier === 'standard' && (
+                          <span className="text-yellow-500 text-lg" title="Standard Quality - Minor warnings">⚠️</span>
+                        )}
+                        {qualityTier === 'caution' && (
+                          <span className="text-orange-500 text-lg" title="Caution - Multiple warnings">🚨</span>
+                        )}
                         {stock.priceAction === 'bearish' && (
                           <span className="text-red-500 text-lg" title="Bearish price action">📉</span>
                         )}
@@ -1417,6 +1500,17 @@ export default function PremarketScanner() {
                       {stock.signal}
                     </span>
                   </div>
+                  
+                  {/* Quality Warnings for Mobile */}
+                  {stock.warnings && stock.warnings.length > 0 && (
+                    <div className="mb-3 space-y-1">
+                      {stock.warnings.map((warning, idx) => (
+                        <div key={idx} className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-2 py-1 rounded border border-orange-200 dark:border-orange-700">
+                          {warning}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div className="text-center">
