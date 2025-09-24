@@ -149,7 +149,27 @@ class EODHDClient {
     return response.json();
   }
 
-  // Get live (delayed) quote for a single symbol - includes premarket/extended hours
+  /**
+   * CORE BUSINESS LOGIC: Live Stock Quote Engine
+   * 
+   * PURPOSE: Fetches fresh stock quotes with multi-tier fallback system
+   * STRATEGY: WebSocket (live) → EODHD REST (delayed) → Error handling
+   * 
+   * DATA SOURCES PRIORITY:
+   * 1. WebSocket: True live data during market hours (premarket + regular)
+   * 2. EODHD REST API: Delayed data (15+ minutes) as fallback
+   * 
+   * BUSINESS IMPACT:
+   * - Provides fresh data for momentum trading decisions
+   * - Supports premarket trading (4:00-9:30 AM ET)
+   * - Handles data staleness warnings for trading quality
+   * - Critical for France timezone advantage (live data at 10:00-15:30 France time)
+   * 
+   * DATA QUALITY:
+   * - Logs data age and freshness warnings
+   * - Supplements WebSocket price data with REST API volumes
+   * - Handles API failures gracefully
+   */
   async getRealTimeQuote(symbol: string): Promise<EODHDRealTimeData> {
     // Use WebSocket for truly live data during market hours
     if (this.isLiveDataFresh()) {
@@ -215,7 +235,29 @@ class EODHDClient {
     return data;
   }
 
-  // Get live (delayed) quotes for multiple symbols - includes premarket/extended hours
+  /**
+   * CORE BUSINESS LOGIC: Batch Stock Quote Engine
+   * 
+   * PURPOSE: Efficiently fetches multiple stock quotes with live data priority
+   * STRATEGY: WebSocket batch collection → Individual real-time calls → Intraday fallback
+   * 
+   * BATCH PROCESSING LOGIC:
+   * 1. WebSocket: 8-second collection window for live data
+   * 2. Real-time API: Individual calls during premarket for fresh data
+   * 3. Intraday API: Historical data with premarket inclusion
+   * 4. REST API: Final fallback with stale data warnings
+   * 
+   * BUSINESS IMPACT:
+   * - Processes up to 50+ stocks efficiently for momentum scanning
+   * - Prioritizes fresh premarket data for gap-up detection
+   * - Handles API rate limits and timeouts gracefully
+   * - Critical for premarket scanner performance
+   * 
+   * PERFORMANCE OPTIMIZATIONS:
+   * - Batch WebSocket subscriptions
+   * - Parallel API calls with rate limiting
+   * - Stale data detection and warnings
+   */
   async getRealTimeQuotes(symbols: string[]): Promise<EODHDRealTimeData[]> {
     if (symbols.length === 0) return [];
     
@@ -457,7 +499,29 @@ class EODHDClient {
     };
   }
 
-  // Get comprehensive technical indicators with proper date ranges
+  /**
+   * CORE BUSINESS LOGIC: Technical Analysis Engine
+   * 
+   * PURPOSE: Fetches key technical indicators for momentum analysis
+   * STRATEGY: Parallel API calls for SMA20, SMA50, SMA200, RSI14
+   * 
+   * TECHNICAL INDICATORS:
+   * - SMA20: Short-term trend (20-day Simple Moving Average)
+   * - SMA50: Medium-term trend (50-day Simple Moving Average) 
+   * - SMA200: Long-term trend (200-day Simple Moving Average)
+   * - RSI14: Momentum oscillator (14-day Relative Strength Index)
+   * 
+   * BUSINESS IMPACT:
+   * - Aligns with Finviz momentum criteria (price above SMAs)
+   * - Validates momentum breakout signals
+   * - Prevents false signals from declining trends
+   * - Critical for scoring algorithm accuracy
+   * 
+   * DATA QUALITY:
+   * - 250-day lookback for reliable SMA200 calculation
+   * - Handles API failures with graceful fallbacks
+   * - Logs successful/failed indicator fetches
+   */
   async getTechnicals(symbol: string): Promise<EODHDTechnicals[]> {
     try {
       // Calculate date range for technical indicators (last 200+ days for SMA200)
@@ -564,7 +628,29 @@ class EODHDClient {
     };
   }
 
-  // Determine current market hours status
+  /**
+   * CORE BUSINESS LOGIC: Market Session Detector
+   * 
+   * PURPOSE: Determines current US market session for data source selection
+   * STRATEGY: ET timezone conversion with weekend detection
+   * 
+   * MARKET SESSIONS:
+   * - Premarket: 4:00-9:30 AM ET (10:00-15:30 France time)
+   * - Regular: 9:30 AM-4:00 PM ET (15:30-22:00 France time)
+   * - After Hours: 4:00-8:00 PM ET (22:00-02:00 France time)
+   * - Closed: Weekends and outside trading hours
+   * 
+   * BUSINESS IMPACT:
+   * - Enables France timezone trading advantage
+   * - Determines data source priority (WebSocket vs REST)
+   * - Controls scanner behavior and filtering
+   * - Critical for premarket momentum detection
+   * 
+   * TIMEZONE HANDLING:
+   * - Uses America/New_York timezone for accuracy
+   * - Handles EST/EDT transitions automatically
+   * - Weekend detection prevents unnecessary API calls
+   */
   getMarketHoursStatus(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
     const now = new Date();
     // Use Intl.DateTimeFormat for more reliable timezone conversion
@@ -612,7 +698,28 @@ class EODHDClient {
     return marketStatus === 'premarket' || marketStatus === 'regular';
   }
 
-  // Get intraday historical data (includes pre-market, delayed ~2-3 hours)
+  /**
+   * CORE BUSINESS LOGIC: Intraday Data Engine
+   * 
+   * PURPOSE: Fetches minute-by-minute historical data including premarket
+   * STRATEGY: ET timezone-aligned data fetching from yesterday 4 PM ET
+   * 
+   * TIME WINDOW:
+   * - Start: Yesterday 4:00 PM ET (market close)
+   * - End: Current time
+   * - Includes: Overnight, premarket, regular hours data
+   * 
+   * BUSINESS IMPACT:
+   * - Captures full premarket session data
+   * - Enables gap analysis and volume calculations
+   * - Provides fallback when real-time APIs fail
+   * - Critical for premarket volume summation
+   * 
+   * DATA QUALITY:
+   * - ET timezone alignment prevents data gaps
+   * - Handles API failures gracefully
+   * - Returns empty array on errors (non-blocking)
+   */
   async getIntradayData(symbol: string, interval = '1m'): Promise<any[]> {
     try {
       const cleanSymbol = symbol.replace('.US', '');
@@ -706,7 +813,29 @@ class EODHDClient {
     return nextOpen;
   }
 
-  // Get real historical average volume for accurate relative volume calculations
+  /**
+   * CORE BUSINESS LOGIC: Relative Volume Calculator
+   * 
+   * PURPOSE: Calculates accurate 30-day average volume for relative volume analysis
+   * STRATEGY: Historical EOD data aggregation with market cap fallback
+   * 
+   * CALCULATION METHOD:
+   * 1. Fetch last 30 days of historical data
+   * 2. Sum total volume across all days
+   * 3. Divide by number of trading days
+   * 4. Fallback to 1M default if data unavailable
+   * 
+   * BUSINESS IMPACT:
+   * - Enables accurate relative volume detection (>1.5x for momentum)
+   * - Replaces fake estimates with real historical data
+   * - Critical for momentum filtering and scoring
+   * - Aligns with professional trading criteria
+   * 
+   * QUALITY ASSURANCE:
+   * - Handles missing data gracefully
+   * - Provides market cap-based estimation fallback
+   * - Logs calculation success/failure for debugging
+   */
   async getHistoricalAverageVolume(symbol: string, days: number = 30): Promise<number> {
     try {
       const to = new Date().toISOString().split('T')[0];
@@ -734,7 +863,29 @@ class EODHDClient {
     }
   }
 
-  // Enhanced premarket gap detection
+  /**
+   * CORE BUSINESS LOGIC: Premarket Gap Analyzer
+   * 
+   * PURPOSE: Analyzes premarket price gaps for momentum significance
+   * STRATEGY: Gap percentage calculation with significance thresholds
+   * 
+   * GAP ANALYSIS:
+   * - Gap %: (Current - Previous) / Previous * 100
+   * - Gap Types: gap_up (>1%), gap_down (<-1%), no_gap
+   * - Significance: >3% gaps marked as significant
+   * - Urgency Score: Gap size * 2 (capped at 100)
+   * 
+   * BUSINESS IMPACT:
+   * - Identifies momentum opportunities from overnight news
+   * - Prioritizes significant gaps for trading attention
+   * - Supports gap-up trading strategy
+   * - Critical for premarket opportunity ranking
+   * 
+   * THRESHOLDS:
+   * - 3%+ gap = Significant (worth trading attention)
+   * - Higher gaps = Higher urgency scores
+   * - Used in quality tier assessment
+   */
   calculatePremarketGap(currentPrice: number, previousClose: number): {
     gapPercent: number;
     gapType: 'gap_up' | 'gap_down' | 'no_gap';
@@ -752,7 +903,29 @@ class EODHDClient {
     };
   }
 
-  // Time-based premarket urgency calculation
+  /**
+   * CORE BUSINESS LOGIC: Time-Based Urgency Calculator
+   * 
+   * PURPOSE: Calculates trading urgency based on premarket time windows
+   * STRATEGY: France timezone advantage with time-based multipliers
+   * 
+   * TIME WINDOWS & MULTIPLIERS:
+   * - Prime (4:00-6:00 AM ET): 1.8x urgency (best opportunities)
+   * - Active (6:00-8:00 AM ET): 1.4x urgency (good opportunities)
+   * - Late (8:00-9:30 AM ET): 1.1x urgency (limited time)
+   * - Closed: 1.0x urgency (no premarket)
+   * 
+   * BUSINESS IMPACT:
+   * - Maximizes France timezone trading advantage
+   * - Prioritizes early premarket opportunities
+   * - Helps time trade entries for maximum profit
+   * - Critical for momentum strategy timing
+   * 
+   * FRANCE TIME MAPPING:
+   * - Prime: 10:00-12:00 France time
+   * - Active: 12:00-14:00 France time
+   * - Late: 14:00-15:30 France time
+   */
   getPremarketUrgency(): {
     urgencyMultiplier: number;
     timeWindow: 'prime' | 'active' | 'late' | 'closed';
@@ -787,7 +960,29 @@ class EODHDClient {
     return { urgencyMultiplier, timeWindow, minutesUntilOpen };
   }
 
-  // Check if stock is near 20-day highs (momentum requirement)
+  /**
+   * CORE BUSINESS LOGIC: Momentum Criteria Validator
+   * 
+   * PURPOSE: Validates stocks against Finviz momentum criteria
+   * STRATEGY: 20-day high analysis + SMA alignment validation
+   * 
+   * MOMENTUM CRITERIA (matches Finviz):
+   * - 20-Day High Proximity: >85% of 20-day high (ta_highlow20d_nh)
+   * - SMA Alignment: Price above SMA20 AND SMA50 (ta_sma50_pa)
+   * - Momentum Score: Composite score based on criteria met
+   * 
+   * BUSINESS IMPACT:
+   * - Ensures scanner matches user's proven Finviz results
+   * - Prevents false momentum signals
+   * - Aligns with professional momentum trading criteria
+   * - Critical for strategy validation and backtesting
+   * 
+   * SCORING LOGIC:
+   * - Near 20-day high: +40 points
+   * - Above SMAs: +30 points
+   * - Very close to highs (>95%): +20 points
+   * - Bullish SMA alignment: +10 points
+   */
   async checkMomentumCriteria(symbol: string, currentPrice: number): Promise<{
     isNear20DayHigh: boolean;
     highProximity: number;
@@ -936,7 +1131,35 @@ class EODHDClient {
     }
   }
 
-  // Real EODHD screener implementation for premarket movers
+  /**
+   * CORE BUSINESS LOGIC: Market-Wide Stock Screener
+   * 
+   * PURPOSE: Discovers momentum stocks from entire US market using EODHD screener
+   * STRATEGY: Dynamic filtering + live quote enhancement + batch processing
+   * 
+   * SCREENING PROCESS:
+   * 1. Apply filters to EODHD screener API (volume, price, change, market cap)
+   * 2. Get top 50 candidates sorted by volume (liquidity priority)
+   * 3. Enhance with live quotes for data freshness
+   * 4. Return qualified momentum candidates
+   * 
+   * FILTER MAPPING:
+   * - Price: adjusted_close field
+   * - Change: refund_1d_p field (daily percentage)
+   * - Volume: avgvol_1d field (current day volume)
+   * - Market Cap: market_capitalization field
+   * 
+   * BUSINESS IMPACT:
+   * - Replaces static stock lists with live market discovery
+   * - Finds fresh momentum opportunities in real-time
+   * - Supports both momentum and breakout strategies
+   * - Critical for competitive trading edge
+   * 
+   * PERFORMANCE:
+   * - Processes up to 20 candidates with live quotes
+   * - Rate limiting (200ms delays) to respect API limits
+   * - Batch processing for efficiency
+   */
   async getPremarketMovers(params: {
     minVolume?: number;
     maxPrice?: number;
@@ -1070,7 +1293,34 @@ class EODHDClient {
 // Export a default instance for backward compatibility
 export const eodhd = new EODHDClient(process.env.EODHD_API_KEY || 'demo');
 
-// Enhanced scoring algorithm for momentum and breakout strategies
+/**
+ * CORE BUSINESS LOGIC: Stock Scoring Algorithm
+ * 
+ * PURPOSE: Calculates comprehensive momentum/breakout scores for stock ranking
+ * STRATEGY: Multi-factor analysis combining price action, volume, and technicals
+ * 
+ * SCORING COMPONENTS:
+ * 1. Price Movement Score (0-60 points): Based on daily change %
+ * 2. Volume Score (0-30 points): Based on estimated relative volume
+ * 3. Technical Score (0-33 points): SMA alignment + RSI momentum
+ * 4. Price Range Bonus (0-10 points): Preference for <$10 stocks
+ * 
+ * STRATEGY DIFFERENCES:
+ * - Momentum: Conservative thresholds, focuses on sustained trends
+ * - Breakout: Aggressive thresholds, focuses on explosive moves
+ * 
+ * BUSINESS IMPACT:
+ * - Ranks stocks by momentum potential (0-100 scale)
+ * - Filters out declining stocks (negative scores)
+ * - Prioritizes volume confirmation and technical alignment
+ * - Critical for automated stock selection and alerts
+ * 
+ * SCORING THRESHOLDS:
+ * - 70+ = Strong signal (immediate attention)
+ * - 50-69 = Moderate signal (watch closely)
+ * - 30-49 = Weak signal (monitor)
+ * - <30 = Avoid (poor setup)
+ */
 export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EODHDTechnicals, strategy: 'momentum' | 'breakout' = 'momentum'): number {
   let score = 0;
   
@@ -1144,6 +1394,30 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
   return finalScore;
 }
 
+/**
+ * CORE BUSINESS LOGIC: Signal Classification Engine
+ * 
+ * PURPOSE: Converts numerical scores to actionable trading signals
+ * STRATEGY: Different thresholds for momentum vs breakout strategies
+ * 
+ * MOMENTUM THRESHOLDS:
+ * - Strong (70+): High confidence, immediate entry consideration
+ * - Moderate (50-69): Good setup, wait for confirmation
+ * - Weak (30-49): Marginal setup, monitor closely
+ * - Avoid (<30): Poor setup, skip
+ * 
+ * BREAKOUT THRESHOLDS (Higher standards):
+ * - Strong (80+): Explosive potential, priority entry
+ * - Moderate (60-79): Good breakout setup
+ * - Weak (40-59): Marginal breakout potential
+ * - Avoid (<40): Insufficient momentum
+ * 
+ * BUSINESS IMPACT:
+ * - Provides clear trading guidance
+ * - Reduces decision fatigue
+ * - Aligns with risk management principles
+ * - Critical for automated alerts and notifications
+ */
 export function getSignal(score: number, strategy: 'momentum' | 'breakout' = 'momentum'): 'Strong' | 'Moderate' | 'Weak' | 'Avoid' {
   if (strategy === 'momentum') {
     if (score >= 70) return 'Strong';
@@ -1240,6 +1514,36 @@ export function getNewsFreshness(dateString: string): {
   }
 }
 
+/**
+ * CORE BUSINESS LOGIC: News Impact Analyzer
+ * 
+ * PURPOSE: Analyzes news sentiment and catalysts for trading decisions
+ * STRATEGY: Aggregates sentiment, identifies high-impact news, categorizes catalysts
+ * 
+ * ANALYSIS COMPONENTS:
+ * - Overall Sentiment: Average polarity across all news (-1 to +1)
+ * - High Impact Count: News with 'High' priority (earnings, FDA, M&A)
+ * - Recent News Count: Articles from last 24 hours
+ * - Top Catalysts: Most frequent news categories
+ * 
+ * CATALYST PRIORITIES:
+ * - High: Earnings, FDA/Regulatory, M&A (immediate price impact)
+ * - Medium: Analyst ratings, Corporate actions (moderate impact)
+ * - Low: Market/sector news, General updates (background noise)
+ * 
+ * BUSINESS IMPACT:
+ * - Identifies news-driven momentum opportunities
+ * - Helps time entries around catalyst events
+ * - Provides context for price movements
+ * - Critical for news-based breakout strategy
+ * 
+ * SENTIMENT SCORING:
+ * - Very Positive (0.6+): Strong bullish catalyst
+ * - Positive (0.2-0.6): Mild bullish sentiment
+ * - Neutral (-0.2-0.2): No clear direction
+ * - Negative (-0.6--0.2): Bearish sentiment
+ * - Very Negative (<-0.6): Strong bearish catalyst
+ */
 export function summarizeNewsImpact(news: EODHDNewsItem[]): {
   overallSentiment: number;
   highImpactCount: number;

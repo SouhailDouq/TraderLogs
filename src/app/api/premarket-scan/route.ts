@@ -148,7 +148,24 @@ interface PremarketStock {
   }
 }
 
-// Discover fresh momentum stocks dynamically using market-wide screening
+/**
+ * CORE BUSINESS LOGIC: Dynamic Stock Discovery Engine
+ * 
+ * PURPOSE: Discovers fresh momentum/breakout stocks from live market data
+ * STRATEGY: Uses EODHD screener API to find stocks matching momentum criteria
+ * FALLBACK: Implements progressive filter relaxation if no stocks found
+ * 
+ * BUSINESS IMPACT:
+ * - Replaces static stock lists with live market discovery
+ * - Finds stocks during premarket hours (4:00-9:30 AM ET)
+ * - Supports both momentum (20-day highs + SMA alignment) and breakout (volume spikes) strategies
+ * 
+ * DATA FLOW:
+ * 1. Check market hours status for data freshness
+ * 2. Apply strategy-specific filters (volume, price, change %)
+ * 3. If no results, progressively relax filters (broader criteria)
+ * 4. Return live stock data for further analysis
+ */
 async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<EODHDRealTimeData[]> {
   try {
     console.log(`Fetching live premarket movers for ${strategy} strategy with filters:`, filters);
@@ -198,7 +215,24 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
   }
 }
 
-// Enhanced stock data with real relative volume and momentum criteria
+/**
+ * CORE BUSINESS LOGIC: Stock Analysis Engine
+ * 
+ * PURPOSE: Enriches basic stock data with advanced momentum/breakout indicators
+ * STRATEGY: Calculates real relative volume, gap analysis, momentum criteria, time urgency
+ * 
+ * KEY CALCULATIONS:
+ * - Real Relative Volume: Current volume / 30-day average volume (not fake estimates)
+ * - Premarket Gap Analysis: Gap %, significance (>3%), urgency scoring
+ * - Momentum Criteria: 20-day high proximity, SMA alignment (matches Finviz criteria)
+ * - Time Urgency: France timezone advantage (4:00-6:00 AM ET = 1.8x multiplier)
+ * 
+ * BUSINESS IMPACT:
+ * - Provides accurate momentum scoring based on real historical data
+ * - Aligns with user's proven Finviz screening criteria
+ * - Prioritizes early premarket opportunities for France timezone trading
+ * - Prevents false signals from fake/estimated data
+ */
 async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 'momentum' | 'breakout' = 'momentum'): Promise<{
   realTime: any;
   relativeVolume: number;
@@ -278,7 +312,29 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
   }
 }
 
-// Get momentum stocks using dynamic market-wide discovery
+/**
+ * CORE BUSINESS LOGIC: Momentum Stock Pipeline
+ * 
+ * PURPOSE: Complete pipeline from stock discovery to qualified momentum candidates
+ * STRATEGY: Combines live discovery + filtering + scoring + quality assessment
+ * 
+ * FILTERING LOGIC:
+ * - Removes warrants/rights (derivative instruments)
+ * - Applies price filters ($1.00-$20 range to avoid penny stocks)
+ * - Volume filters (>1M for momentum, >25K for breakout)
+ * - Float filters for breakout strategy (<50M shares)
+ * - Score filters (minimum score threshold)
+ * 
+ * QUALITY TIERS:
+ * - Premium: Meets all momentum criteria (20-day highs + SMA alignment)
+ * - Standard: Good technical setup but missing some criteria
+ * - Caution: Marginal setup with warnings
+ * 
+ * BUSINESS IMPACT:
+ * - Provides ranked list of momentum opportunities
+ * - Quality over quantity approach (top 10 stocks)
+ * - Real-time validation prevents stale/declining stock signals
+ */
 async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<EODHDRealTimeData[]> {
   try {
     console.log('Discovering fresh momentum stocks from market-wide screening...')
@@ -408,6 +464,32 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
 
 // No fallback stocks - scanner only uses live data
 
+/**
+ * MAIN API ENDPOINT: Premarket Scanner
+ * 
+ * PURPOSE: Main entry point for momentum/breakout stock scanning
+ * STRATEGY: Adaptive filtering based on market session (premarket vs regular hours)
+ * 
+ * MARKET SESSION LOGIC:
+ * - Premarket (4:00-9:30 AM ET): Focus on overnight movers, gap-ups
+ * - Regular Hours (9:30-4:00 PM ET): Focus on intraday momentum
+ * - After Hours (4:00-8:00 PM ET): Extended hours momentum
+ * 
+ * FILTER ADAPTATION:
+ * - Momentum Strategy: >1M volume, <$20 price, >1.5x relative volume, 20-day highs
+ * - Breakout Strategy: >5% change, >2x relative volume, <10M float
+ * - Progressive refinement: Frontend filters applied on top of baseline
+ * 
+ * RESPONSE FORMAT:
+ * - Sorted by quality tier (premium > standard > caution)
+ * - Includes scoring, warnings, momentum criteria
+ * - Quality breakdown statistics
+ * 
+ * BUSINESS IMPACT:
+ * - Provides live momentum opportunities during France trading hours (10:00-15:30)
+ * - Aligns with user's Finviz momentum criteria
+ * - Supports both conservative and aggressive trading approaches
+ */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -690,6 +772,27 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * LEGACY SCORING FUNCTION: Premarket Score Calculator
+ * 
+ * PURPOSE: Simplified scoring algorithm for premarket stocks
+ * NOTE: This appears to be legacy code - main scoring is done in eodhd.ts calculateScore()
+ * 
+ * SCORING COMPONENTS:
+ * - Base Score: Premarket movement (10%+ = 40 points, 7%+ = 35 points, etc.)
+ * - Volume Score: Relative volume multiplier (5x+ = 25 points, 3x+ = 20 points, etc.)
+ * - Technical Score: SMA alignment (above SMA20/50/200 = bonus points)
+ * - Proximity Score: Distance to 52-week high (>90% = 15 points)
+ * - RSI Score: Momentum confirmation (55-75 range = 8 points, >80 = penalty)
+ * - Price Bonus: Under $10 preference (+5 points)
+ * 
+ * BUSINESS LOGIC:
+ * - Caps score between 0-100
+ * - Penalizes overbought conditions (RSI >80)
+ * - Rewards technical alignment and momentum
+ * 
+ * USAGE: May be used as fallback or comparison to main scoring algorithm
+ */
 function calculatePremarketScore(stockData: any, changePercent: number, relativeVolume: number): number {
   let score = 0
   

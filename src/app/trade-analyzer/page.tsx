@@ -8,6 +8,7 @@ import { useCurrency } from '@/hooks/useCurrency'
 import { convertCurrency, formatCurrencyWithSymbol } from '@/utils/currency'
 import CurrencySwitcher from '@/components/CurrencySwitcher'
 import { StrategySelector, TradingStrategy } from '@/components/Strategy/StrategySelector'
+import TradeValidationPanel from '@/components/TradeValidationPanel'
 // Removed direct API import - now using backend route
 
 interface StockData {
@@ -178,6 +179,10 @@ export default function TradeAnalyzer() {
   // Daily watchlist state
   const [dailyWatchlist, setDailyWatchlist] = useState<WatchlistStock[]>([])
   const [lastResetDate, setLastResetDate] = useState<string>('')
+  
+  // Automated trading validation state
+  const [selectedStockForValidation, setSelectedStockForValidation] = useState<any>(null)
+  const [tradeDecision, setTradeDecision] = useState<any>(null)
 
   const fetchStockDataFromAPI = async () => {
     if (!tickerInput.trim()) {
@@ -255,6 +260,9 @@ export default function TradeAnalyzer() {
           shortable: stockData.shortable
         })
         setApiError(null)
+        
+        // Trigger automated trading validation
+        triggerAutomatedValidation(data)
       } else {
         setApiError('Failed to fetch stock data. Please check the ticker symbol.')
       }
@@ -264,6 +272,36 @@ export default function TradeAnalyzer() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Trigger automated trading validation
+  const triggerAutomatedValidation = (data: any) => {
+    if (!data || !data.symbol || !data.price) return
+    
+    // Calculate score using existing analyzeSetup logic
+    const setup = analyzeSetup()
+    
+    // Create stock object for validation
+    const stockForValidation = {
+      symbol: data.symbol,
+      price: data.price,
+      score: setup.positionScore,
+      changePercent: parseFloat(data.change?.replace('%', '') || '0'),
+      volume: parseFloat(data.volume?.replace(/[,M]/g, '') || '0') * (data.volume?.includes('M') ? 1000000 : 1),
+      relativeVolume: parseFloat(data.relVolume || '1'),
+      gapAnalysis: {
+        gapPercent: parseFloat(data.change?.replace('%', '') || '0'),
+        gapType: parseFloat(data.change?.replace('%', '') || '0') > 0 ? 'gap_up' : 'gap_down',
+        significant: Math.abs(parseFloat(data.change?.replace('%', '') || '0')) > 3
+      },
+      momentumCriteria: {
+        nearHigh: data.week52High ? (data.price / parseFloat(data.week52High)) > 0.9 : false,
+        aboveSMAs: data.sma20 && data.sma50 ? (data.price > parseFloat(data.sma20) && data.price > parseFloat(data.sma50)) : false,
+        score: setup.positionScore
+      }
+    }
+    
+    setSelectedStockForValidation(stockForValidation)
   }
 
   const analyzeSetup = (): TradeSetup => {
@@ -1491,6 +1529,35 @@ export default function TradeAnalyzer() {
                   </div>
                 </div>
 
+                {/* Automated Trading Assistant */}
+                <div className={`rounded-lg shadow-lg transition-colors ${
+                  isDarkMode ? 'bg-gray-900' : 'bg-gray-50'
+                }`}>
+                  <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className={`text-lg font-semibold ${
+                          isDarkMode ? 'text-white' : 'text-gray-900'
+                        }`}>🤖 Automated Trading Assistant</h3>
+                        <p className={`text-sm ${
+                          isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                        }`}>Professional analysis with real technical indicators, news sentiment & risk management</p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <TradeValidationPanel 
+                    selectedStock={selectedStockForValidation}
+                    onTradeDecision={setTradeDecision}
+                    onStockDeselect={() => setSelectedStockForValidation(null)}
+                  />
+                </div>
+
                 {/* Market Status Indicator */}
                 {(stockData.isAfterHours || stockData.isPremarket || (stockData.afterHoursPrice && stockData.afterHoursPrice !== stockData.price)) && (
                   <div className={`p-3 rounded-lg border ${
@@ -1516,8 +1583,8 @@ export default function TradeAnalyzer() {
                   </div>
                 )}
 
-                {/* Add to Watchlist Button */}
-                <div className="flex justify-center">
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   <button
                     onClick={handleAddToWatchlist}
                     className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 shadow-md hover:shadow-lg"
@@ -1526,6 +1593,16 @@ export default function TradeAnalyzer() {
                       <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                     </svg>
                     Add to Today's Watchlist
+                  </button>
+                  
+                  <button
+                    onClick={() => triggerAutomatedValidation(stockData)}
+                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-medium rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                    🤖 Re-run AI Analysis
                   </button>
                 </div>
 

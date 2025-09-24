@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useDarkMode } from '@/hooks/useDarkMode'
+import TradeValidationPanel from '@/components/TradeValidationPanel'
+import TradingInstructions from '@/components/TradingInstructions'
 
 interface PremarketStock {
   symbol: string
@@ -68,6 +70,8 @@ export default function PremarketScanner() {
   const [error, setError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
   const [isInitialized, setIsInitialized] = useState(false)
+  const [selectedStock, setSelectedStock] = useState<PremarketStock | null>(null)
+  const [tradeDecision, setTradeDecision] = useState<any>(null)
   
   // Strategy-specific filter presets
   const strategyFilters: Record<TradingStrategy, StrategyFilters> = {
@@ -568,6 +572,20 @@ export default function PremarketScanner() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Trading Instructions */}
+        <div className="mb-8">
+          <TradingInstructions />
+        </div>
+
+        {/* Trade Validation Panel */}
+        <div className="mb-8">
+          <TradeValidationPanel 
+            selectedStock={selectedStock}
+            onTradeDecision={setTradeDecision}
+            onStockDeselect={() => setSelectedStock(null)}
+          />
         </div>
 
         {/* Strategy Selector */}
@@ -1264,15 +1282,20 @@ export default function PremarketScanner() {
                     const riskWarning = getRiskWarning(stock)
                     const qualityTier = stock.qualityTier || 'caution'
                     return (
-                    <tr key={stock.symbol} className={`border-t transition-all duration-200 ${
-                      qualityTier === 'premium' ? 
-                        (isDarkMode ? 'border-green-700 bg-green-900/10 hover:bg-green-900/20' : 'border-green-300 bg-green-50 hover:bg-green-100') :
-                      qualityTier === 'standard' ?
-                        (isDarkMode ? 'border-yellow-700 bg-yellow-900/10 hover:bg-yellow-900/20' : 'border-yellow-300 bg-yellow-50 hover:bg-yellow-100') :
-                      qualityTier === 'caution' ?
-                        (isDarkMode ? 'border-orange-700 bg-orange-900/10 hover:bg-orange-900/20' : 'border-orange-300 bg-orange-50 hover:bg-orange-100') :
-                        (isDarkMode ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-200 hover:bg-gray-50')
-                    }`}>
+                    <tr 
+                      key={stock.symbol} 
+                      onClick={() => setSelectedStock(stock)}
+                      className={`border-t transition-all duration-200 cursor-pointer ${
+                        selectedStock?.symbol === stock.symbol 
+                          ? (isDarkMode ? 'bg-blue-900/30 border-blue-600 ring-2 ring-blue-500' : 'bg-blue-100 border-blue-400 ring-2 ring-blue-300')
+                          : qualityTier === 'premium' ? 
+                            (isDarkMode ? 'border-green-700 bg-green-900/10 hover:bg-green-900/20' : 'border-green-300 bg-green-50 hover:bg-green-100') :
+                          qualityTier === 'standard' ?
+                            (isDarkMode ? 'border-yellow-700 bg-yellow-900/10 hover:bg-yellow-900/20' : 'border-yellow-300 bg-yellow-50 hover:bg-yellow-100') :
+                          qualityTier === 'caution' ?
+                            (isDarkMode ? 'border-orange-700 bg-orange-900/10 hover:bg-orange-900/20' : 'border-orange-300 bg-orange-50 hover:bg-orange-100') :
+                            (isDarkMode ? 'border-gray-700 hover:bg-gray-800' : 'border-gray-200 hover:bg-gray-50')
+                      }`}>
                       <td className="px-6 py-5">
                         <div className="flex flex-col lg:flex-row lg:items-center gap-3">
                           <div className="flex items-center gap-2">
@@ -1437,15 +1460,20 @@ export default function PremarketScanner() {
                 const riskWarning = getRiskWarning(stock)
                 const qualityTier = stock.qualityTier || 'caution'
                 return (
-                <div key={stock.symbol} className={`p-4 rounded-xl border shadow-lg ${
-                  qualityTier === 'premium' ? 
-                    (isDarkMode ? 'bg-green-900/10 border-green-700' : 'bg-green-50 border-green-300') :
-                  qualityTier === 'standard' ?
-                    (isDarkMode ? 'bg-yellow-900/10 border-yellow-700' : 'bg-yellow-50 border-yellow-300') :
-                  qualityTier === 'caution' ?
-                    (isDarkMode ? 'bg-orange-900/10 border-orange-700' : 'bg-orange-50 border-orange-300') :
-                    (isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200')
-                }`}>
+                <div 
+                  key={stock.symbol} 
+                  onClick={() => setSelectedStock(stock)}
+                  className={`p-4 rounded-xl border shadow-lg cursor-pointer transition-all duration-200 ${
+                    selectedStock?.symbol === stock.symbol 
+                      ? (isDarkMode ? 'bg-blue-900/30 border-blue-600 ring-2 ring-blue-500' : 'bg-blue-100 border-blue-400 ring-2 ring-blue-300')
+                      : qualityTier === 'premium' ? 
+                        (isDarkMode ? 'bg-green-900/10 border-green-700 hover:bg-green-900/20' : 'bg-green-50 border-green-300 hover:bg-green-100') :
+                      qualityTier === 'standard' ?
+                        (isDarkMode ? 'bg-yellow-900/10 border-yellow-700 hover:bg-yellow-900/20' : 'bg-yellow-50 border-yellow-300 hover:bg-yellow-100') :
+                      qualityTier === 'caution' ?
+                        (isDarkMode ? 'bg-orange-900/10 border-orange-700 hover:bg-orange-900/20' : 'bg-orange-50 border-orange-300 hover:bg-orange-100') :
+                        (isDarkMode ? 'bg-gray-800 border-gray-700 hover:bg-gray-700' : 'bg-white border-gray-200 hover:bg-gray-50')
+                  }`}>
                   {riskWarning && (
                     <div className={`mb-3 p-2 rounded-lg text-xs font-medium ${
                       riskWarning.level === 'high' ? 

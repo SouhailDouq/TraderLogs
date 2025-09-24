@@ -5,7 +5,42 @@ import { Trade } from '@/utils/store'
 type PrismaTrade = Awaited<ReturnType<typeof PrismaClient.prototype.trade.findFirst>>
 type PrismaError = Error & { code: string }
 
+/**
+ * CORE BUSINESS LOGIC: Trade Data Management Service
+ * 
+ * PURPOSE: Handles all trade data operations (CRUD) with deduplication and user isolation
+ * STRATEGY: Database-first approach with CSV import support and conflict resolution
+ * 
+ * KEY FEATURES:
+ * - User-specific data isolation (multi-user support)
+ * - Duplicate trade prevention via sourceId generation
+ * - CSV import with conflict detection
+ * - Graceful error handling (prevents UI crashes)
+ * - Trade journaling and profit/loss tracking
+ * 
+ * BUSINESS IMPACT:
+ * - Maintains trading history integrity
+ * - Supports performance analysis and tax reporting
+ * - Enables portfolio tracking and risk management
+ * - Critical for Trading 212 CSV import workflow
+ */
 export class TradeService {
+  /**
+   * CORE BUSINESS LOGIC: Unique Trade Identifier Generator
+   * 
+   * PURPOSE: Creates unique sourceId to prevent duplicate trades
+   * STRATEGY: Combines symbol, date, type, quantity, timestamp, and random suffix
+   * 
+   * DEDUPLICATION LOGIC:
+   * - Uses existing trade.id if available (from CSV processing)
+   * - Generates composite key: symbol-date-type-quantity-timestamp-random
+   * - Handles race conditions and import conflicts
+   * 
+   * BUSINESS IMPACT:
+   * - Prevents duplicate trades from multiple CSV imports
+   * - Maintains data integrity across import sessions
+   * - Supports incremental trade updates
+   */
   private generateSourceId(trade: Trade): string {
     // Use the trade's id if it exists (from CSV processing), otherwise generate a unique one
     if (trade.id) {
@@ -18,6 +53,23 @@ export class TradeService {
     return `${trade.symbol}-${trade.date}-${trade.type.replace(/\s+/g, '-')}-${trade.quantity}-${timestamp}-${randomSuffix}`
   }
 
+  /**
+   * CORE BUSINESS LOGIC: Trade Retrieval Engine
+   * 
+   * PURPOSE: Fetches all trades for a user with error resilience
+   * STRATEGY: User-isolated queries with graceful error handling
+   * 
+   * DATA ISOLATION:
+   * - Filters by userId for multi-user support
+   * - Orders by date (newest first) for chronological view
+   * - Returns empty array on errors (prevents UI crashes)
+   * 
+   * BUSINESS IMPACT:
+   * - Provides complete trading history for analysis
+   * - Supports portfolio performance calculations
+   * - Enables trade journaling and review
+   * - Critical for dashboard and analytics screens
+   */
   async getAllTrades(userId?: string) {
     console.log('Fetching all trades from DB for user:', userId)
     try {
@@ -42,6 +94,30 @@ export class TradeService {
     }
   }
 
+  /**
+   * CORE BUSINESS LOGIC: Bulk Trade Import Engine
+   * 
+   * PURPOSE: Imports multiple trades with deduplication and conflict resolution
+   * STRATEGY: Individual trade processing with sourceId-based duplicate detection
+   * 
+   * IMPORT PROCESS:
+   * 1. Generate unique sourceId for each trade
+   * 2. Check for existing trades (user + sourceId + source)
+   * 3. Skip duplicates, create new trades
+   * 4. Handle race conditions (P2002 unique constraint violations)
+   * 5. Calculate totals and profit/loss automatically
+   * 
+   * BUSINESS IMPACT:
+   * - Enables Trading 212 CSV import workflow
+   * - Prevents data corruption from duplicate imports
+   * - Supports incremental trade updates
+   * - Critical for maintaining trading history integrity
+   * 
+   * ERROR HANDLING:
+   * - Graceful duplicate handling (skip, don't fail)
+   * - Race condition protection
+   * - Detailed logging for debugging
+   */
   async saveTrades(trades: Trade[], source: 'CSV' | 'API', userId: string): Promise<{ saved: number; skipped: number }> {
     console.log(`🔄 TradeService.saveTrades called with ${trades.length} trades for userId: ${userId}`)
     let saved = 0
@@ -105,7 +181,16 @@ export class TradeService {
   }
 
   /**
-   * Get the date range of existing trades
+   * CORE BUSINESS LOGIC: Trade Timeline Analyzer
+   * 
+   * PURPOSE: Determines the complete date range of trading activity
+   * STRATEGY: Database transaction to get earliest and latest trade dates
+   * 
+   * BUSINESS IMPACT:
+   * - Enables performance period analysis
+   * - Supports date range filtering in UI
+   * - Critical for calendar view and time-based analytics
+   * - Helps determine trading activity patterns
    */
   async getTradeTimeRange(): Promise<{ earliest: Date | null; latest: Date | null }> {
     const result = await prisma.$transaction([
@@ -126,7 +211,16 @@ export class TradeService {
   }
 
   /**
-   * Get all trades within a date range
+   * CORE BUSINESS LOGIC: Time-Period Trade Filter
+   * 
+   * PURPOSE: Retrieves trades within specific date boundaries
+   * STRATEGY: Date range filtering with chronological ordering
+   * 
+   * BUSINESS IMPACT:
+   * - Supports monthly/quarterly performance analysis
+   * - Enables tax period reporting
+   * - Critical for calendar view and period-based analytics
+   * - Helps analyze trading patterns over time
    */
   async getTradesInRange(start: Date, end: Date): Promise<PrismaTrade[]> {
     return prisma.trade.findMany({
@@ -176,7 +270,28 @@ export class TradeService {
   }
 
   /**
-   * Update a trade by its ID
+   * CORE BUSINESS LOGIC: Trade Modification Engine
+   * 
+   * PURPOSE: Updates existing trades with validation and error handling
+   * STRATEGY: Existence validation + selective field updates + journal support
+   * 
+   * UPDATE PROCESS:
+   * 1. Verify trade exists (prevent phantom updates)
+   * 2. Handle journal field separately (JSON serialization)
+   * 3. Update timestamp for audit trail
+   * 4. Handle not-found errors gracefully (P2025)
+   * 
+   * BUSINESS IMPACT:
+   * - Enables trade corrections and journaling
+   * - Supports profit/loss adjustments
+   * - Critical for trade review and analysis workflow
+   * - Maintains data integrity during updates
+   * 
+   * SUPPORTED UPDATES:
+   * - Trade details (price, quantity, fees)
+   * - Journal entries and notes
+   * - Profit/loss calculations
+   * - Current price updates
    */
   async updateTrade(id: string, updateData: Partial<Trade>): Promise<PrismaTrade | null> {
     try {

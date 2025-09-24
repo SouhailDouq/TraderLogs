@@ -23,9 +23,11 @@ const eslintConfig = [
       "@typescript-eslint/no-wrapper-object-types": "off",
       "@typescript-eslint/no-unnecessary-type-constraint": "off",
       "@next/next/no-html-link-for-pages": "off",
+      "@next/next/no-img-element": "warn",
       "react/no-unescaped-entities": "off",
       "react-hooks/rules-of-hooks": "off",
-      "react-hooks/exhaustive-deps": "warn"
+      "react-hooks/exhaustive-deps": "warn",
+      "prefer-const": "warn"
     }
   },
   {
@@ -41,9 +43,11 @@ const eslintConfig = [
       "@typescript-eslint/no-wrapper-object-types": "off",
       "@typescript-eslint/no-unnecessary-type-constraint": "off",
       "@next/next/no-html-link-for-pages": "off",
+      "@next/next/no-img-element": "warn",
       "react/no-unescaped-entities": "off",
       "react-hooks/rules-of-hooks": "off",
-      "react-hooks/exhaustive-deps": "warn"
+      "react-hooks/exhaustive-deps": "warn",
+      "prefer-const": "warn"
     }
   }
 ];
