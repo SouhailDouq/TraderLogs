@@ -44,6 +44,10 @@ class APICache {
     return this.get(key) !== null
   }
 
+  delete(key: string): boolean {
+    return this.cache.delete(key)
+  }
+
   clear(): void {
     this.cache.clear()
   }

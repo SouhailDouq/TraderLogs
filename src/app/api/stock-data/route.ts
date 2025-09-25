@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { eodhd } from '@/utils/eodhd'
 import { apiCache } from '@/utils/apiCache'
 import { rateLimiter } from '@/utils/rateLimiter'
-import { calculateScore, getSignal, formatMarketCap } from '@/utils/eodhd'
+import { formatMarketCap } from '@/utils/eodhd';
+import { scoringEngine, type StockData as ScoringStockData } from '@/utils/scoringEngine';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const symbol = searchParams.get('symbol')
+  const forceRefresh = searchParams.get('forceRefresh') === 'true'
   
   try {
     
@@ -17,12 +19,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Check cache first
+    // Check cache first (unless force refresh is requested)
     const cacheKey = `stock_data_${symbol.toUpperCase()}`
-    const cached = apiCache.get(cacheKey)
-    if (cached) {
-      console.log(`Using cached data for ${symbol}`)
-      return NextResponse.json(cached)
+    if (!forceRefresh) {
+      const cached = apiCache.get(cacheKey)
+      if (cached) {
+        console.log(`Using cached data for ${symbol}`)
+        return NextResponse.json(cached)
+      }
+    } else {
+      console.log(`Force refresh requested for ${symbol} - bypassing cache`)
+      apiCache.delete(cacheKey)
     }
 
     // Check rate limit
@@ -80,15 +87,38 @@ You can still analyze this stock by entering data manually.`,
       rsi: techData.RSI_14
     });
     
-    // Calculate relative volume
-    const avgVolume = fundData.SharesOutstanding ? 
-      (fundData.SharesOutstanding * 0.02) : // Estimate 2% daily turnover
-      1000000 // Default fallback
-    const relativeVolume = realTimeData.volume / avgVolume
+    // Calculate relative volume using the new, more accurate intraday method
+    const avgVolume = await eodhd.getHistoricalAverageVolume(symbol, 30);
+    const currentVolume = realTimeData.volume || 0;
+    const relativeVolume = avgVolume > 0 ? currentVolume / avgVolume : 0;    
+    // Calculate enhanced score with real data
+    const marketStatus = eodhd.getMarketHoursStatus()
+    const isPremarket = marketStatus === 'premarket'
+    const gapPercent = ((realTimeData.close - realTimeData.previousClose) / realTimeData.previousClose) * 100
     
-    // Calculate breakout-specific score for trade analyzer
-    const score = calculateScore(realTimeData, techData, 'breakout')
-    const signal = getSignal(score, 'breakout')
+    const enhancedData = {
+      realRelativeVolume: relativeVolume ?? undefined,
+      gapPercent: gapPercent,
+      avgVolume: avgVolume ?? undefined,
+      isPremarket: isPremarket
+    }
+    
+    const stockDataForScoring: ScoringStockData = {
+      symbol: realTimeData.code.replace('.US', ''),
+      price: realTimeData.close,
+      changePercent: realTimeData.change_p,
+      volume: realTimeData.volume,
+      relVolume: relativeVolume,
+      sma20: techData.SMA_20 || 0,
+      sma50: techData.SMA_50 || 0,
+      rsi: techData.RSI_14 || 0,
+      week52High: fundData?.['52WeekHigh'] || techData?.['52WeekHigh'] || realTimeData.close
+    };
+
+    const scoreBreakdown = scoringEngine.calculateScore(stockDataForScoring, 'technical-momentum');
+    const score = scoreBreakdown.finalScore;
+    const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : 'Avoid';
+    const analysisReasoning = scoreBreakdown.analysisReasoning;
     
     // Convert to expected format for trade analyzer
     const response = {
@@ -101,17 +131,17 @@ You can still analyze this stock by entering data manually.`,
       pe: fundData.PERatio ? fundData.PERatio.toFixed(2) : '-',
       beta: fundData.Beta ? fundData.Beta.toFixed(2) : '-',
       // Use real technical data when available, otherwise estimate
-      sma20: techData.SMA_20 ? techData.SMA_20.toFixed(2) : realTimeData.close.toFixed(2),
-      sma50: techData.SMA_50 ? techData.SMA_50.toFixed(2) : realTimeData.close.toFixed(2),
-      sma200: techData.SMA_200 ? techData.SMA_200.toFixed(2) : realTimeData.close.toFixed(2),
+      sma20: techData.SMA_20 ? techData.SMA_20.toFixed(2) : null,
+      sma50: techData.SMA_50 ? techData.SMA_50.toFixed(2) : null,
+      sma200: techData.SMA_200 ? techData.SMA_200.toFixed(2) : null,
       week52High: (fundData?.['52WeekHigh'] || techData?.['52WeekHigh']) ? 
         (fundData['52WeekHigh'] || techData['52WeekHigh'] || realTimeData.close).toFixed(2) : 
         realTimeData.close.toFixed(2),
       week52Low: (fundData?.['52WeekLow'] || techData?.['52WeekLow']) ? 
         (fundData['52WeekLow'] || techData['52WeekLow'] || realTimeData.close).toFixed(2) : 
         realTimeData.close.toFixed(2),
-      rsi: techData.RSI_14 ? techData.RSI_14.toFixed(1) : '50.0',
-      relVolume: relativeVolume.toFixed(2),
+      rsi: techData.RSI_14 ? techData.RSI_14.toFixed(1) : null,
+      relVolume: relativeVolume ? relativeVolume.toFixed(2) : 'N/A',
       
       // EODHD real-time data
       open: realTimeData.open,
@@ -138,7 +168,17 @@ You can still analyze this stock by entering data manually.`,
       // Enhanced data from EODHD with strategy-specific scoring
       score: score,
       signal: signal,
+      analysisReasoning: analysisReasoning,
       strategy: 'breakout',
+      
+      // Enhanced scoring data for consistency
+      enhancedScoring: {
+        realRelativeVolume: relativeVolume,
+        gapPercent: gapPercent,
+        avgVolume: avgVolume,
+        isPremarket: isPremarket,
+        marketStatus: marketStatus
+      },
       
       // Technical indicators
       macd: techData.MACD || null,
@@ -168,7 +208,7 @@ You can still analyze this stock by entering data manually.`,
           ...(techData.RSI_14 ? [] : ['rsi'])
         ],
         dataTimestamp: new Date().toISOString(),
-        cacheStatus: cached ? 'cached' : 'fresh'
+        cacheStatus: forceRefresh ? 'fresh' : 'fresh'
       }
     }
 

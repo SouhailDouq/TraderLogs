@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eodhd, summarizeNewsImpact, categorizeNewsByTags, formatMarketCap, EODHDRealTimeData, calculateScore, getSignal } from '@/utils/eodhd';
+import { eodhd, summarizeNewsImpact, categorizeNewsByTags, formatMarketCap, EODHDRealTimeData } from '@/utils/eodhd';
+import { scoringEngine, type StockData } from '@/utils/scoringEngine';
 
 // Create a comprehensive EODHD client mock for enhanced methods not yet implemented
 const eodhdEnhanced = {
@@ -22,24 +23,33 @@ const eodhdEnhanced = {
     // Use the real EODHD client for live quotes
     return await eodhd.getRealTimeQuote(symbol);
   },
-  getFundamentals: async (symbol: string) => ({
-    General: {
-      SharesFloat: Math.floor(Math.random() * 100000000) + 10000000
-    },
-    Highlights: {
-      MarketCapitalization: Math.floor(Math.random() * 10000000000) + 1000000000,
-      SharesOutstanding: Math.floor(Math.random() * 200000000) + 50000000
+  getFundamentals: async (symbol: string) => {
+    // Use real EODHD fundamentals instead of mock data
+    try {
+      return await eodhd.getFundamentals(symbol);
+    } catch (error) {
+      console.error(`❌ ${symbol}: Real fundamentals failed - no mock data returned for trading safety`);
+      return null; // Don't return fake fundamentals for trading decisions
     }
-  }),
-  getTechnicals: async (symbol: string) => [{
-    SMA_20: 95 + Math.random() * 10,
-    SMA_50: 90 + Math.random() * 10,
-    SMA_200: 85 + Math.random() * 10,
-    RSI_14: 40 + Math.random() * 40
-  }],
+  },
+  getTechnicals: async (symbol: string) => {
+    // Use real technical data from EODHD instead of mock data
+    try {
+      return await eodhd.getTechnicals(symbol);
+    } catch (error) {
+      console.log(`⚠️ ${symbol}: Real technicals failed, using fallback`);
+      return [{
+        SMA_20: undefined,
+        SMA_50: undefined, 
+        SMA_200: undefined,
+        RSI_14: undefined
+      }];
+    }
+  },
   getHistoricalAverageVolume: async (symbol: string, days: number) => {
-    // Mock historical volume calculation
-    return Math.floor(Math.random() * 2000000) + 500000;
+    // CORRECTED: Use the REAL historical average volume calculation from the main eodhd client
+    console.log(`✅ Using REAL historical volume calculation for ${symbol}`);
+    return await eodhd.getHistoricalAverageVolume(symbol, days);
   },
   calculatePremarketGap: (current: number, previous: number) => ({
     gapPercent: ((current - previous) / previous) * 100,
@@ -72,25 +82,70 @@ const eodhdEnhanced = {
     };
   },
   checkMomentumCriteria: async (symbol: string, price: number) => {
-    // Mock momentum criteria - replace with real analysis
-    const highProximity = 85 + Math.random() * 15;
-    return {
-      isNear20DayHigh: highProximity > 85,
-      highProximity,
-      isAboveSMAs: Math.random() > 0.3,
-      smaAlignment: Math.random() > 0.5 ? 'bullish' as const : 'mixed' as const,
-      momentumScore: Math.floor(40 + Math.random() * 40)
-    };
+    // Use REAL technical analysis instead of dangerous mock data
+    try {
+      const technicals = await eodhd.getTechnicals(symbol);
+      const realTimeData = await eodhd.getRealTimeQuote(symbol);
+      
+      if (!technicals || !realTimeData) {
+        throw new Error('No real data available');
+      }
+      
+      const tech = technicals[0] || {};
+      const sma20 = tech.SMA_20 || 0;
+      const sma50 = tech.SMA_50 || 0;
+      const sma200 = tech.SMA_200 || 0;
+      
+      // Calculate REAL 20-day high proximity using available data
+      const currentHigh = realTimeData.high || price;
+      const highProximity = currentHigh > 0 ? (price / currentHigh) * 100 : 0;
+      
+      // Calculate REAL SMA alignment
+      const aboveSMA20 = price > sma20 && sma20 > 0;
+      const aboveSMA50 = price > sma50 && sma50 > 0;
+      const aboveSMA200 = price > sma200 && sma200 > 0;
+      const isAboveSMAs = aboveSMA20 && aboveSMA50;
+      
+      const smaAlignment = (aboveSMA20 && aboveSMA50 && aboveSMA200) ? 'bullish' as const :
+                          (aboveSMA20 && aboveSMA50) ? 'bullish' as const : 'mixed' as const;
+      
+      // Calculate REAL momentum score based on technical strength
+      let momentumScore = 0;
+      if (aboveSMA20) momentumScore += 20;
+      if (aboveSMA50) momentumScore += 15;
+      if (aboveSMA200) momentumScore += 10;
+      if (highProximity > 90) momentumScore += 25;
+      else if (highProximity > 80) momentumScore += 15;
+      else if (highProximity > 70) momentumScore += 10;
+      
+      return {
+        isNear20DayHigh: highProximity > 85,
+        highProximity,
+        isAboveSMAs,
+        smaAlignment,
+        momentumScore: Math.min(momentumScore, 80) // Cap at 80
+      };
+    } catch (error) {
+      console.error(`❌ REAL momentum analysis failed for ${symbol}:`, error);
+      // Return conservative real-data-only fallback
+      return {
+        isNear20DayHigh: false,
+        highProximity: 0,
+        isAboveSMAs: false,
+        smaAlignment: 'mixed' as const,
+        momentumScore: 0
+      };
+    }
   },
   getStockNews: async (symbol: string, limit: number) => {
-    // Mock news data
-    return [
-      {
-        date: new Date().toISOString(),
-        title: `${symbol} shows strong momentum`,
-        content: 'Market analysis indicates positive sentiment'
-      }
-    ];
+    // Use REAL news data from EODHD instead of dangerous mock data
+    try {
+      return await eodhd.getStockNews(symbol, limit);
+    } catch (error) {
+      console.error(`❌ REAL news data failed for ${symbol}:`, error);
+      // Return empty array instead of fake news - no mock data for trading decisions!
+      return [];
+    }
   }
 };
 
@@ -255,22 +310,11 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
     const previousClose = realTimeData.previousClose || currentPrice;
     
     // 1. Calculate real relative volume using historical data
-    let relativeVolume = 1.5; // Default fallback
-    try {
-      const historicalAvgVolume = await eodhdEnhanced.getHistoricalAverageVolume(symbol, 30);
-      if (historicalAvgVolume > 0 && realTimeData.volume > 0) {
-        relativeVolume = realTimeData.volume / historicalAvgVolume;
-        console.log(`📊 ${symbol}: Real relative volume ${relativeVolume.toFixed(2)}x (current: ${realTimeData.volume.toLocaleString()}, avg: ${historicalAvgVolume.toLocaleString()})`);
-      }
-    } catch (error) {
-      console.log(`⚠️ ${symbol}: Using estimated relative volume due to API error`);
-      // Improved estimation based on price and market cap
-      const estimatedAvgVolume = currentPrice > 50 ? 3000000 : 
-                                currentPrice > 20 ? 2000000 :
-                                currentPrice > 10 ? 1500000 :
-                                currentPrice > 5 ? 1000000 : 800000;
-      relativeVolume = (realTimeData.volume || 0) / estimatedAvgVolume;
-    }
+    // 1. Calculate TRUE intraday relative volume
+    const avgVolume = await eodhd.getHistoricalAverageVolume(symbol, 30);
+    const currentVolume = realTimeData.volume || 0;
+    const relativeVolume = avgVolume > 0 ? currentVolume / avgVolume : 0;
+    console.log(`📊 ${symbol}: RelVol ${relativeVolume.toFixed(2)}x (Current: ${currentVolume.toLocaleString()}, Avg: ${avgVolume.toLocaleString()})`);
     
     // 2. Enhanced premarket gap analysis
     const gapAnalysis = eodhdEnhanced.calculatePremarketGap(currentPrice, previousClose);
@@ -431,18 +475,17 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
           console.log(`⚠️ ${symbol}: Data is ${Math.round(dataAge/60000)} minutes old - may not be reliable for live trading`)
         }
         
-        // Calculate strategy-specific score
-        const score = calculateScore(stock, technicals || undefined, strategy)
-        const signal = getSignal(score, strategy)
+        // Skip individual scoring here - will be done in final enhanced analysis
+        // This eliminates duplicate scoring with different data sources
         
-        // Apply minimum score filter to reduce noise
-        if (score < filters.minScore) {
-          console.log(`${symbol} filtered: score ${score} < ${filters.minScore}`)
+        // Apply minimum volume filter to reduce noise
+        if ((stock.volume || 0) < filters.minVolume) {
+          console.log(`${symbol} filtered: volume ${stock.volume} < ${filters.minVolume}`)
           continue
         }
         
-        qualifiedStocks.push({ stock, score })
-        console.log(`${symbol} qualified with score: ${score}${isStaleData ? ' ⚠️ STALE DATA' : ''}`)
+        qualifiedStocks.push({ stock, score: 0 }) // Temporary score, will be calculated properly later
+        console.log(`${symbol} qualified for enhanced analysis${isStaleData ? ' ⚠️ STALE DATA' : ''}`)
         
       } catch (error) {
         console.error(`Error processing stock:`, error)
@@ -650,41 +693,62 @@ export async function POST(request: NextRequest) {
           timeUrgency
         };
         
-        const score = calculateScore(stock, undefined, strategy);
-        const signal = getSignal(score, strategy);
+        // Create enhanced data for consistent scoring with Trade Analyzer
+        const scoringData = {
+          realRelativeVolume: relativeVolume,
+          gapPercent: gapAnalysis.gapPercent,
+          avgVolume: (stock.volume || 0) / (relativeVolume || 1),
+          isPremarket: eodhdEnhanced.getMarketHoursStatus() === 'premarket'
+        };
         
+        const technicalsData = await eodhd.getTechnicals(symbol);
+        const technicals = technicalsData?.[0] || {};
+
+        const stockDataForScoring: StockData = {
+          symbol: stock.code.replace('.US', ''),
+          price: stock.close,
+          changePercent: stock.change_p,
+          volume: stock.volume,
+          relVolume: relativeVolume,
+          sma20: technicals.SMA_20 || 0,
+          sma50: technicals.SMA_50 || 0,
+          rsi: technicals.RSI_14 || 0,
+          week52High: stock.high || stock.close
+        };
+        const scoreBreakdown = scoringEngine.calculateScore(stockDataForScoring, strategy);
+        const score = scoreBreakdown.finalScore;
+        const analysisReasoning = scoreBreakdown.analysisReasoning;
+        const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : 'Avoid'; // Simplified signal
+
         console.log(`🎯 ${symbol}: Enhanced score ${score}/100 (${signal}) - Gap: ${gapAnalysis.gapPercent.toFixed(1)}%, RelVol: ${relativeVolume.toFixed(1)}x, Urgency: ${timeUrgency.urgencyMultiplier.toFixed(2)}x`);
-        
+
         // Get news data with timeout protection
-        let newsData = undefined
+        let newsData = undefined;
         try {
-          const newsPromise = eodhdEnhanced.getStockNews(symbol, 3) // Limit to 3 articles for speed
-          const newsTimeout = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('news timeout')), 2000) // 2 second timeout
-          )
-          const news = await Promise.race([newsPromise, newsTimeout]) as any[]
-          
+          const newsPromise = eodhdEnhanced.getStockNews(symbol, 3);
+          const newsTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('news timeout')), 2000));
+          const news = await Promise.race([newsPromise, newsTimeout]) as any[];
+
           if (news && news.length > 0) {
             const recentNews = news.filter(article => {
-              const articleDate = new Date(article.date)
-              const hoursSinceArticle = (Date.now() - articleDate.getTime()) / (1000 * 60 * 60)
-              return hoursSinceArticle <= 24 // Only articles from last 24 hours
-            })
-            
+              const articleDate = new Date(article.date);
+              const hoursSinceArticle = (Date.now() - articleDate.getTime()) / (1000 * 60 * 60);
+              return hoursSinceArticle <= 24;
+            });
+
             if (recentNews.length > 0) {
               newsData = {
                 count: news.length,
-                sentiment: 0, // Simplified - no sentiment analysis for speed
-                topCatalyst: 'General', // Simplified catalyst
+                sentiment: 0,
+                topCatalyst: 'General',
                 recentCount: recentNews.length
-              }
+              };
             }
           }
         } catch (error) {
-          // Skip news if it times out or fails - don't let it break the scan
-          console.log(`${symbol}: Skipping news due to timeout/error`)
+          console.log(`${symbol}: Skipping news due to timeout/error`);
         }
-        
+
         return {
           symbol: stock.code.replace('.US', ''),
           price: stock.close,
@@ -698,7 +762,6 @@ export async function POST(request: NextRequest) {
           marketCap: 'Unknown',
           lastUpdated: new Date(stock.timestamp * 1000).toISOString(),
           news: newsData,
-          // Enhanced momentum data
           gapAnalysis: {
             gapPercent: gapAnalysis.gapPercent,
             isSignificant: gapAnalysis.isSignificant
@@ -713,10 +776,10 @@ export async function POST(request: NextRequest) {
             timeWindow: timeUrgency.timeWindow,
             urgencyMultiplier: timeUrgency.urgencyMultiplier
           },
-          // Quality assessment
           qualityTier,
-          warnings
-        } as PremarketStock
+          warnings,
+          analysisReasoning
+        } as PremarketStock;
         
       } catch (error) {
         console.error(`Error processing stock:`, error)

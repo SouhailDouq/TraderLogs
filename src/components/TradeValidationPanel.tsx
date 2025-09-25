@@ -3,12 +3,13 @@
 import { useState, useEffect } from 'react'
 
 interface TradeValidationPanelProps {
-  selectedStock: any | null
-  onTradeDecision: (decision: any) => void
-  onStockDeselect?: () => void
+  selectedStock: any | null;
+  onTradeDecision: (decision: any) => void;
+  onStockDeselect?: () => void;
+  analysisReasoning?: string[];
 }
 
-export default function TradeValidationPanel({ selectedStock, onTradeDecision, onStockDeselect }: TradeValidationPanelProps) {
+export default function TradeValidationPanel({ selectedStock, onTradeDecision, onStockDeselect, analysisReasoning = [] }: TradeValidationPanelProps) {
   const [validation, setValidation] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [riskParams, setRiskParams] = useState({
@@ -277,17 +278,30 @@ export default function TradeValidationPanel({ selectedStock, onTradeDecision, o
           )}
 
           {/* Reasoning */}
-          <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-4 rounded-lg">
             <h4 className="font-semibold text-gray-900 dark:text-white mb-2">
               🧠 Analysis Reasoning
             </h4>
             <ul className="space-y-2">
-              {validation.reasoning.map((reason: string, index: number) => (
-                <li key={index} className="text-sm text-gray-700 dark:text-gray-300 flex items-start">
-                  <span className="w-2 h-2 bg-blue-500 rounded-full mr-2 mt-1.5 flex-shrink-0"></span>
-                  {reason}
-                </li>
-              ))}
+              {analysisReasoning && analysisReasoning.length > 0 ? (
+                analysisReasoning.map((reason: string, index: number) => (
+                  <li key={index} className="text-sm flex items-center">
+                    <span className={`mr-2 font-bold ${reason.startsWith('✅') ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {reason.startsWith('✅') ? '✓' : '✗'}
+                    </span>
+                    <span className="text-gray-900 dark:text-gray-100">
+                      {reason.substring(2)}
+                    </span>
+                  </li>
+                ))
+              ) : (
+                validation.reasoning.map((reason: string, index: number) => (
+                  <li key={index} className="text-sm text-gray-900 dark:text-gray-100 flex items-start">
+                    <span className="w-2 h-2 bg-blue-500 rounded-full mr-2 mt-1.5 flex-shrink-0"></span>
+                    {reason}
+                  </li>
+                ))
+              )}
               
               {/* Enhanced Technical Analysis Display */}
               {validation.technicalAnalysis && (

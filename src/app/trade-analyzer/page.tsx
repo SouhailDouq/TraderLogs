@@ -9,6 +9,7 @@ import { convertCurrency, formatCurrencyWithSymbol } from '@/utils/currency'
 import CurrencySwitcher from '@/components/CurrencySwitcher'
 import { StrategySelector, TradingStrategy } from '@/components/Strategy/StrategySelector'
 import TradeValidationPanel from '@/components/TradeValidationPanel'
+import { scoringEngine, type StockData as ScoringStockData } from '@/utils/scoringEngine'
 // Removed direct API import - now using backend route
 
 interface StockData {
@@ -19,6 +20,16 @@ interface StockData {
   avgVolume: string
   marketCap: string
   pe: string
+  score?: number
+  signal?: string
+  analysisReasoning?: string[]
+  enhancedScoring?: {
+    realRelativeVolume?: number
+    gapPercent?: number
+    avgVolume?: number
+    isPremarket?: boolean
+    marketStatus?: string
+  }
   forwardPE: string
   peg: string
   epsThisY: string
@@ -184,7 +195,7 @@ export default function TradeAnalyzer() {
   const [selectedStockForValidation, setSelectedStockForValidation] = useState<any>(null)
   const [tradeDecision, setTradeDecision] = useState<any>(null)
 
-  const fetchStockDataFromAPI = async () => {
+  const fetchStockDataFromAPI = async (forceRefresh = false) => {
     if (!tickerInput.trim()) {
       setApiError('Please enter a ticker symbol')
       return
@@ -195,7 +206,8 @@ export default function TradeAnalyzer() {
 
     try {
       // Use our backend API route to avoid CORS issues
-      const response = await fetch(`/api/stock-data?symbol=${encodeURIComponent(tickerInput.trim().toUpperCase())}`)
+      const url = `/api/stock-data?symbol=${encodeURIComponent(tickerInput.trim().toUpperCase())}${forceRefresh ? '&forceRefresh=true' : ''}`
+      const response = await fetch(url)
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -236,6 +248,8 @@ export default function TradeAnalyzer() {
           afterHoursChangePercent: data.afterHoursChangePercent,
           isAfterHours: data.isAfterHours,
           isPremarket: data.isPremarket,
+          analysisReasoning: data.analysisReasoning,
+          score: data.score,
           // Keep other fields as they were
           forwardPE: stockData.forwardPE,
           peg: stockData.peg,
@@ -281,11 +295,18 @@ export default function TradeAnalyzer() {
     // Calculate score using existing analyzeSetup logic
     const setup = analyzeSetup()
     
+    console.log('🎯 Trade Analyzer setup score:', setup.positionScore, 'for', data.symbol)
+    console.log('🎯 Stock data score:', data.score, 'API score available:', !!data.score)
+    
+    // Use API score if available, otherwise use calculated score
+    const finalScore = data.score !== undefined ? data.score : setup.positionScore
+    console.log('🎯 Final score for validation:', finalScore)
+    
     // Create stock object for validation
     const stockForValidation = {
       symbol: data.symbol,
       price: data.price,
-      score: setup.positionScore,
+      score: finalScore,
       changePercent: parseFloat(data.change?.replace('%', '') || '0'),
       volume: parseFloat(data.volume?.replace(/[,M]/g, '') || '0') * (data.volume?.includes('M') ? 1000000 : 1),
       relativeVolume: parseFloat(data.relVolume || '1'),
@@ -307,19 +328,22 @@ export default function TradeAnalyzer() {
   const analyzeSetup = (): TradeSetup => {
     const signals: string[] = []
     const warnings: string[] = []
-    let score = 0
 
     // Strategy-specific analysis adjustments
     const isNewsStrategy = selectedStrategy === 'news-momentum'
     const isTechnicalStrategy = selectedStrategy === 'technical-momentum'
+    
+    // Use the enhanced score from API (calculated with same logic as premarket scanner)
+    const score = stockData.score || 0
+    
+    console.log(`🎯 Trade Analyzer using API score: ${score} for ${stockData.symbol}`)
 
-    // Helper function to parse percentage strings
+    // Helper functions for parsing data
     const parsePercent = (str: string): number => {
       if (!str) return 0
       return parseFloat(str.replace('%', '')) || 0
     }
 
-    // Helper function to parse number strings
     const parseNumber = (str: string): number => {
       if (!str) return 0
       return parseFloat(str.replace(/[^0-9.-]/g, '')) || 0
@@ -336,27 +360,22 @@ export default function TradeAnalyzer() {
     const relativeVolume = parseNumber(stockData.relVolume)
     const rsi = parseNumber(stockData.rsi)
     
-    // Market context analysis
+    // Market context analysis (informational only - score already calculated)
     const marketContext = stockData.marketContext
-    let marketMultiplier = 1.0 // Base multiplier for market conditions
     
     if (marketContext) {
       // VIX analysis - high volatility reduces reliability
       if (marketContext.vix && marketContext.vix > 25) {
         warnings.push(`High market volatility (VIX: ${marketContext.vix.toFixed(1)}) - increased risk`)
-        marketMultiplier *= 0.8
       } else if (marketContext.vix && marketContext.vix < 15) {
         signals.push(`Low volatility environment (VIX: ${marketContext.vix.toFixed(1)}) - favorable conditions`)
-        marketMultiplier *= 1.1
       }
       
       // SPY trend analysis
       if (marketContext.spyTrend === 'bearish') {
         warnings.push(`Market in bearish trend (SPY: ${marketContext.spyChange ? marketContext.spyChange.toFixed(2) : 'N/A'}%) - breakouts may fail`)
-        marketMultiplier *= 0.7
       } else if (marketContext.spyTrend === 'bullish') {
         signals.push(`Market in bullish trend (SPY: +${marketContext.spyChange ? marketContext.spyChange.toFixed(2) : 'N/A'}%) - favorable for breakouts`)
-        marketMultiplier *= 1.2
       }
       
       // Market condition analysis
@@ -364,281 +383,123 @@ export default function TradeAnalyzer() {
         warnings.push('Volatile market conditions - use smaller position sizes')
       } else if (marketContext.marketCondition === 'trending') {
         signals.push('Trending market conditions - favorable for momentum plays')
-        score += 10
       }
     } else {
       warnings.push('Market context unavailable - use extra caution')
-      marketMultiplier *= 0.9
     }
     
-    // CRITICAL: Real-time price validation - reject high scores on declining stocks
-    const intradayChange = stockData.intradayChange || 0
-    const priceAction = stockData.priceAction || 'neutral'
-    const volumeSpike = stockData.volumeSpike || false
-    
-    // Debug logging
-    console.log('DEBUG - OPEN Analysis:')
-    console.log('Raw stockData:', stockData)
-    console.log('intradayChange from stockData:', stockData.intradayChange)
-    console.log('intradayChange variable:', intradayChange)
-    console.log('priceAction:', priceAction)
-    console.log('volumeSpike:', volumeSpike)
-    
-    // Major decline override - cap scores for stocks down significantly
-    if (intradayChange < -5) {
-      warnings.push(`Stock down ${Math.abs(intradayChange).toFixed(1)}% today - high risk despite technical signals`)
-      marketMultiplier *= 0.3 // Severely reduce score
-      warnings.push('Score heavily penalized due to significant intraday decline')
-    } else if (intradayChange < -3) {
-      warnings.push(`Stock down ${Math.abs(intradayChange).toFixed(1)}% today - caution advised`)
-      marketMultiplier *= 0.5 // Reduce score by half
-    } else if (intradayChange < -1.5) {
-      warnings.push(`Stock down ${Math.abs(intradayChange).toFixed(1)}% today - weak intraday momentum`)
-      marketMultiplier *= 0.7
+    // Enhanced scoring data analysis (informational - score already calculated in API)
+    const enhancedScoring = stockData.enhancedScoring
+    if (enhancedScoring) {
+      signals.push(`Real relative volume: ${enhancedScoring.realRelativeVolume?.toFixed(1)}x`)
+      if (enhancedScoring.gapPercent) {
+        const gap = enhancedScoring.gapPercent
+        if (Math.abs(gap) > 5) {
+          if (gap > 0) {
+            signals.push(`Premarket gap up: +${gap.toFixed(1)}%`)
+          } else {
+            warnings.push(`Premarket gap down: ${gap.toFixed(1)}%`)
+          }
+        }
+      }
+      if (enhancedScoring.isPremarket) {
+        signals.push('Premarket context considered in scoring')
+      }
     }
     
-    // Volume spike analysis for selling pressure
-    if (volumeSpike && intradayChange < -2) {
-      warnings.push('High volume selling detected - potential breakdown in progress')
-      marketMultiplier *= 0.4 // Further penalty for high-volume selling
-    } else if (volumeSpike && intradayChange > 2) {
-      signals.push('High volume buying detected - strong momentum confirmation')
-      score += 15
+    // RSI overbought warnings (critical for risk management)
+    if (rsi > 85) {
+      warnings.push(`🚨 EXTREMELY OVERBOUGHT: RSI ${rsi.toFixed(1)} - high reversal risk!`)
+    } else if (rsi > 80) {
+      warnings.push(`⚠️ OVERBOUGHT: RSI ${rsi.toFixed(1)} - potential pullback risk`)
+    } else if (rsi >= 55 && rsi <= 70) {
+      signals.push(`Healthy RSI: ${rsi.toFixed(1)} - good momentum range`)
     }
     
-    // Price action momentum check
-    if (priceAction === 'bearish') {
-      warnings.push('Bearish intraday price action - technical signals may be outdated')
-      score -= 20
-    } else if (priceAction === 'bullish') {
-      signals.push('Bullish intraday price action - momentum confirmation')
-      score += 10
-    }
-    
-    // Enhanced data quality assessment with stability warnings
+    // Data quality assessment (informational only - score already calculated)
     const dataQuality = stockData.dataQuality
     if (dataQuality) {
-      // Check for estimated technical data that causes score volatility
       if (dataQuality.technicalDataSource === 'estimated') {
-        warnings.push('⚠️ SCORE INSTABILITY: Technical indicators estimated - scores may vary significantly on refresh')
-        warnings.push('Estimated fields: ' + (dataQuality.estimatedFields || []).join(', '))
-        marketMultiplier *= 0.7 // Reduce confidence in estimated data
-        score -= 15 // Penalty for unreliable technicals
+        warnings.push('⚠️ ESTIMATED DATA: Technical indicators estimated - use caution')
+        if (dataQuality.estimatedFields?.length) {
+          warnings.push('Estimated fields: ' + dataQuality.estimatedFields.join(', '))
+        }
       }
       
       if (dataQuality.reliability === 'low') {
         warnings.push('Low data reliability - verify key metrics manually')
-        marketMultiplier *= 0.8
       } else if (dataQuality.reliability === 'high' && dataQuality.technicalDataSource === 'real') {
         signals.push('High quality real-time data with real technical indicators')
-        score += 10
       }
       
-      // Cache status warning for trading decisions
       if (dataQuality.cacheStatus === 'cached') {
         signals.push('Using cached data - scores stable for trading decisions')
       } else {
-        warnings.push('Fresh API data - score may differ from previous analysis')
+        signals.push('Fresh API data - most recent analysis')
       }
     }
 
-    // Price above moving averages (trend confirmation)
+    // Technical analysis (informational only - score already calculated in API)
     if (currentPrice > sma20 && sma20 > 0) {
       signals.push('Above 20-day SMA (short-term uptrend)')
-      score += 20
     } else if (sma20 > 0) {
       warnings.push('Below 20-day SMA (weak short-term trend)')
     }
 
     if (currentPrice > sma50 && sma50 > 0) {
       signals.push('Above 50-day SMA (medium-term uptrend)')
-      score += 15
     } else if (sma50 > 0) {
       warnings.push('Below 50-day SMA (weak medium-term trend)')
     }
 
     if (currentPrice > sma200 && sma200 > 0) {
       signals.push('Above 200-day SMA (long-term uptrend)')
-      score += 10
     } else if (sma200 > 0) {
       warnings.push('Below 200-day SMA (bearish long-term trend)')
     }
 
-    // Strategy-specific volume analysis
-    const volumeReliable = dataQuality?.reliability !== 'low'
-    
-    if (isTechnicalStrategy) {
-      // Technical momentum: 1.5x+ relative volume threshold
-      if (relativeVolume > 3 && volumeReliable) {
-        signals.push('Exceptional relative volume (3x+ average) - very strong technical interest')
-        score += 25
-      } else if (relativeVolume > 2) {
-        signals.push(`High relative volume (${relativeVolume.toFixed(1)}x average) - strong technical interest`)
-        score += volumeReliable ? 20 : 15
-      } else if (relativeVolume > 1.5) {
-        signals.push(`Above average relative volume (${relativeVolume.toFixed(1)}x) - meets technical criteria`)
-        score += volumeReliable ? 15 : 12
-      } else if (relativeVolume < 1.5 && relativeVolume > 0) {
-        warnings.push(`Below 1.5x relative volume (${relativeVolume.toFixed(1)}x) - doesn't meet technical momentum criteria`)
-        score -= 15
-      }
-    } else if (isNewsStrategy) {
-      // News momentum: 5x+ relative volume threshold (much higher)
-      if (relativeVolume > 10 && volumeReliable) {
-        signals.push('Exceptional relative volume (10x+ average) - massive news momentum')
-        score += 35
-      } else if (relativeVolume > 5) {
-        signals.push(`Very high relative volume (${relativeVolume.toFixed(1)}x average) - strong news momentum`)
-        score += volumeReliable ? 30 : 25
-      } else if (relativeVolume > 3) {
-        signals.push(`High relative volume (${relativeVolume.toFixed(1)}x average) - decent news interest`)
-        score += volumeReliable ? 15 : 12
-      } else if (relativeVolume < 5 && relativeVolume > 0) {
-        warnings.push(`Below 5x relative volume (${relativeVolume.toFixed(1)}x) - insufficient for news momentum strategy`)
-        score -= 20
-      }
-    }
-    
-    if (!volumeReliable) {
-      warnings.push('Volume data estimated - verify manually before entry')
+    // Volume analysis (informational)
+    if (relativeVolume > 3) {
+      signals.push(`High relative volume (${relativeVolume.toFixed(1)}x average) - strong interest`)
+    } else if (relativeVolume > 1.5) {
+      signals.push(`Above average volume (${relativeVolume.toFixed(1)}x) - decent interest`)
+    } else if (relativeVolume < 1.5 && relativeVolume > 0) {
+      warnings.push(`Below average volume (${relativeVolume.toFixed(1)}x) - weak interest`)
     }
 
-    // Enhanced 52-week high analysis with market context
+    // 52-week high proximity
     const highProximity = week52High > 0 ? (currentPrice / week52High) * 100 : 0
-    if (highProximity > 98) {
-      // Very close to 52-week high - check market conditions
-      if (marketContext?.marketCondition === 'volatile') {
-        warnings.push('At 52-week high in volatile market - potential reversal risk')
-        score += 10
-      } else {
-        signals.push('Breaking new 52-week high - exceptional momentum')
-        score += 30
-      }
-    } else if (highProximity > 90) {
+    if (highProximity > 95) {
       signals.push(`Near 52-week high (${highProximity.toFixed(1)}%) - strong momentum`)
-      score += 20
-    } else if (highProximity > 75) {
-      signals.push(`Good proximity to 52-week high (${highProximity.toFixed(1)}%) - decent momentum`)
-      score += 10
     } else if (highProximity < 50) {
       warnings.push(`Far from 52-week high (${highProximity.toFixed(1)}%) - weak momentum`)
-      score -= 8
     }
 
-    // Enhanced RSI analysis with MACD confirmation
-    if (rsi > 0) {
-      if (rsi < 30) {
-        warnings.push(`RSI oversold (${rsi.toFixed(1)}) - potential reversal risk`)
-        score -= 8
-      } else if (rsi > 80) {
-        warnings.push(`RSI extremely overbought (${rsi.toFixed(1)}) - high pullback risk`)
-        score -= 15
-      } else if (rsi > 70) {
-        warnings.push(`RSI overbought (${rsi.toFixed(1)}) - potential pullback risk`)
-        score -= 10
-      } else if (rsi >= 55 && rsi <= 70) {
-        signals.push(`RSI in bullish range (${rsi.toFixed(1)}) - good momentum`)
-        score += 12
-      } else if (rsi >= 45 && rsi < 55) {
-        signals.push(`RSI neutral (${rsi.toFixed(1)}) - no momentum bias`)
-        score += 5
-      }
-    }
-    
-    // MACD analysis for additional confirmation
-    if (stockData.macd && stockData.macdSignal && stockData.macdHistogram) {
+    // MACD analysis
+    if (stockData.macd && stockData.macdSignal) {
       const macd = parseFloat(stockData.macd)
       const macdSignal = parseFloat(stockData.macdSignal)
-      const macdHist = parseFloat(stockData.macdHistogram)
       
-      if (macd > macdSignal && macdHist > 0) {
-        signals.push('MACD bullish crossover - momentum confirmation')
-        score += 15
-      } else if (macd < macdSignal && macdHist < 0) {
+      if (macd > macdSignal) {
+        signals.push('MACD bullish - momentum confirmation')
+      } else {
         warnings.push('MACD bearish - momentum divergence')
-        score -= 12
-      } else if (Math.abs(macdHist) < 0.001) {
-        signals.push('MACD near crossover - watch for momentum shift')
-        score += 5
       }
     }
 
-    // Strategy-specific price criteria
-    if (isTechnicalStrategy) {
-      if (currentPrice <= 10) {
-        signals.push('Price under $10 - meets technical momentum criteria')
-        score += 5
-      } else {
-        warnings.push('Price above $10 - outside technical momentum range')
-      }
-    } else if (isNewsStrategy) {
-      if (currentPrice >= 2 && currentPrice <= 20) {
-        signals.push('Price in $2-20 range - meets news momentum criteria')
-        score += 8
-      } else if (currentPrice < 2) {
-        warnings.push('Price below $2 - too low for news momentum strategy')
-        score -= 5
-      } else {
-        warnings.push('Price above $20 - outside news momentum range')
-        score -= 3
-      }
+    // Price criteria check
+    if (isTechnicalStrategy && currentPrice <= 10) {
+      signals.push('Price under $10 - meets technical momentum criteria')
+    } else if (isNewsStrategy && currentPrice >= 2 && currentPrice <= 20) {
+      signals.push('Price in $2-20 range - meets news momentum criteria')
     }
 
-    // Strategy-specific market cap and float analysis
-    const marketCap = parseNumber(stockData.marketCap)
-    if (isTechnicalStrategy) {
-      if (stockData.marketCap.includes('B') && marketCap < 2) {
-        signals.push('Small cap stock - higher volatility potential for technical breakouts')
-        score += 5
-      } else if (stockData.marketCap.includes('M') && marketCap < 500) {
-        signals.push('Small cap stock - higher volatility potential for technical breakouts')
-        score += 5
-      }
-    } else if (isNewsStrategy) {
-      // For news momentum, we prefer smaller float (more volatile on news)
-      if (stockData.marketCap.includes('M') && marketCap < 100) {
-        signals.push('Micro cap - excellent for news momentum plays')
-        score += 15
-      } else if (stockData.marketCap.includes('M') && marketCap < 500) {
-        signals.push('Small cap - good for news momentum plays')
-        score += 10
-      } else if (stockData.marketCap.includes('B') && marketCap < 1) {
-        signals.push('Small cap - decent for news momentum')
-        score += 8
-      } else if (marketCap > 5) {
-        warnings.push('Large cap - may be less responsive to news catalysts')
-        score -= 5
-      }
-    }
-
-    // Apply market context multiplier to final score and cap at 100
-    const rawScore = score
-    score = Math.round(score * marketMultiplier)
-    
-    // Cap score at 100 maximum
-    if (score > 100) {
-      score = 100
-    }
-    
-    // Enhanced volatility warnings for trading decisions
-    if (marketMultiplier !== 1.0) {
-      if (marketMultiplier > 1.0) {
-        signals.push(`Score boosted by market conditions (${(marketMultiplier * 100).toFixed(0)}%) - Raw: ${rawScore}, Final: ${score}`)
-      } else {
-        warnings.push(`Score reduced by market/data conditions (${(marketMultiplier * 100).toFixed(0)}%) - Raw: ${rawScore}, Final: ${score}`)
-        if (marketMultiplier < 0.6) {
-          warnings.push('🚨 MAJOR SCORE REDUCTION: This score is highly volatile - wait for stable data before trading')
-        }
-      }
-    }
-    
-    // Overall stability assessment
+    // Overall assessment
     const hasEstimatedData = dataQuality?.technicalDataSource === 'estimated'
     const hasLowReliability = dataQuality?.reliability === 'low'
-    const hasHighVolatility = marketMultiplier < 0.7 || marketMultiplier > 1.3
     
-    if (hasEstimatedData || hasLowReliability || hasHighVolatility) {
-      warnings.push('⚠️ TRADING CAUTION: Score reliability is compromised - consider manual verification before entry')
+    if (hasEstimatedData || hasLowReliability) {
+      warnings.push('⚠️ TRADING CAUTION: Score reliability may be compromised - consider manual verification before entry')
     }
     
     // Enhanced entry and exit levels with volatility adjustment
@@ -724,6 +585,16 @@ export default function TradeAnalyzer() {
       case 'Weak': return 'bg-orange-100 border-orange-300 text-orange-800'
       case 'Avoid': return 'bg-red-100 border-red-300 text-red-800'
       default: return 'bg-gray-100 border-gray-300 text-gray-800'
+    }
+  }
+
+  const getSignalBorderColor = (signal: string) => {
+    switch (signal) {
+      case 'Strong': return 'border-green-300'
+      case 'Moderate': return 'border-blue-300'
+      case 'Weak': return 'border-orange-300'
+      case 'Avoid': return 'border-red-300'
+      default: return 'border-gray-300'
     }
   }
 
@@ -910,10 +781,7 @@ export default function TradeAnalyzer() {
                     </span>
                   </div>
                   <div className="text-sm text-gray-600 space-y-1">
-                    <div className="flex justify-between">
-                      <span>Score:</span>
-                      <span className="font-medium">{stock.positionScore}/100</span>
-                    </div>
+                    {/* REMOVED: Score display - not using this scoring system for trading decisions */}
                     <div className="flex justify-between">
                       <span>Entry:</span>
                       <span className="font-medium">{formatPrice(stock.entryPrice)}</span>
@@ -1103,7 +971,7 @@ export default function TradeAnalyzer() {
                     />
                   </div>
                   <button
-                    onClick={fetchStockDataFromAPI}
+                    onClick={() => fetchStockDataFromAPI()}
                     disabled={isLoading || !tickerInput.trim()}
                     className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-md transition-colors duration-200 flex items-center gap-2"
                   >
@@ -1163,7 +1031,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.symbol}
+                      value={stockData.symbol || ''}
                       onChange={(e) => setStockData({...stockData, symbol: e.target.value.toUpperCase()})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1234,7 +1102,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.change}
+                      value={stockData.change || ''}
                       onChange={(e) => setStockData({...stockData, change: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1252,7 +1120,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.marketCap}
+                      value={stockData.marketCap || ''}
                       onChange={(e) => setStockData({...stockData, marketCap: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1279,7 +1147,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.volume}
+                      value={stockData.volume || ''}
                       onChange={(e) => setStockData({...stockData, volume: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1297,7 +1165,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.relVolume}
+                      value={stockData.relVolume || ''}
                       onChange={(e) => setStockData({...stockData, relVolume: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1315,7 +1183,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.rsi}
+                      value={stockData.rsi || ''}
                       onChange={(e) => setStockData({...stockData, rsi: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1342,7 +1210,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.sma20}
+                      value={stockData.sma20 || ''}
                       onChange={(e) => setStockData({...stockData, sma20: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1360,7 +1228,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.sma50}
+                      value={stockData.sma50 || ''}
                       onChange={(e) => setStockData({...stockData, sma50: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1378,7 +1246,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.sma200}
+                      value={stockData.sma200 || ''}
                       onChange={(e) => setStockData({...stockData, sma200: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1405,7 +1273,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.week52High}
+                      value={stockData.week52High || ''}
                       onChange={(e) => setStockData({...stockData, week52High: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1423,7 +1291,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.week52Low}
+                      value={stockData.week52Low || ''}
                       onChange={(e) => setStockData({...stockData, week52Low: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1450,7 +1318,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.pe}
+                      value={stockData.pe || ''}
                       onChange={(e) => setStockData({...stockData, pe: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1468,7 +1336,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.beta}
+                      value={stockData.beta || ''}
                       onChange={(e) => setStockData({...stockData, beta: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1486,7 +1354,7 @@ export default function TradeAnalyzer() {
                     </label>
                     <input
                       type="text"
-                      value={stockData.atr}
+                      value={stockData.atr || ''}
                       onChange={(e) => setStockData({...stockData, atr: e.target.value})}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
                         isDarkMode
@@ -1518,14 +1386,18 @@ export default function TradeAnalyzer() {
             {hasData ? (
               <div className="space-y-6">
                 {/* Signal Strength */}
-                <div className={`p-4 rounded-lg border-2 ${getSignalColor(setup.signal)}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-semibold">Entry Signal</h3>
-                    <span className="text-2xl font-bold uppercase">{setup.signal}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Setup Score</span>
-                    <span className="font-bold">{setup.positionScore}/100</span>
+                <div className={`p-4 rounded-lg border-2 ${getSignalBorderColor(setup.signal)} ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+                  <div className="space-y-2">
+                    {stockData.analysisReasoning?.map((reason, index) => (
+                      <div key={index} className="flex items-center text-sm">
+                        <span className={`mr-2 ${reason.startsWith('✅') ? 'text-green-500' : 'text-red-500'}`}>
+                          {reason.startsWith('✅') ? '✓' : '✗'}
+                        </span>
+                        <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                          {reason.substring(2)}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -1596,13 +1468,18 @@ export default function TradeAnalyzer() {
                   </button>
                   
                   <button
-                    onClick={() => triggerAutomatedValidation(stockData)}
+                    onClick={() => {
+                      // Force fresh data by re-fetching stock data first
+                      fetchStockDataFromAPI(true).then(() => {
+                        triggerAutomatedValidation(stockData)
+                      })
+                    }}
                     className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-medium rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                     </svg>
-                    🤖 Re-run AI Analysis
+                    🤖 Re-run AI Analysis (Fresh Data)
                   </button>
                 </div>
 

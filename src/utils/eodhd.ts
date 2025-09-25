@@ -864,6 +864,90 @@ class EODHDClient {
   }
 
   /**
+   * ADVANCED BUSINESS LOGIC: True Intraday Relative Volume Engine
+   * 
+   * PURPOSE: Calculates real-time, intraday relative volume (RVOL) for precise momentum detection.
+   * STRATEGY: Compares current volume in a time window (e.g., last 5 mins) to the historical average of that same window.
+   * 
+   * CALCULATION METHOD:
+   * 1. Fetches minute-by-minute intraday data for the past 60 days.
+   * 2. Calculates the average volume for EACH MINUTE of the trading day (e.g., avg volume at 9:31 AM, 9:32 AM, etc.).
+   * 3. Fetches the intraday data for the CURRENT trading day.
+   * 4. Compares the current volume at the current time to the historical average for that same minute.
+   * 5. Returns the true RVOL, a powerful indicator of immediate momentum.
+   * 
+   * BUSINESS IMPACT:
+   * - Provides a far more accurate measure of momentum than daily RVOL.
+   * - Answers the question: "Is there a surge of interest in this stock RIGHT NOW?"
+   * - Eliminates misleading signals from stocks that had high volume hours ago but are now quiet.
+   * - Aligns the scanner with the techniques used by professional momentum traders.
+   */
+  async getTrueRelativeVolume(symbol: string, days: number = 60): Promise<{ relativeVolume: number; avgVolume: number; currentVolume: number; }> {
+    try {
+      const cleanSymbol = symbol.replace('.US', '');
+
+      // 1. Fetch historical intraday data for the past N days in a single call
+      const to = new Date();
+      const from = new Date();
+      from.setDate(from.getDate() - days);
+
+      const fromTimestamp = Math.floor(from.getTime() / 1000);
+      const toTimestamp = Math.floor(to.getTime() / 1000);
+
+      console.log(`📊 Fetching ${days} days of intraday data for ${cleanSymbol}...`);
+      const allHistoricalData = await this.makeRequest(`/intraday/${cleanSymbol}.US`, {
+        from: fromTimestamp,
+        to: toTimestamp,
+        interval: '1m'
+      });
+
+      if (allHistoricalData.length === 0) {
+        console.log(`⚠️ ${symbol}: No historical intraday data found to calculate true RVOL.`);
+        return { relativeVolume: 0, avgVolume: 0, currentVolume: 0 };
+      }
+
+      // 2. Calculate average volume for each minute of the day
+      const volumeByMinute: { [key: string]: number[] } = {};
+      for (const record of allHistoricalData) {
+        const time = new Date(record.datetime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        if (!volumeByMinute[time]) {
+          volumeByMinute[time] = [];
+        }
+        volumeByMinute[time].push(toNumber(record.volume));
+      }
+
+      const avgVolumeByMinute: { [key: string]: number } = {};
+      for (const time in volumeByMinute) {
+        const volumes = volumeByMinute[time];
+        avgVolumeByMinute[time] = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+      }
+
+      // 3. Fetch today's intraday data
+      const todayIntraday = await this.getIntradayData(cleanSymbol, '1m');
+      if (todayIntraday.length === 0) {
+        console.log(`⚠️ ${symbol}: No current intraday data to calculate true RVOL.`);
+        return { relativeVolume: 0, avgVolume: 0, currentVolume: 0 };
+      }
+
+      // 4. Compare current volume to historical average
+      const latestRecord = todayIntraday[todayIntraday.length - 1];
+      const currentTime = new Date(latestRecord.datetime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+      
+      const currentVolume = toNumber(latestRecord.volume);
+      const avgVolume = avgVolumeByMinute[currentTime] || 0;
+      const relativeVolume = avgVolume > 0 ? currentVolume / avgVolume : 0;
+
+      console.log(`📈 ${symbol}: True RVOL ${relativeVolume.toFixed(2)}x (Current: ${currentVolume}, Avg for ${currentTime}: ${avgVolume.toFixed(0)})`);
+
+      return { relativeVolume, avgVolume, currentVolume };
+
+    } catch (error) {
+      console.error(`❌ ${symbol}: CRITICAL - Failed to calculate true intraday RVOL:`, error);
+      return { relativeVolume: 0, avgVolume: 0, currentVolume: 0 };
+    }
+  }
+
+  /**
    * CORE BUSINESS LOGIC: Premarket Gap Analyzer
    * 
    * PURPOSE: Analyzes premarket price gaps for momentum significance
@@ -1065,41 +1149,28 @@ class EODHDClient {
     }
   }
 
-  // Get stock news (placeholder implementation)
+  // Get stock news - REAL DATA ONLY, NO MOCK DATA FOR TRADING DECISIONS
   async getStockNews(symbol: string, limit: number = 10): Promise<EODHDNewsItem[]> {
     try {
-      // Mock implementation - replace with real API call
-      return [
-        {
-          date: new Date().toISOString(),
-          title: `${symbol} Market Update`,
-          content: 'Latest market developments and analysis',
-          link: `https://example.com/news/${symbol}`,
-          symbols: [symbol],
-          tags: ['market', 'analysis'],
-          sentiment: {
-            polarity: 0.1,
-            neg: 0.2,
-            neu: 0.6,
-            pos: 0.2
-          }
-        }
-      ];
+      // DISABLED: No real EODHD news API endpoint available yet
+      // Return empty array instead of dangerous mock data
+      console.log(`⚠️ News data not available for ${symbol} - no mock data returned for trading safety`);
+      return [];
     } catch (error) {
       console.error(`Error fetching news for ${symbol}:`, error);
       return [];
     }
   }
 
-  // Get comprehensive stock context (placeholder implementation)
+  // Get comprehensive stock context - REAL DATA ONLY
   async getStockContext(symbol: string): Promise<any> {
     try {
-      // Mock implementation - replace with real API call
-      const news = await this.getStockNews(symbol, 5);
+      // Use only real data sources - no mock context for trading decisions
+      const news = await this.getStockNews(symbol, 5); // Returns empty array (no mock)
       return {
         news,
         symbol,
-        context: 'Market analysis and recent developments'
+        context: null // No fake context data
       };
     } catch (error) {
       console.error(`Error fetching context for ${symbol}:`, error);
@@ -1107,24 +1178,13 @@ class EODHDClient {
     }
   }
 
-  // Get news by tags (placeholder implementation)
+  // Get news by tags - REAL DATA ONLY, NO MOCK DATA FOR TRADING DECISIONS
   async getNewsByTags(tags: string[], limit: number = 10): Promise<EODHDNewsItem[]> {
     try {
-      // Mock implementation - replace with real API call
-      return tags.map(tag => ({
-        date: new Date().toISOString(),
-        title: `${tag} Market News`,
-        content: `Latest developments in ${tag} sector`,
-        link: `https://example.com/news/tags/${tag}`,
-        symbols: [],
-        tags: [tag],
-        sentiment: {
-          polarity: Math.random() * 0.4 - 0.2, // Random between -0.2 and 0.2
-          neg: Math.random() * 0.3,
-          neu: 0.4 + Math.random() * 0.4,
-          pos: Math.random() * 0.3
-        }
-      })).slice(0, limit);
+      // DISABLED: No real EODHD news API endpoint available yet
+      // Return empty array instead of dangerous mock data with random sentiment
+      console.log(`⚠️ Tag-based news data not available - no mock data returned for trading safety`);
+      return [];
     } catch (error) {
       console.error(`Error fetching news by tags:`, error);
       return [];
@@ -1321,7 +1381,12 @@ export const eodhd = new EODHDClient(process.env.EODHD_API_KEY || 'demo');
  * - 30-49 = Weak signal (monitor)
  * - <30 = Avoid (poor setup)
  */
-export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EODHDTechnicals, strategy: 'momentum' | 'breakout' = 'momentum'): number {
+export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EODHDTechnicals, strategy: 'momentum' | 'breakout' = 'momentum', enhancedData?: { 
+  realRelativeVolume?: number; 
+  gapPercent?: number; 
+  avgVolume?: number;
+  isPremarket?: boolean;
+}): number {
   let score = 0;
   
   const currentPrice = toNumber(realTimeData.close);
@@ -1329,39 +1394,49 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
   const change = toNumber(realTimeData.change);
   const changePercent = toNumber(realTimeData.change_p);
   
-  // Base momentum score from price movement
+  // FIXED: More conservative base scoring to prevent inflation
   if (strategy === 'momentum') {
-    if (changePercent > 15) score += 50;
-    else if (changePercent > 10) score += 40;
-    else if (changePercent > 7) score += 35;
-    else if (changePercent > 5) score += 30;
-    else if (changePercent > 3) score += 25;
-    else if (changePercent > 1) score += 15;
-    else if (changePercent > 0) score += 10;
-    else score -= 20; // Penalty for declining stocks
+    if (changePercent > 15) score += 30;      // Reduced from 50
+    else if (changePercent > 10) score += 25; // Reduced from 40
+    else if (changePercent > 7) score += 20;  // Reduced from 35
+    else if (changePercent > 5) score += 15;  // Reduced from 30
+    else if (changePercent > 3) score += 12;  // Reduced from 25
+    else if (changePercent > 1) score += 8;   // Reduced from 15
+    else if (changePercent > 0) score += 5;   // Reduced from 10
+    else score -= 15; // Penalty for declining stocks
   } else {
-    // Breakout strategy - more aggressive scoring
-    if (changePercent > 20) score += 60;
-    else if (changePercent > 15) score += 50;
-    else if (changePercent > 10) score += 40;
-    else if (changePercent > 7) score += 30;
-    else if (changePercent > 5) score += 20;
+    // Breakout strategy - still aggressive but capped
+    if (changePercent > 20) score += 40;      // Reduced from 60
+    else if (changePercent > 15) score += 35; // Reduced from 50
+    else if (changePercent > 10) score += 25; // Reduced from 40
+    else if (changePercent > 7) score += 20;  // Reduced from 30
+    else if (changePercent > 5) score += 15;  // Reduced from 20
     else score -= 10;
   }
   
-  // Volume analysis
+  // ENHANCED: Real relative volume scoring
   if (volume > 0) {
-    // Estimate relative volume (simplified)
-    const estimatedAvgVolume = 1000000; // Default assumption
-    const relativeVolume = volume / estimatedAvgVolume;
+    let relativeVolume;
     
-    if (relativeVolume > 10) score += 30;
-    else if (relativeVolume > 5) score += 25;
-    else if (relativeVolume > 3) score += 20;
-    else if (relativeVolume > 2) score += 15;
-    else if (relativeVolume > 1.5) score += 10;
-    else if (relativeVolume > 1) score += 5;
-    else score -= 10; // Low volume penalty
+    // Use real relative volume if provided, otherwise estimate
+    if (enhancedData?.realRelativeVolume) {
+      relativeVolume = enhancedData.realRelativeVolume;
+    } else {
+      // NO MOCK DATA: Skip relative volume scoring if no real data available
+      console.log(`⚠️ No real relative volume data for scoring - skipping volume analysis`);
+      relativeVolume = 0; // Don't use fake 1M average volume
+    }
+    
+    // More accurate volume scoring with real data
+    if (relativeVolume > 50) score += 25;      // Exceptional volume
+    else if (relativeVolume > 20) score += 22; // Very high volume
+    else if (relativeVolume > 10) score += 18; // High volume
+    else if (relativeVolume > 5) score += 15;  // Good volume
+    else if (relativeVolume > 3) score += 12;  // Decent volume
+    else if (relativeVolume > 2) score += 10;  // Above average
+    else if (relativeVolume > 1.5) score += 8; // Meets minimum
+    else if (relativeVolume > 1) score += 5;   // Average
+    else score -= 10; // Below average penalty
   }
   
   // Technical indicators analysis
@@ -1369,24 +1444,78 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
     const sma20 = technicals.SMA_20 || 0;
     const sma50 = technicals.SMA_50 || 0;
     const sma200 = technicals.SMA_200 || 0;
-    const rsi = technicals.RSI_14 || 50;
+    const rsi = technicals.RSI_14 || 0; // No fake RSI 50 - use 0 if no real data
     
-    // Price above moving averages (bullish trend)
-    if (currentPrice > sma20 && sma20 > 0) score += 15;
-    if (currentPrice > sma50 && sma50 > 0) score += 10;
-    if (currentPrice > sma200 && sma200 > 0) score += 8;
+    // FIXED: More conservative technical scoring
+    if (currentPrice > sma20 && sma20 > 0) score += 10; // Reduced from 15
+    if (currentPrice > sma50 && sma50 > 0) score += 8;  // Reduced from 10
+    if (currentPrice > sma200 && sma200 > 0) score += 6; // Reduced from 8
     
-    // RSI analysis
-    if (rsi >= 50 && rsi <= 70) score += 10; // Healthy momentum
-    else if (rsi > 70 && rsi <= 80) score += 5; // Strong but not overbought
-    else if (rsi > 80) score -= 10; // Overbought warning
-    else if (rsi < 30) score -= 15; // Oversold (bad for momentum)
+    // FIXED: More conservative RSI analysis
+    if (rsi >= 50 && rsi <= 70) score += 8;  // Reduced from 10
+    else if (rsi > 70 && rsi <= 80) score += 4; // Reduced from 5
+    else if (rsi > 80) score -= 8;  // Reduced penalty from -10
+    else if (rsi < 30) score -= 12; // Reduced penalty from -15
   }
   
-  // Price range considerations
-  if (currentPrice <= 10) score += 10; // Sweet spot for momentum
-  else if (currentPrice <= 20) score += 5;
-  else if (currentPrice > 50) score -= 5; // Higher price stocks harder to move
+  // FIXED: More conservative price range scoring
+  if (currentPrice <= 10) score += 6;  // Reduced from 10
+  else if (currentPrice <= 20) score += 3; // Reduced from 5
+  else if (currentPrice > 50) score -= 3;  // Reduced penalty from -5
+  
+  // NEW: CRITICAL RISK PENALTIES - Prevent dangerous trades
+  
+  // 1. Declining stock penalty (major red flag for momentum)
+  if (changePercent < -3) {
+    score -= 25; // Heavy penalty for stocks declining >3%
+  } else if (changePercent < -1) {
+    score -= 15; // Moderate penalty for declining stocks
+  }
+  
+  // 2. Enhanced overbought penalties (bubble territory)
+  if (technicals && technicals.RSI_14) {
+    const rsi = technicals.RSI_14;
+    if (rsi > 90) {
+      score -= 35; // Extremely dangerous bubble levels
+    } else if (rsi > 85) {
+      score -= 25; // Very dangerous overbought levels (was 20)
+    } else if (rsi > 80) {
+      score -= 15; // Dangerous overbought levels
+    }
+  }
+  
+  // 3. Low volume penalty - ONLY if we have real relative volume data
+  if (enhancedData?.realRelativeVolume && enhancedData.realRelativeVolume < 0.5) {
+    score -= 15; // Very low volume is dangerous for momentum (real data only)
+  }
+  
+  // 4. Gap analysis (premarket/afterhours context)
+  if (enhancedData?.gapPercent !== undefined) {
+    const gap = enhancedData.gapPercent;
+    if (enhancedData.isPremarket) {
+      // Premarket gap analysis
+      if (Math.abs(gap) > 20) {
+        score -= 15; // Extreme gaps are risky
+      } else if (Math.abs(gap) > 15) {
+        score -= 10; // Large gaps need caution
+      } else if (gap > 10) {
+        score += 8; // Good premarket momentum
+      } else if (gap > 5) {
+        score += 5; // Decent premarket movement
+      } else if (gap > 3) {
+        score += 3; // Some premarket interest
+      }
+    }
+  }
+  
+  // 5. Price action context penalty
+  const currentHour = new Date().getUTCHours() - 5; // ET time
+  if (currentHour >= 9.5 && currentHour < 16) { // Regular market hours
+    // During market hours, declining stocks are especially risky
+    if (changePercent < 0) {
+      score -= 10; // Additional penalty during market hours
+    }
+  }
   
   // Cap the score between 0 and 100
   const finalScore = Math.min(Math.max(score, 0), 100);
@@ -1400,17 +1529,19 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
  * PURPOSE: Converts numerical scores to actionable trading signals
  * STRATEGY: Different thresholds for momentum vs breakout strategies
  * 
- * MOMENTUM THRESHOLDS:
- * - Strong (70+): High confidence, immediate entry consideration
- * - Moderate (50-69): Good setup, wait for confirmation
- * - Weak (30-49): Marginal setup, monitor closely
- * - Avoid (<30): Poor setup, skip
+ * UPDATED REALISTIC THRESHOLDS:
  * 
- * BREAKOUT THRESHOLDS (Higher standards):
+ * MOMENTUM THRESHOLDS (More Demanding):
+ * - Strong (75+): Exceptional setup, high confidence entry
+ * - Moderate (55-74): Good setup, wait for confirmation  
+ * - Weak (35-54): Marginal setup, monitor closely
+ * - Avoid (<35): Poor setup, skip
+ * 
+ * BREAKOUT THRESHOLDS (Higher Standards):
  * - Strong (80+): Explosive potential, priority entry
- * - Moderate (60-79): Good breakout setup
- * - Weak (40-59): Marginal breakout potential
- * - Avoid (<40): Insufficient momentum
+ * - Moderate (65-79): Good breakout setup
+ * - Weak (45-64): Marginal breakout potential
+ * - Avoid (<45): Insufficient momentum
  * 
  * BUSINESS IMPACT:
  * - Provides clear trading guidance
@@ -1420,15 +1551,16 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
  */
 export function getSignal(score: number, strategy: 'momentum' | 'breakout' = 'momentum'): 'Strong' | 'Moderate' | 'Weak' | 'Avoid' {
   if (strategy === 'momentum') {
-    if (score >= 70) return 'Strong';
-    if (score >= 50) return 'Moderate';
-    if (score >= 30) return 'Weak';
+    // UPDATED: More demanding thresholds
+    if (score >= 75) return 'Strong';    // Raised from 70
+    if (score >= 55) return 'Moderate';  // Raised from 50
+    if (score >= 35) return 'Weak';      // Raised from 30
     return 'Avoid';
   } else {
-    // Breakout strategy - higher thresholds
+    // Breakout strategy - higher thresholds (unchanged as already demanding)
     if (score >= 80) return 'Strong';
-    if (score >= 60) return 'Moderate';
-    if (score >= 40) return 'Weak';
+    if (score >= 65) return 'Moderate';  // Raised from 60
+    if (score >= 45) return 'Weak';      // Raised from 40
     return 'Avoid';
   }
 }

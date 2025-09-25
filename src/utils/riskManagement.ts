@@ -48,6 +48,9 @@ export class AutomatedTradingEngine {
     const warnings: string[] = [];
     const reasoning: string[] = [];
     let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'HIGH';
+    
+    // Add debug logging to track inconsistencies
+    console.log(`🔍 TRADE VALIDATION START: ${symbol} at ${currentPrice}, score: ${score}`);
 
     // 1. SCORE VALIDATION
     if (score < 70) {
@@ -62,17 +65,67 @@ export class AutomatedTradingEngine {
       };
     }
 
-    // 2. CHART PATTERN ANALYSIS
-    const chartAnalysis = await this.analyzeChartPatterns(symbol, currentPrice);
-    if (chartAnalysis.bearishSignals > chartAnalysis.bullishSignals) {
-      warnings.push('Bearish chart pattern detected');
-      confidence = 'MEDIUM';
-    }
-
-    // 3. NEWS SENTIMENT VALIDATION
-    const newsAnalysis = await this.validateNewsCatalyst(symbol);
-    if (newsAnalysis.sentiment < -0.2) {
-      warnings.push('Negative news sentiment detected');
+    // 2. PARALLEL API CALLS WITH ERROR HANDLING
+    let chartAnalysis, newsAnalysis, volatility;
+    
+    try {
+      // Execute all API calls in parallel but handle errors individually
+      const [chartResult, newsResult, volatilityResult] = await Promise.allSettled([
+        this.analyzeChartPatterns(symbol, currentPrice),
+        this.validateNewsCatalyst(symbol),
+        this.calculateVolatility(symbol, stockData)
+      ]);
+      
+      // Handle chart analysis result
+      if (chartResult.status === 'fulfilled') {
+        chartAnalysis = chartResult.value;
+        console.log(`📊 Chart Analysis: ${chartAnalysis.bullishSignals} bullish, ${chartAnalysis.bearishSignals} bearish`);
+        if (chartAnalysis.bearishSignals > chartAnalysis.bullishSignals) {
+          warnings.push('Bearish chart pattern detected');
+          confidence = 'MEDIUM';
+        }
+      } else {
+        console.warn('⚠️ Chart analysis failed:', chartResult.reason);
+        chartAnalysis = this.getDefaultChartAnalysis(currentPrice);
+        warnings.push('Technical analysis unavailable');
+        confidence = 'MEDIUM';
+      }
+      
+      // Handle news analysis result
+      if (newsResult.status === 'fulfilled') {
+        newsAnalysis = newsResult.value;
+        console.log(`📰 News Analysis: sentiment ${newsAnalysis.sentiment}, catalyst ${newsAnalysis.catalystType}`);
+        if (newsAnalysis.sentiment < -0.2) {
+          warnings.push('Negative news sentiment detected');
+          confidence = 'LOW';
+        }
+      } else {
+        console.warn('⚠️ News analysis failed:', newsResult.reason);
+        newsAnalysis = this.getDefaultNewsAnalysis();
+        warnings.push('News analysis unavailable');
+      }
+      
+      // Handle volatility result
+      if (volatilityResult.status === 'fulfilled') {
+        volatility = volatilityResult.value;
+        console.log(`📈 Volatility: ${volatility.toFixed(2)}%`);
+        if (volatility > this.riskParams.maxVolatility) {
+          warnings.push(`High volatility: ${volatility.toFixed(2)}%`);
+          confidence = 'LOW';
+        }
+      } else {
+        console.warn('⚠️ Volatility calculation failed:', volatilityResult.reason);
+        volatility = this.getDefaultVolatility(stockData);
+        warnings.push('Volatility analysis unavailable');
+      }
+      
+    } catch (error) {
+      console.error('🚨 Critical error in parallel API calls:', error);
+      // Use all defaults if everything fails
+      chartAnalysis = this.getDefaultChartAnalysis(currentPrice);
+      newsAnalysis = this.getDefaultNewsAnalysis();
+      volatility = this.getDefaultVolatility(stockData);
+      warnings.push('Analysis partially unavailable - using conservative estimates');
       confidence = 'LOW';
     }
 
@@ -81,13 +134,6 @@ export class AutomatedTradingEngine {
     if (volumeAnalysis.sellingPressure > 0.6) {
       warnings.push('High selling pressure detected');
       confidence = 'MEDIUM';
-    }
-
-    // 5. VOLATILITY CHECK
-    const volatility = await this.calculateVolatility(symbol, stockData);
-    if (volatility > this.riskParams.maxVolatility) {
-      warnings.push(`High volatility: ${volatility.toFixed(2)}%`);
-      confidence = 'LOW';
     }
 
     // 6. POSITION SIZING (Kelly Criterion + Risk Management)
@@ -124,6 +170,10 @@ export class AutomatedTradingEngine {
     reasoning.push(`Position size: €${optimalSize} (${((optimalSize/currentPrice)).toFixed(0)} shares)`);
     reasoning.push(`Stop loss: €${stopLoss.toFixed(2)} (${((currentPrice-stopLoss)/currentPrice*100).toFixed(1)}% risk)`);
     reasoning.push(`Targets: ${profitTargets.map(t => `€${t.toFixed(2)}`).join(', ')}`);
+
+    // Final decision logging
+    console.log(`🎯 FINAL DECISION: ${shouldTrade ? 'TRADE' : 'NO TRADE'} - ${confidence} confidence, ${warnings.length} warnings`);
+    console.log(`📊 Key metrics: Volatility ${volatility.toFixed(1)}%, Position €${optimalSize}, R/R ${profitTargets.length > 0 ? ((profitTargets[0] - currentPrice) / (currentPrice - stopLoss)).toFixed(2) : 0}:1`);
 
     return {
       shouldTrade,
@@ -487,6 +537,12 @@ export class AutomatedTradingEngine {
 
   /**
    * FINAL DECISION LOGIC: All factors combined
+   * 
+   * ALIGNED WITH SCORING SYSTEM:
+   * - Strong signals (75+) with HIGH confidence = TRADE
+   * - Good signals (70+) with HIGH confidence + low warnings = TRADE
+   * - Medium confidence needs exceptional scores (85+)
+   * - Low confidence = NO TRADE
    */
   private makeFinalDecision(
     score: number, 
@@ -500,13 +556,60 @@ export class AutomatedTradingEngine {
     // Don't trade if position size too small (not worth it)
     if (positionSize < 100) return false;
     
-    // High confidence + high score = trade
-    if (confidence === 'HIGH' && score >= 80) return true;
+    // HIGH CONFIDENCE TRADING RULES:
+    if (confidence === 'HIGH') {
+      // Strong signals with minimal warnings = trade
+      if (score >= 75 && warningCount <= 1) return true;
+      
+      // Good signals with no warnings = trade
+      if (score >= 70 && warningCount === 0) return true;
+    }
     
-    // Medium confidence needs higher score
-    if (confidence === 'MEDIUM' && score >= 90) return true;
+    // MEDIUM CONFIDENCE: Need exceptional scores
+    if (confidence === 'MEDIUM' && score >= 85 && warningCount === 0) return true;
     
-    // Low confidence = no trade
+    // LOW CONFIDENCE: No automated trading
     return false;
+  }
+
+  /**
+   * DEFAULT FALLBACK METHODS: Ensure consistent behavior when APIs fail
+   */
+  private getDefaultChartAnalysis(currentPrice: number) {
+    return {
+      bullishSignals: 1,
+      bearishSignals: 1,
+      supportLevel: currentPrice * 0.95,
+      resistanceLevels: [currentPrice * 1.03, currentPrice * 1.08, currentPrice * 1.15],
+      pattern: 'NEUTRAL' as const,
+      technicalData: {
+        rsi: 50,
+        sma20: currentPrice * 0.98,
+        sma50: currentPrice * 0.96,
+        sma200: currentPrice * 0.92,
+        macd: 0,
+        macdSignal: 0,
+        high52Week: currentPrice * 1.2,
+        proximityToHigh: 83
+      }
+    };
+  }
+
+  private getDefaultNewsAnalysis() {
+    return {
+      sentiment: 0,
+      catalystType: 'NO_DATA',
+      freshness: 'UNKNOWN',
+      impact: 'LOW',
+      newsCount: 0,
+      recentCount: 0,
+      highImpactCount: 0
+    };
+  }
+
+  private getDefaultVolatility(stockData: any): number {
+    // Use conservative volatility estimate
+    const changePercent = Math.abs(stockData.changePercent || 0);
+    return Math.max(changePercent, 8); // Default to 8% volatility
   }
 }

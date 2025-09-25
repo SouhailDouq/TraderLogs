@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@/generated/prisma'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getAuthenticatedUser, createUnauthorizedResponse } from '@/lib/auth-utils'
 
 // Create a fresh Prisma client for this API route
 const prisma = new PrismaClient()
@@ -9,15 +8,12 @@ const prisma = new PrismaClient()
 export async function POST(req: NextRequest) {
   try {
     console.log('🔍 Batch upload API called')
-    const session = await getServerSession(authOptions)
-    console.log('📋 Session data:', session ? { email: session.user?.email, hasUser: !!session.user } : 'No session')
-    
-    // Temporarily disable auth check for debugging
-    let userEmail = session?.user?.email
-    if (!userEmail) {
-      console.log('⚠️ No session found, using default user for debugging')
-      userEmail = 'douqchisouhail@gmail.com' // Your email from the database
+    const user = await getAuthenticatedUser()
+    if (!user) {
+      return createUnauthorizedResponse()
     }
+    
+    console.log('📋 Authenticated user:', { email: user.email, id: user.id })
 
     const { trades, source } = await req.json()
     
@@ -35,7 +31,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    console.log(`💾 Attempting to save ${trades.length} trades for user: ${userEmail}`)
+    console.log(`💾 Attempting to save ${trades.length} trades for user: ${user.email} (ID: ${user.id})`)
     
     let saved = 0
     let skipped = 0
@@ -44,12 +40,12 @@ export async function POST(req: NextRequest) {
       try {
         const sourceId = `${trade.symbol}-${trade.date}-${trade.type.replace(/\s+/g, '-')}-${trade.quantity}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
         
-        // Check if trade already exists
+        // Check if trade already exists for this user
         const existingTrade = await prisma.trade.findFirst({
           where: {
             sourceId,
             source,
-            userId: '68bb400f94dc40c06284ebd3' // Your user ID
+            userId: user.id
           }
         })
 
@@ -59,11 +55,11 @@ export async function POST(req: NextRequest) {
           continue
         }
 
-        // Create new trade
+        // Create new trade with authenticated user ID
         console.log(`💾 Creating new trade: ${trade.symbol}`)
         const createdTrade = await prisma.trade.create({
           data: {
-            userId: '68bb400f94dc40c06284ebd3', // Your user ID
+            userId: user.id, // Use authenticated user ID
             symbol: trade.symbol,
             type: trade.type,
             quantity: trade.quantity,

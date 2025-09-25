@@ -6,7 +6,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { symbol, score, currentPrice, stockData, riskParams } = body
 
-    if (!symbol || !score || !currentPrice) {
+    console.log('🔍 TRADE VALIDATION START:', symbol, 'at', currentPrice, 'score:', score)
+    
+    if (!symbol || score === undefined || score === null || !currentPrice) {
+      console.error('❌ Missing required parameters:', { symbol, score, currentPrice })
       return NextResponse.json(
         { error: 'Missing required parameters: symbol, score, currentPrice' },
         { status: 400 }
