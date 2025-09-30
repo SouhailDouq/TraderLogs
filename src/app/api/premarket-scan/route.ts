@@ -201,6 +201,13 @@ interface PremarketStock {
     timeWindow: string
     urgencyMultiplier: number
   }
+  macdAnalysis?: {
+    signal: 'bullish' | 'bearish' | 'neutral' | null
+    description: string
+    macd: number | null
+    macdSignal: number | null
+    histogram: number | null
+  }
 }
 
 /**
@@ -648,6 +655,16 @@ export async function POST(request: NextRequest) {
         
         const { relativeVolume, gapAnalysis, momentumCriteria, timeUrgency } = enhancedData;
         
+        // Get technical data for MACD analysis
+        const technicalsData = await eodhd.getTechnicals(symbol);
+        const technicals = technicalsData?.[0] || {};
+
+        // Enhanced MACD analysis for momentum validation
+        const macdAnalysis = analyzeMACDSignals(technicals);
+        if (macdAnalysis.signal) {
+          console.log(`📊 ${symbol}: MACD ${macdAnalysis.signal} - ${macdAnalysis.description}`);
+        }
+        
         // Collect warnings instead of filtering out completely
         const warnings: string[] = [];
         let qualityTier: 'premium' | 'standard' | 'caution' = 'premium';
@@ -670,6 +687,14 @@ export async function POST(request: NextRequest) {
         if (relativeVolume < filters.minRelativeVolume) {
           warnings.push(`⚠️ Low relative volume: ${relativeVolume.toFixed(2)}x < ${filters.minRelativeVolume}x`);
           if (qualityTier === 'premium') qualityTier = 'standard';
+        }
+        
+        // MACD momentum validation
+        if (macdAnalysis.signal === 'bearish') {
+          warnings.push(`⚠️ MACD bearish divergence - ${macdAnalysis.description}`);
+          if (qualityTier === 'premium') qualityTier = 'caution';
+        } else if (macdAnalysis.signal === 'bullish') {
+          console.log(`✅ ${symbol}: MACD bullish confirmation - ${macdAnalysis.description}`);
         }
         
         // Premarket gap significance filter
@@ -701,9 +726,6 @@ export async function POST(request: NextRequest) {
           isPremarket: eodhdEnhanced.getMarketHoursStatus() === 'premarket'
         };
         
-        const technicalsData = await eodhd.getTechnicals(symbol);
-        const technicals = technicalsData?.[0] || {};
-
         const stockDataForScoring: StockData = {
           symbol: stock.code.replace('.US', ''),
           price: stock.close,
@@ -713,6 +735,8 @@ export async function POST(request: NextRequest) {
           sma20: technicals.SMA_20 || 0,
           sma50: technicals.SMA_50 || 0,
           rsi: technicals.RSI_14 || 0,
+          macd: technicals.MACD || 0,
+          macdSignal: technicals.MACD_Signal || 0,
           week52High: stock.high || stock.close
         };
         const scoreBreakdown = scoringEngine.calculateScore(stockDataForScoring, strategy);
@@ -775,6 +799,13 @@ export async function POST(request: NextRequest) {
           timeUrgency: {
             timeWindow: timeUrgency.timeWindow,
             urgencyMultiplier: timeUrgency.urgencyMultiplier
+          },
+          macdAnalysis: {
+            signal: macdAnalysis.signal,
+            description: macdAnalysis.description,
+            macd: technicals.MACD || null,
+            macdSignal: technicals.MACD_Signal || null,
+            histogram: technicals.MACD_Histogram || null
           },
           qualityTier,
           warnings,
@@ -899,4 +930,80 @@ function calculatePremarketScore(stockData: any, changePercent: number, relative
   if (currentPrice <= 10) score += 5
   
   return Math.min(Math.max(score, 0), 100) // Cap between 0-100
+}
+
+/**
+ * MACD Analysis Function for Premarket Scanner
+ * 
+ * PURPOSE: Analyzes MACD signals to validate momentum and prevent false breakouts
+ * STRATEGY: Identifies bullish/bearish crossovers and momentum divergences
+ * 
+ * SIGNAL TYPES:
+ * - Bullish: MACD > Signal Line + MACD > 0 (strong momentum confirmation)
+ * - Bearish: MACD < Signal Line (momentum divergence warning)
+ * - Neutral: Insufficient data or mixed signals
+ * 
+ * BUSINESS IMPACT:
+ * - Prevents false signals on stocks with bearish MACD divergence
+ * - Confirms momentum on stocks with bullish MACD crossovers
+ * - Aligns with Trade Analyzer MACD scoring for consistency
+ */
+function analyzeMACDSignals(technicals: any): {
+  signal: 'bullish' | 'bearish' | 'neutral' | null;
+  description: string;
+  strength: number; // 0-10 scale
+} {
+  const macd = technicals.MACD;
+  const macdSignal = technicals.MACD_Signal;
+  const macdHistogram = technicals.MACD_Histogram;
+  
+  // Return neutral if no MACD data available
+  if (!macd || !macdSignal) {
+    return {
+      signal: null,
+      description: 'MACD data unavailable',
+      strength: 0
+    };
+  }
+  
+  const macdValue = parseFloat(macd.toString());
+  const signalValue = parseFloat(macdSignal.toString());
+  const histogramValue = macdHistogram ? parseFloat(macdHistogram.toString()) : null;
+  
+  // Strong bullish: MACD > Signal AND MACD > 0 (momentum confirmation)
+  if (macdValue > signalValue && macdValue > 0) {
+    const strength = Math.min(10, Math.abs(macdValue - signalValue) * 10);
+    return {
+      signal: 'bullish',
+      description: `Bullish crossover above zero line (MACD: ${macdValue.toFixed(3)}, Signal: ${signalValue.toFixed(3)})`,
+      strength
+    };
+  }
+  
+  // Moderate bullish: MACD > Signal but below zero (early momentum)
+  if (macdValue > signalValue && macdValue <= 0) {
+    const strength = Math.min(7, Math.abs(macdValue - signalValue) * 8);
+    return {
+      signal: 'bullish',
+      description: `Early bullish crossover below zero (MACD: ${macdValue.toFixed(3)}, Signal: ${signalValue.toFixed(3)})`,
+      strength
+    };
+  }
+  
+  // Bearish: MACD < Signal (momentum divergence)
+  if (macdValue < signalValue) {
+    const strength = Math.min(10, Math.abs(signalValue - macdValue) * 10);
+    return {
+      signal: 'bearish',
+      description: `Bearish divergence (MACD: ${macdValue.toFixed(3)} < Signal: ${signalValue.toFixed(3)})`,
+      strength
+    };
+  }
+  
+  // Neutral: MACD ≈ Signal (no clear direction)
+  return {
+    signal: 'neutral',
+    description: `Neutral momentum (MACD: ${macdValue.toFixed(3)}, Signal: ${signalValue.toFixed(3)})`,
+    strength: 1
+  };
 }

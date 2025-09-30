@@ -43,6 +43,13 @@ interface PremarketStock {
     timeWindow: string
     urgencyMultiplier: number
   }
+  macdAnalysis?: {
+    signal: 'bullish' | 'bearish' | 'neutral' | null
+    description: string
+    macd: number | null
+    macdSignal: number | null
+    histogram: number | null
+  }
 }
 
 type TradingStrategy = 'momentum' | 'breakout'
@@ -1272,7 +1279,7 @@ export default function PremarketScanner() {
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Volume</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Rel Vol</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">News</th>
-                    <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Score</th>
+                    <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Score & MACD</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Signal</th>
                     <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Market Cap</th>
                   </tr>
@@ -1419,19 +1426,37 @@ export default function PremarketScanner() {
                         )}
                       </td>
                       <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-4 h-4 rounded-full ${
-                            stock.score >= 80 ? 'bg-green-500' :
-                            stock.score >= 60 ? 'bg-blue-500' : 
-                            stock.score >= 45 ? 'bg-yellow-500' : 'bg-red-500'
-                          }`}></div>
-                          <span className={`font-bold text-xl ${
-                            stock.score >= 80 ? 'text-green-600' :
-                            stock.score >= 60 ? 'text-blue-600' : 
-                            stock.score >= 45 ? 'text-yellow-600' : 'text-red-600'
-                          }`}>
-                            {stock.score}
-                          </span>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-4 h-4 rounded-full ${
+                              stock.score >= 80 ? 'bg-green-500' :
+                              stock.score >= 60 ? 'bg-blue-500' : 
+                              stock.score >= 45 ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}></div>
+                            <span className={`font-bold text-xl ${
+                              stock.score >= 80 ? 'text-green-600' :
+                              stock.score >= 60 ? 'text-blue-600' : 
+                              stock.score >= 45 ? 'text-yellow-600' : 'text-red-600'
+                            }`}>
+                              {stock.score}
+                            </span>
+                          </div>
+                          {/* MACD Signal Indicator */}
+                          {stock.macdAnalysis?.signal && (
+                            <div className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
+                              stock.macdAnalysis.signal === 'bullish' 
+                                ? 'bg-green-100 text-green-700 border border-green-200' :
+                              stock.macdAnalysis.signal === 'bearish'
+                                ? 'bg-red-100 text-red-700 border border-red-200' :
+                                'bg-gray-100 text-gray-600 border border-gray-200'
+                            }`} title={stock.macdAnalysis.description}>
+                              <span className="text-xs">
+                                {stock.macdAnalysis.signal === 'bullish' ? '📈' : 
+                                 stock.macdAnalysis.signal === 'bearish' ? '📉' : '📊'}
+                              </span>
+                              <span className="uppercase">MACD {stock.macdAnalysis.signal}</span>
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-5">
@@ -1506,17 +1531,35 @@ export default function PremarketScanner() {
                           <span className="text-orange-500 text-sm" title="Volume spike detected">🔥</span>
                         )}
                       </div>
-                      <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${
-                        stock.score >= 80 ? 'bg-green-100 text-green-700' :
-                        stock.score >= 60 ? 'bg-blue-100 text-blue-700' : 
-                        stock.score >= 45 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
-                      }`}>
-                        <div className={`w-3 h-3 rounded-full ${
-                          stock.score >= 80 ? 'bg-green-500' :
-                          stock.score >= 60 ? 'bg-blue-500' : 
-                          stock.score >= 45 ? 'bg-yellow-500' : 'bg-red-500'
-                        }`}></div>
-                        <span className="font-bold">{stock.score}</span>
+                      <div className="flex flex-col gap-2">
+                        <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${
+                          stock.score >= 80 ? 'bg-green-100 text-green-700' :
+                          stock.score >= 60 ? 'bg-blue-100 text-blue-700' : 
+                          stock.score >= 45 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                        }`}>
+                          <div className={`w-3 h-3 rounded-full ${
+                            stock.score >= 80 ? 'bg-green-500' :
+                            stock.score >= 60 ? 'bg-blue-500' : 
+                            stock.score >= 45 ? 'bg-yellow-500' : 'bg-red-500'
+                          }`}></div>
+                          <span className="font-bold">{stock.score}</span>
+                        </div>
+                        {/* MACD Signal for Mobile */}
+                        {stock.macdAnalysis?.signal && (
+                          <div className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
+                            stock.macdAnalysis.signal === 'bullish' 
+                              ? 'bg-green-100 text-green-700 border border-green-200' :
+                            stock.macdAnalysis.signal === 'bearish'
+                              ? 'bg-red-100 text-red-700 border border-red-200' :
+                              'bg-gray-100 text-gray-600 border border-gray-200'
+                          }`} title={stock.macdAnalysis.description}>
+                            <span className="text-xs">
+                              {stock.macdAnalysis.signal === 'bullish' ? '📈' : 
+                               stock.macdAnalysis.signal === 'bearish' ? '📉' : '📊'}
+                            </span>
+                            <span className="uppercase">MACD</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase ${
