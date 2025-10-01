@@ -6,6 +6,7 @@
  */
 
 import { eodhd, type EODHDTechnicals, type EODHDNewsItem } from './eodhd'
+import { momentumValidator, type MomentumValidationResult } from './momentumValidator'
 
 interface TradeValidationResult {
   shouldTrade: boolean;
@@ -52,8 +53,8 @@ export class AutomatedTradingEngine {
     // Add debug logging to track inconsistencies
     console.log(`🔍 TRADE VALIDATION START: ${symbol} at ${currentPrice}, score: ${score}`);
 
-    // 1. SCORE VALIDATION
-    if (score < 70) {
+    // 1. SCORE VALIDATION - Aligned with momentum breakout strategy
+    if (score < 60) {
       return {
         shouldTrade: false,
         confidence: 'LOW',
@@ -61,7 +62,7 @@ export class AutomatedTradingEngine {
         stopLoss: 0,
         profitTargets: [],
         warnings: ['Score too low for automated trading'],
-        reasoning: ['Minimum score of 70 required for automation']
+        reasoning: ['Minimum score of 60 required for automation']
       };
     }
 
@@ -129,19 +130,53 @@ export class AutomatedTradingEngine {
       confidence = 'LOW';
     }
 
-    // 4. VOLUME ANALYSIS
+    // 4. UNIFIED MOMENTUM VALIDATION (Consistent with Premarket Scanner)
+    const tech = chartAnalysis?.technicalData;
+    console.log(`🔍 Technical data available: SMA20=${tech?.sma20}, SMA50=${tech?.sma50}, SMA200=${tech?.sma200}, RSI=${tech?.rsi}, ProximityToHigh=${tech?.proximityToHigh}`);
+    
+    const momentumData = {
+      symbol,
+      currentPrice,
+      volume: stockData.volume || 0,
+      relativeVolume: stockData.relativeVolume || 1,
+      changePercent: stockData.changePercent || 0,
+      technicalData: tech ? {
+        sma20: tech.sma20 || 0,
+        sma50: tech.sma50 || 0,
+        sma200: tech.sma200 || 0, // Handle undefined SMA200
+        proximityToHigh: tech.proximityToHigh || 0, // Handle missing proximity
+        rsi: tech.rsi || 0
+      } : undefined
+    };
+    
+    console.log(`🎯 Momentum data for validation:`, momentumData);
+    
+    const momentumValidation = momentumValidator.validateMomentum(momentumData);
+    
+    if (momentumValidation.isEarlyBreakout) {
+      reasoning.push(`🚀 Early breakout detected (${momentumValidation.momentumScore}/${momentumValidation.maxScore} momentum points)`);
+      // Boost confidence for early breakouts
+      if (confidence === 'MEDIUM') confidence = 'HIGH';
+    }
+    
+    // Add momentum-specific warnings and reasoning
+    momentumValidation.warnings.forEach((warning: string) => warnings.push(warning));
+    momentumValidation.reasoning.forEach((reason: string) => reasoning.push(reason));
+
+    // 5. VOLUME ANALYSIS
     const volumeAnalysis = this.analyzeVolumeProfile(stockData);
     if (volumeAnalysis.sellingPressure > 0.6) {
       warnings.push('High selling pressure detected');
       confidence = 'MEDIUM';
     }
 
-    // 6. POSITION SIZING (Kelly Criterion + Risk Management)
+    // 8. POSITION SIZING (Enhanced with momentum validation)
     const optimalSize = this.calculateOptimalPositionSize(
       score, 
       volatility, 
-      confidence,
-      currentPrice
+      confidence, 
+      currentPrice,
+      momentumValidation.isEarlyBreakout
     );
 
     // 7. STOP LOSS CALCULATION (Technical + Volatility Based)
@@ -158,12 +193,13 @@ export class AutomatedTradingEngine {
       volatility
     );
 
-    // 9. FINAL DECISION
+    // 9. FINAL DECISION (Enhanced with momentum validation)
     const shouldTrade = this.makeFinalDecision(
       score, 
       confidence, 
       warnings.length, 
-      optimalSize
+      optimalSize,
+      momentumValidation.isEarlyBreakout
     );
 
     reasoning.push(`Score: ${score}/100 (${confidence} confidence)`);
@@ -224,11 +260,43 @@ export class AutomatedTradingEngine {
       }
       
       // 3. 52-Week High Analysis
-      const high52Week = latestTech['52WeekHigh'] || latestTech.high_52weeks || 0;
+      let high52Week = latestTech['52WeekHigh'] || latestTech.high_52weeks || 0;
+      let proximityToHigh = 0;
+      
       if (high52Week > 0) {
-        const proximityToHigh = (currentPrice / high52Week) * 100;
+        proximityToHigh = (currentPrice / high52Week) * 100;
         if (proximityToHigh > 90) {
           bullishSignals++; // Near 52-week high (momentum)
+        }
+      } else {
+        // Fallback: Calculate 52-week high from historical data
+        console.log(`⚠️ No 52-week high data for ${symbol}, fetching from historical data...`);
+        try {
+          const oneYearAgo = new Date();
+          oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+          const historicalData = await eodhd.getHistoricalData(
+            symbol, 
+            oneYearAgo.toISOString().split('T')[0], 
+            new Date().toISOString().split('T')[0]
+          );
+          
+          if (historicalData && historicalData.length > 0) {
+            high52Week = Math.max(...historicalData.map((d: any) => d.high));
+            proximityToHigh = (currentPrice / high52Week) * 100;
+            console.log(`✅ Calculated 52-week high: $${high52Week.toFixed(2)}, proximity: ${proximityToHigh.toFixed(1)}%`);
+            
+            if (proximityToHigh > 90) {
+              bullishSignals++; // Near 52-week high (momentum)
+            }
+          } else {
+            // Final fallback
+            high52Week = currentPrice * 1.1;
+            proximityToHigh = (currentPrice / high52Week) * 100;
+          }
+        } catch (error) {
+          console.log(`⚠️ Failed to fetch historical data for ${symbol}, using approximation`);
+          high52Week = currentPrice * 1.1;
+          proximityToHigh = (currentPrice / high52Week) * 100;
         }
       }
       
@@ -267,7 +335,7 @@ export class AutomatedTradingEngine {
           macd,
           macdSignal,
           high52Week,
-          proximityToHigh: high52Week > 0 ? (currentPrice / high52Week) * 100 : 0
+          proximityToHigh: proximityToHigh
         }
       };
     } catch (error) {
@@ -394,6 +462,9 @@ export class AutomatedTradingEngine {
     }
   }
 
+  // REMOVED: Old momentum validation method
+  // Now using unified MomentumValidator for consistency across the app
+
   /**
    * VOLUME PROFILE ANALYSIS: Buying vs Selling pressure
    */
@@ -416,7 +487,8 @@ export class AutomatedTradingEngine {
     score: number, 
     volatility: number, 
     confidence: 'HIGH' | 'MEDIUM' | 'LOW',
-    currentPrice: number
+    currentPrice: number,
+    isEarlyBreakout: boolean = false
   ): number {
     const baseSize = this.riskParams.maxPositionSize;
     
@@ -427,15 +499,20 @@ export class AutomatedTradingEngine {
       'LOW': 0.3
     }[confidence];
     
-    // Adjust for score (70-100 range)
-    const scoreMultiplier = (score - 70) / 30; // 0-1 range
+    // FIXED: Adjust for score with early breakout consideration
+    // Early breakouts get special treatment - use score >= 60 as baseline instead of 70
+    const scoreBaseline = isEarlyBreakout ? 60 : 70;
+    const scoreRange = isEarlyBreakout ? 40 : 30; // Wider range for early breakouts
+    const scoreMultiplier = Math.max(0.1, (score - scoreBaseline) / scoreRange);
+    
+    console.log(`💰 Position sizing: score=${score}, baseline=${scoreBaseline}, multiplier=${scoreMultiplier.toFixed(2)}, isEarlyBreakout=${isEarlyBreakout}`);
     
     // Adjust for volatility (reduce size for high volatility)
     const volatilityMultiplier = Math.max(0.3, 1 - (volatility / 100));
     
     const optimalSize = baseSize * confidenceMultiplier * scoreMultiplier * volatilityMultiplier;
     
-    return Math.min(optimalSize, this.riskParams.maxPositionSize);
+    return Math.min(Math.max(optimalSize, 100), this.riskParams.maxPositionSize); // Ensure minimum €100
   }
 
   /**
@@ -538,35 +615,49 @@ export class AutomatedTradingEngine {
   /**
    * FINAL DECISION LOGIC: All factors combined
    * 
-   * ALIGNED WITH SCORING SYSTEM:
-   * - Strong signals (75+) with HIGH confidence = TRADE
-   * - Good signals (70+) with HIGH confidence + low warnings = TRADE
-   * - Medium confidence needs exceptional scores (85+)
+   * MOMENTUM BREAKOUT STRATEGY ALIGNED:
+   * - Strong signals (70+) with HIGH confidence = TRADE
+   * - Good signals (65+) with HIGH confidence + low warnings = TRADE  
+   * - Medium confidence needs good scores (75+)
    * - Low confidence = NO TRADE
    */
   private makeFinalDecision(
     score: number, 
     confidence: 'HIGH' | 'MEDIUM' | 'LOW', 
     warningCount: number,
-    positionSize: number
+    positionSize: number,
+    isEarlyBreakout: boolean = false
   ): boolean {
-    // Don't trade if too many warnings
-    if (warningCount >= 3) return false;
+    // Don't trade if too many warnings (allow more flexibility)
+    if (warningCount >= 4) return false;
     
     // Don't trade if position size too small (not worth it)
     if (positionSize < 100) return false;
     
-    // HIGH CONFIDENCE TRADING RULES:
+    // EARLY BREAKOUT OVERRIDE: Your "money printing machine" criteria
+    if (isEarlyBreakout) {
+      // Early breakouts get priority even with lower scores
+      if (confidence === 'HIGH' && score >= 60 && warningCount <= 2) return true;
+      if (confidence === 'MEDIUM' && score >= 65 && warningCount <= 1) return true;
+    }
+
+    // HIGH CONFIDENCE TRADING RULES (More aggressive for momentum):
     if (confidence === 'HIGH') {
-      // Strong signals with minimal warnings = trade
-      if (score >= 75 && warningCount <= 1) return true;
+      // Strong momentum signals = trade
+      if (score >= 70 && warningCount <= 2) return true;
       
-      // Good signals with no warnings = trade
-      if (score >= 70 && warningCount === 0) return true;
+      // Good momentum signals with minimal warnings = trade
+      if (score >= 65 && warningCount <= 1) return true;
+      
+      // Exceptional momentum with some warnings = trade
+      if (score >= 60 && warningCount === 0) return true;
     }
     
-    // MEDIUM CONFIDENCE: Need exceptional scores
-    if (confidence === 'MEDIUM' && score >= 85 && warningCount === 0) return true;
+    // MEDIUM CONFIDENCE: More reasonable thresholds
+    if (confidence === 'MEDIUM') {
+      if (score >= 75 && warningCount <= 1) return true;
+      if (score >= 70 && warningCount === 0) return true;
+    }
     
     // LOW CONFIDENCE: No automated trading
     return false;

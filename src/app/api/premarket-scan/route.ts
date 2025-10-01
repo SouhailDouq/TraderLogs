@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eodhd, summarizeNewsImpact, categorizeNewsByTags, formatMarketCap, EODHDRealTimeData } from '@/utils/eodhd';
+import { eodhd } from '@/utils/eodhd';
+import { momentumValidator } from '@/utils/momentumValidator';
 import { scoringEngine, type StockData } from '@/utils/scoringEngine';
 
 // Create a comprehensive EODHD client mock for enhanced methods not yet implemented
@@ -228,7 +229,7 @@ interface PremarketStock {
  * 3. If no results, progressively relax filters (broader criteria)
  * 4. Return live stock data for further analysis
  */
-async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<EODHDRealTimeData[]> {
+async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<any[]> {
   try {
     console.log(`Fetching live premarket movers for ${strategy} strategy with filters:`, filters);
     
@@ -386,7 +387,7 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
  * - Quality over quantity approach (top 10 stocks)
  * - Real-time validation prevents stale/declining stock signals
  */
-async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<EODHDRealTimeData[]> {
+async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<any[]> {
   try {
     console.log('Discovering fresh momentum stocks from market-wide screening...')
     
@@ -399,7 +400,7 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
       return []
     }
     
-    const qualifiedStocks: { stock: EODHDRealTimeData; score: number }[] = []
+    const qualifiedStocks: { stock: any; score: number }[] = []
     
     // Process all candidates - no backend limiting, let frontend filter
     for (const stock of premarketMovers) {
@@ -669,16 +670,39 @@ export async function POST(request: NextRequest) {
         const warnings: string[] = [];
         let qualityTier: 'premium' | 'standard' | 'caution' = 'premium';
         
-        // Enhanced momentum criteria validation
-        if (strategy === 'momentum' && momentumCriteria) {
-          // Critical momentum requirements based on Finviz criteria
-          if (!momentumCriteria.isNear20DayHigh) {
-            warnings.push(`⚠️ Not near 20-day highs (${momentumCriteria.highProximity.toFixed(1)}% proximity)`);
-            qualityTier = 'caution';
+        // UNIFIED MOMENTUM VALIDATION (Same as Trade Analyzer)
+        if (strategy === 'momentum') {
+          const momentumData = {
+            symbol,
+            currentPrice: stock.close || stock.price || 0,
+            volume: stock.volume || 0,
+            relativeVolume: relativeVolume,
+            changePercent: stock.change_p || 0,
+            technicalData: technicals ? {
+              sma20: technicals.SMA_20 || 0,
+              sma50: technicals.SMA_50 || 0,
+              sma200: technicals.SMA_200 || 0,
+              proximityToHigh: momentumCriteria?.highProximity || 0,
+              rsi: technicals.RSI_14 || 0
+            } : undefined
+          };
+          
+          const momentumValidation = momentumValidator.validateMomentum(momentumData);
+          
+          console.log(`🎯 ${symbol}: Momentum validation - ${momentumValidation.momentumScore}/${momentumValidation.maxScore} points`);
+          momentumValidation.reasoning.forEach(reason => console.log(`   ${reason}`));
+          
+          if (momentumValidation.isEarlyBreakout) {
+            console.log(`🚀 ${symbol}: EARLY BREAKOUT DETECTED!`);
+            // Boost quality for early breakouts
+            if (qualityTier !== 'premium') qualityTier = 'premium';
           }
           
-          if (!momentumCriteria.isAboveSMAs) {
-            warnings.push(`⚠️ Not above key SMAs (${momentumCriteria.smaAlignment} alignment)`);
+          // Add momentum-specific warnings
+          momentumValidation.warnings.forEach((warning: string) => warnings.push(warning));
+          
+          // Downgrade quality if insufficient momentum criteria
+          if (momentumValidation.momentumScore < 6) {
             qualityTier = 'caution';
           }
         }
