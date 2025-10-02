@@ -1,8 +1,9 @@
 // EODHD API utilities for real-time and historical stock data
 // Documentation: https://eodhd.com/financial-apis/
 
-import { getWebSocketManager, type WebSocketMessage } from './websocket';
+import { getWebSocketManager, WebSocketMessage } from './websocket';
 import { yahooFinance } from './yahoo-finance';
+import { fetchStockDataYahoo } from './alphaVantageApi';
 
 // Helper function to safely convert API values to numbers
 function toNumber(value: string | number | null | undefined): number {
@@ -171,14 +172,19 @@ class EODHDClient {
    * - Handles API failures gracefully
    */
   async getRealTimeQuote(symbol: string): Promise<EODHDRealTimeData> {
-    // Use WebSocket for truly live data during market hours
-    if (this.isLiveDataFresh()) {
+    // Use WebSocket for truly live data during market hours (including premarket)
+    const marketStatus = this.getMarketHoursStatus();
+    const useWebSocket = ['premarket', 'regular', 'afterhours'].includes(marketStatus);
+    
+    if (useWebSocket) {
       try {
+        console.log(`🔌 Attempting WebSocket connection for ${marketStatus} data...`);
         const wsManager = getWebSocketManager();
         await wsManager.connect();
         
-        // Wait a bit for connection to stabilize
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Wait a bit longer for premarket connections to stabilize
+        const stabilizationTime = marketStatus === 'premarket' ? 200 : 100;
+        await new Promise(resolve => setTimeout(resolve, stabilizationTime));
         
         const wsData = await wsManager.getLiveQuote(symbol, 1500); // Increased timeout
         if (wsData && wsData.p) { // WebSocket uses 'p' for price
@@ -289,7 +295,7 @@ class EODHDClient {
           // Subscribe to all symbols
           symbols.forEach(symbol => wsManager.subscribe(symbol, callback));
           
-          // Wait 8 seconds to collect live data (increased for premarket)
+          // MAXIMUM COLLECTION TIME: Wait 12 seconds for maximum live data capture
           setTimeout(() => {
             // Unsubscribe and return collected data
             symbols.forEach(symbol => wsManager.unsubscribe(symbol, callback));
@@ -298,7 +304,7 @@ class EODHDClient {
               this.convertWebSocketToRealTimeData(wsData)
             );
             
-            console.log(`✅ WebSocket collected ${results.length}/${symbols.length} live quotes after 8s wait`);
+            console.log(`🔴 LIVE WebSocket collected ${results.length}/${symbols.length} quotes after 12s aggressive collection`);
             
             // Log which symbols failed to get WebSocket data
             const failedSymbols = symbols.filter(symbol => 
@@ -315,7 +321,7 @@ class EODHDClient {
               // If volume enhancement fails, return WebSocket data as-is
               resolve(results);
             });
-          }, 8000);
+          }, 12000); // Increased to 12 seconds for maximum live data collection
         });
         
         const wsResults = await collectWebSocketData;
@@ -452,26 +458,72 @@ class EODHDClient {
   private async enhanceWithDailyVolumes(wsResults: EODHDRealTimeData[]): Promise<EODHDRealTimeData[]> {
     const enhanced = [...wsResults];
     
-    // Fetch volumes in batches to avoid API limits
-    for (const result of enhanced) {
-      try {
-        const symbol = result.code.replace('.US', '');
-        const restData = await this.makeRequest(`/real-time/${symbol}.US`);
-        
-        if (restData?.volume) {
-          result.volume = toNumber(restData.volume);
-          result.previousClose = toNumber(restData.previousClose) || result.close;
-          result.change = result.close - result.previousClose;
-          result.change_p = result.previousClose > 0 ? 
-            ((result.change / result.previousClose) * 100) : 0;
-          // Keep the WebSocket timestamp (live) instead of REST API timestamp (stale)
-          // result.timestamp stays as WebSocket timestamp for accurate freshness
+    console.log(`🔄 Enhancing ${enhanced.length} WebSocket results with daily volume data...`);
+    
+    // Process in smaller batches to avoid API rate limits
+    const batchSize = 5;
+    for (let i = 0; i < enhanced.length; i += batchSize) {
+      const batch = enhanced.slice(i, i + batchSize);
+      
+      const promises = batch.map(async (result) => {
+        try {
+          const symbol = result.code.replace('.US', '');
+          console.log(`📊 Fetching daily volume for ${symbol}...`);
+          
+          const restData = await this.makeRequest(`/real-time/${symbol}.US`);
+          
+          if (restData?.volume && toNumber(restData.volume) > 0) {
+            const volume = toNumber(restData.volume);
+            const previousClose = toNumber(restData.previousClose);
+            const change = result.close - previousClose;
+            const changePercent = previousClose > 0 ? ((change / previousClose) * 100) : 0;
+            
+            // Update with REST API volume data but keep WebSocket price and timestamp
+            result.volume = volume;
+            result.previousClose = previousClose;
+            result.change = change;
+            result.change_p = changePercent;
+            
+            console.log(`✅ Enhanced ${symbol}: vol=${volume.toLocaleString()}, change=${changePercent.toFixed(2)}%, prevClose=$${previousClose}`);
+            return true;
+          } else {
+            console.log(`⚠️ No volume data for ${symbol} from REST API - Response:`, restData);
+            
+            // Try to get volume from intraday data as backup
+            try {
+              const intradayData = await this.getIntradayData(symbol);
+              if (intradayData && intradayData.length > 0) {
+                const latestData = intradayData[intradayData.length - 1];
+                const intradayVolume = toNumber(latestData.volume);
+                
+                if (intradayVolume > 0) {
+                  result.volume = intradayVolume;
+                  console.log(`✅ Got volume from intraday backup: ${intradayVolume.toLocaleString()}`);
+                  return true;
+                }
+              }
+            } catch (error) {
+              console.log(`⚠️ Intraday volume backup also failed for ${symbol}`);
+            }
+            
+            return false;
+          }
+        } catch (error) {
+          console.log(`❌ Failed to enhance ${result.code}: ${error}`);
+          return false;
         }
-      } catch (error) {
-        // Continue with WebSocket data if REST API fails
-        console.log(`Could not enhance ${result.code} with daily volume`);
+      });
+      
+      await Promise.allSettled(promises);
+      
+      // Small delay between batches
+      if (i + batchSize < enhanced.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
+    
+    const enhancedCount = enhanced.filter(r => r.volume > 0).length;
+    console.log(`✅ Volume enhancement complete: ${enhancedCount}/${enhanced.length} stocks enhanced with daily volume data`);
     
     return enhanced;
   }
@@ -580,8 +632,19 @@ class EODHDClient {
         console.log(`✅ Got SMA200: ${technicals.SMA_200}`);
       } else {
         console.log(`❌ SMA200 failed:`, sma200Data.status === 'rejected' ? sma200Data.reason : 'No data');
-        // Try to get SMA200 from fundamentals as fallback
-        console.log(`🔄 Attempting SMA200 fallback calculation...`);
+        // Try Alpha Vantage as backup for SMA200
+        console.log(`🔄 Attempting Alpha Vantage backup for SMA200...`);
+        try {
+          const alphaData = await fetchStockDataYahoo(symbol);
+          if (alphaData?.sma200 && parseFloat(alphaData.sma200) > 0) {
+            technicals.SMA_200 = parseFloat(alphaData.sma200);
+            console.log(`✅ Got SMA200 from Alpha Vantage backup: ${technicals.SMA_200}`);
+          } else {
+            console.log(`🔄 Alpha Vantage SMA200 failed, attempting historical calculation...`);
+          }
+        } catch (error) {
+          console.log(`⚠️ Alpha Vantage SMA200 backup failed:`, error);
+        }
       }
       
       if (rsiData.status === 'fulfilled' && rsiData.value?.length > 0) {
@@ -696,6 +759,89 @@ class EODHDClient {
     // Use WebSocket during both premarket and regular hours for live data
     // Premarket data is available and fresh during 4:00-9:30 AM ET
     return marketStatus === 'premarket' || marketStatus === 'regular';
+  }
+
+  // Check WebSocket connection status for live data monitoring
+  public isWebSocketConnected(): boolean {
+    try {
+      const wsManager = getWebSocketManager();
+      return wsManager.isConnected();
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // Get 52-week high with Alpha Vantage backup
+  async get52WeekHigh(symbol: string): Promise<{ high: number; proximity: number } | null> {
+    try {
+      console.log(`📊 Fetching 52-week high for ${symbol}...`);
+      
+      // Try Alpha Vantage first to avoid 403 errors from EODHD fundamentals
+      console.log(`🔄 Trying Alpha Vantage first for 52-week high...`);
+      const alphaData = await fetchStockDataYahoo(symbol);
+      let week52High = null;
+      
+      if (alphaData?.week52High && parseFloat(alphaData.week52High) > 0) {
+        week52High = parseFloat(alphaData.week52High);
+        console.log(`✅ Got 52-week high from Alpha Vantage: $${week52High}`);
+      } else {
+        console.log(`🔄 Alpha Vantage failed, trying EODHD fundamentals...`);
+        try {
+          const fundamentals = await this.getFundamentals(symbol);
+          week52High = fundamentals?.Highlights?.['52WeekHigh'] || fundamentals?.General?.['52WeekHigh'];
+          if (week52High && week52High > 0) {
+            console.log(`✅ Got 52-week high from EODHD: $${week52High}`);
+          }
+        } catch (error: any) {
+          console.log(`⚠️ EODHD fundamentals failed (likely 403):`, error?.message || 'Unknown error');
+        }
+      }
+      
+      if (!week52High || week52High <= 0) {
+        console.log(`⚠️ Both Alpha Vantage and EODHD failed, using historical calculation...`);
+        
+        // Fallback to historical data calculation
+        try {
+          const historicalData = await this.getHistoricalData(symbol, 
+            new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+            new Date().toISOString().split('T')[0]
+          );
+          
+          if (historicalData && historicalData.length > 0) {
+            week52High = Math.max(...historicalData.map((d: any) => toNumber(d.high)));
+            console.log(`✅ Calculated 52-week high from historical data: $${week52High}`);
+          }
+        } catch (error: any) {
+          console.log(`❌ Historical data calculation also failed:`, error?.message);
+        }
+      }
+      
+      if (!week52High || week52High <= 0) {
+        console.log(`❌ Could not get 52-week high for ${symbol}`);
+        return null;
+      }
+      
+      // Get current price for proximity calculation
+      const realTimeData = await this.getRealTimeQuote(symbol);
+      const currentPrice = realTimeData?.close || 0;
+      
+      if (currentPrice <= 0) {
+        console.log(`❌ Could not get current price for ${symbol}`);
+        return null;
+      }
+      
+      const proximity = (currentPrice / week52High) * 100;
+      console.log(`✅ ${symbol}: 52-week high $${week52High}, current $${currentPrice}, proximity: ${proximity.toFixed(1)}%`);
+      
+      return {
+        high: week52High,
+        proximity: proximity
+      };
+      
+    } catch (error) {
+      console.error(`❌ Failed to get 52-week high for ${symbol}:`, error);
+      return null;
+    }
   }
 
   /**

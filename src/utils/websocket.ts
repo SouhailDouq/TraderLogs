@@ -92,12 +92,20 @@ class EODHDWebSocketManager {
       };
 
       this.ws.onclose = (event) => {
-        console.log(`WebSocket closed: ${event.code} - ${event.reason}`);
+        console.log(`🔌 WebSocket closed: ${event.code} - ${event.reason || 'No reason provided'}`);
         this.isConnecting = false;
         this.stopHeartbeat();
         
-        if (event.code !== 1000) { // Not a normal closure
+        // Handle different close codes
+        if (event.code === 1006) {
+          console.log('🔄 WebSocket closed abnormally (1006) - likely network issue, will reconnect');
           this.handleReconnect();
+        } else if (event.code !== 1000 && event.code !== 1001) { 
+          // Not a normal closure or going away
+          console.log(`🔄 WebSocket closed with code ${event.code}, attempting reconnect`);
+          this.handleReconnect();
+        } else {
+          console.log('✅ WebSocket closed normally');
         }
       };
 
@@ -172,8 +180,8 @@ class EODHDWebSocketManager {
     }
   }
 
-  // Get live quote for single symbol (Promise-based)
-  async getLiveQuote(symbol: string, timeout = 5000): Promise<WebSocketMessage> {
+  // Get live quote for single symbol (Promise-based) - AGGRESSIVE MODE
+  async getLiveQuote(symbol: string, timeout = 8000): Promise<WebSocketMessage> {
     return new Promise(async (resolve, reject) => {
       // Wait for connection if not ready
       if (!this.isConnected()) {
@@ -202,14 +210,14 @@ class EODHDWebSocketManager {
     });
   }
 
-  // Get live quotes for multiple symbols with proper error handling
-  async getLiveQuotes(symbols: string[], timeout = 15000): Promise<WebSocketMessage[]> {
+  // Get live quotes for multiple symbols - MAXIMUM AGGRESSIVE MODE
+  async getLiveQuotes(symbols: string[], timeout = 20000): Promise<WebSocketMessage[]> {
     if (!this.isConnected()) {
       throw new Error('WebSocket not connected');
     }
     
-    // Limit to 3 symbols max to avoid API limits and improve success rate
-    const limitedSymbols = symbols.slice(0, 3);
+    // AGGRESSIVE: Process more symbols for maximum live data coverage
+    const limitedSymbols = symbols.slice(0, 8); // Increased from 3 to 8 for more live data
     const results: WebSocketMessage[] = [];
     
     const promises = limitedSymbols.map(symbol => 
@@ -251,21 +259,30 @@ class EODHDWebSocketManager {
     }
   }
 
-  // Handle reconnection logic
+  // Handle reconnection logic with improved stability
   private handleReconnect(): void {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+      // Exponential backoff with jitter to prevent thundering herd
+      const baseDelay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+      const jitter = Math.random() * 1000; // Add up to 1 second of jitter
+      const delay = Math.min(baseDelay + jitter, 30000); // Cap at 30 seconds
       
-      console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+      console.log(`🔄 WebSocket reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
       
       setTimeout(() => {
         this.connect().catch(error => {
-          console.error('Reconnection failed:', error);
+          console.error('❌ WebSocket reconnection failed:', error);
+          // Continue trying if we haven't reached max attempts
+          if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.handleReconnect();
+          }
         });
       }, delay);
     } else {
-      console.error('Max reconnection attempts reached');
+      console.error('❌ Max WebSocket reconnection attempts reached - switching to REST API only');
+      // Clean up any remaining subscriptions
+      this.subscriptions.clear();
     }
   }
 

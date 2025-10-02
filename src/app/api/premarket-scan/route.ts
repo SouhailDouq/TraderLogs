@@ -97,9 +97,9 @@ const eodhdEnhanced = {
       const sma50 = tech.SMA_50 || 0;
       const sma200 = tech.SMA_200 || 0;
       
-      // Calculate REAL 20-day high proximity using available data
-      const currentHigh = realTimeData.high || price;
-      const highProximity = currentHigh > 0 ? (price / currentHigh) * 100 : 0;
+      // Calculate REAL 52-week high proximity using Alpha Vantage backup
+      const week52Data = await eodhd.get52WeekHigh(symbol);
+      const highProximity = week52Data ? week52Data.proximity : 0;
       
       // Calculate REAL SMA alignment
       const aboveSMA20 = price > sma20 && sma20 > 0;
@@ -626,13 +626,64 @@ export async function POST(request: NextRequest) {
     
     console.log('Starting premarket scan with filters:', filters)
     
-    // Get momentum stocks from EODHD
+    // Get momentum stocks from EODHD with WebSocket enhancement
     const momentumStocks = await getMomentumStocks(strategy, filters)
     console.log(`Processing ${momentumStocks.length} momentum stocks from EODHD`)
     
-    // Process stocks in parallel for speed - limit to top 10 for Vercel timeout constraints
-    const topStocks = momentumStocks.slice(0, 10)
-    console.log(`Processing top ${topStocks.length} stocks in parallel for speed`)
+    // MAXIMUM WEBSOCKET UTILIZATION: Get live data for ALL discovered stocks
+    if (momentumStocks.length > 0) {
+      const isWebSocketConnected = eodhd.isWebSocketConnected();
+      console.log(`🔴 MAXIMUM WebSocket Mode: Processing ALL ${momentumStocks.length} stocks with live data (WebSocket: ${isWebSocketConnected ? '✅ Connected' : '❌ Disconnected'})...`);
+      
+      // Process ALL stocks in batches for maximum live data coverage
+      const batchSize = 15; // Increased batch size for more aggressive WebSocket usage
+      let totalEnhanced = 0;
+      
+      for (let i = 0; i < momentumStocks.length; i += batchSize) {
+        const batch = momentumStocks.slice(i, i + batchSize);
+        const symbols = batch.map(stock => stock.code.replace('.US', ''));
+        
+        try {
+          console.log(`🚀 WebSocket Batch ${Math.floor(i/batchSize) + 1}: Processing ${symbols.length} stocks for live data...`);
+          
+          // Aggressive WebSocket-first approach with extended timeout
+          const liveQuotes = await eodhd.getRealTimeQuotes(symbols.map(s => `${s}.US`));
+          console.log(`✅ Batch ${Math.floor(i/batchSize) + 1}: Enhanced ${liveQuotes.length}/${symbols.length} stocks with LIVE WebSocket data`);
+          
+          // Update ALL stocks in this batch with live data
+          liveQuotes.forEach(liveQuote => {
+            const matchingStock = batch.find(stock => 
+              stock.code === liveQuote.code || stock.code === `${liveQuote.code}.US`
+            );
+            if (matchingStock) {
+              // CRITICAL: Update with live WebSocket data for accurate scoring
+              matchingStock.close = liveQuote.close;
+              matchingStock.volume = liveQuote.volume;
+              matchingStock.change = liveQuote.change;
+              matchingStock.change_p = liveQuote.change_p;
+              matchingStock.timestamp = liveQuote.timestamp;
+              matchingStock.previousClose = liveQuote.previousClose;
+              totalEnhanced++;
+              console.log(`🔴 LIVE: ${matchingStock.code} → $${liveQuote.close}, vol: ${liveQuote.volume?.toLocaleString()}, change: ${liveQuote.change_p?.toFixed(2)}%`);
+            }
+          });
+          
+          // Small delay between batches to respect API limits but maintain speed
+          if (i + batchSize < momentumStocks.length) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          
+        } catch (error) {
+          console.log(`⚠️ WebSocket batch ${Math.floor(i/batchSize) + 1} failed, continuing with next batch:`, error);
+        }
+      }
+      
+      console.log(`🔴 LIVE DATA SUMMARY: Enhanced ${totalEnhanced}/${momentumStocks.length} stocks (${Math.round((totalEnhanced/momentumStocks.length)*100)}%) with WebSocket data`);
+    }
+    
+    // Process ALL stocks with live WebSocket data - maximum utilization for accurate scoring
+    const topStocks = momentumStocks.slice(0, 50) // Increased to 50 for maximum live data coverage
+    console.log(`🔴 PROCESSING ${topStocks.length} stocks with LIVE WebSocket data for accurate scoring`)
     
     const stockPromises = topStocks.map(async (stock) => {
       try {
@@ -648,11 +699,18 @@ export async function POST(request: NextRequest) {
         }
         
         // Get enhanced stock data with real relative volume and momentum analysis
+        // Use live WebSocket data if available (already updated above)
         const enhancedData = await getEnhancedStockData(symbol, stock, strategy);
         if (!enhancedData) {
           console.log(`${symbol} filtered: Enhanced data unavailable`);
           return null;
         }
+        
+        // CRITICAL: Verify data source and freshness for accurate scoring
+        const dataAge = Date.now() - (stock.timestamp * 1000);
+        const isLiveData = dataAge < 60000; // Less than 1 minute old
+        const dataSource = isLiveData ? '🔴 LIVE WebSocket' : '📡 REST API';
+        console.log(`🔴 SCORING ${symbol}: Using ${dataSource} data (${Math.round(dataAge/1000)}s old) - Price: $${stock.close}, Vol: ${stock.volume?.toLocaleString()}, Change: ${stock.change_p?.toFixed(2)}%`);
         
         const { relativeVolume, gapAnalysis, momentumCriteria, timeUrgency } = enhancedData;
         
@@ -750,12 +808,13 @@ export async function POST(request: NextRequest) {
           isPremarket: eodhdEnhanced.getMarketHoursStatus() === 'premarket'
         };
         
+        // CRITICAL: Ensure scoring uses LIVE WebSocket data
         const stockDataForScoring: StockData = {
           symbol: stock.code.replace('.US', ''),
-          price: stock.close,
-          changePercent: stock.change_p,
-          volume: stock.volume,
-          relVolume: relativeVolume,
+          price: stock.close, // LIVE WebSocket price
+          changePercent: stock.change_p, // LIVE WebSocket change
+          volume: stock.volume, // LIVE WebSocket volume (enhanced with daily data)
+          relVolume: relativeVolume, // Calculated from LIVE data
           sma20: technicals.SMA_20 || 0,
           sma50: technicals.SMA_50 || 0,
           rsi: technicals.RSI_14 || 0,
@@ -763,12 +822,13 @@ export async function POST(request: NextRequest) {
           macdSignal: technicals.MACD_Signal || 0,
           week52High: stock.high || stock.close
         };
+        
         const scoreBreakdown = scoringEngine.calculateScore(stockDataForScoring, strategy);
         const score = scoreBreakdown.finalScore;
         const analysisReasoning = scoreBreakdown.analysisReasoning;
-        const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : 'Avoid'; // Simplified signal
+        const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : 'Avoid';
 
-        console.log(`🎯 ${symbol}: Enhanced score ${score}/100 (${signal}) - Gap: ${gapAnalysis.gapPercent.toFixed(1)}%, RelVol: ${relativeVolume.toFixed(1)}x, Urgency: ${timeUrgency.urgencyMultiplier.toFixed(2)}x`);
+        console.log(`🔴 LIVE SCORE ${symbol}: ${score}/100 (${signal}) ${dataSource} - Price: $${stock.close}, Change: ${stock.change_p?.toFixed(2)}%, Gap: ${gapAnalysis.gapPercent.toFixed(1)}%, RelVol: ${relativeVolume.toFixed(1)}x`);
 
         // Get news data with timeout protection
         let newsData = undefined;
@@ -867,8 +927,22 @@ export async function POST(request: NextRequest) {
       caution: stocks.filter(s => s.qualityTier === 'caution').length
     };
     
+    // Calculate WebSocket usage statistics
+    const liveDataCount = stocks.filter(stock => {
+      const dataAge = Date.now() - new Date(stock.lastUpdated).getTime();
+      return dataAge < 60000; // Less than 1 minute old = live data
+    }).length;
+    
+    const webSocketStats = {
+      totalStocks: stocks.length,
+      liveDataCount,
+      liveDataPercentage: stocks.length > 0 ? Math.round((liveDataCount / stocks.length) * 100) : 0,
+      dataFreshness: liveDataCount > 0 ? '🔴 LIVE WebSocket' : '📡 REST API Fallback'
+    };
+    
     console.log(`🎯 ${scanMode} momentum scan completed: ${stocks.length} stocks found during ${marketStatus} hours`);
     console.log(`🏆 Quality breakdown: ${qualityBreakdown.premium} premium, ${qualityBreakdown.standard} standard, ${qualityBreakdown.caution} caution`);
+    console.log(`🔴 WebSocket Stats: ${liveDataCount}/${stocks.length} stocks using live data (${webSocketStats.liveDataPercentage}%)`);
     
     return NextResponse.json({
       stocks,
@@ -878,7 +952,8 @@ export async function POST(request: NextRequest) {
       scanMode,
       marketStatus,
       count: stocks.length,
-      qualityBreakdown
+      qualityBreakdown,
+      webSocketStats
     })
     
   } catch (error) {
