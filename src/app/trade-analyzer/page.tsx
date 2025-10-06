@@ -1390,11 +1390,11 @@ export default function TradeAnalyzer() {
                   <div className="space-y-2">
                     {stockData.analysisReasoning?.map((reason, index) => (
                       <div key={index} className="flex items-center text-sm">
-                        <span className={`mr-2 ${reason.startsWith('✅') ? 'text-green-500' : 'text-red-500'}`}>
-                          {reason.startsWith('✅') ? '✓' : '✗'}
+                        <span className={`mr-2 ${reason.includes('PASS') ? 'text-green-500' : 'text-red-500'}`}>
+                          {reason.includes('PASS') ? '✓' : '✗'}
                         </span>
                         <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                          {reason.substring(2)}
+                          {reason}
                         </span>
                       </div>
                     ))}

@@ -58,7 +58,8 @@ export type TradingStrategy = 'technical-momentum' | 'news-momentum'
 export class ProfessionalScoringEngine {
   
   /**
-   * MAIN SCORING ENGINE - Calculates realistic, reliable scores
+   * MAIN SCORING ENGINE - Calculates realistic, reliable scores with weighted components
+   * ALIGNED WITH NEW EODHD.TS SCORING SYSTEM
    */
   calculateScore(stockData: StockData, strategy: TradingStrategy = 'technical-momentum'): ScoreBreakdown {
     const breakdown: ScoreBreakdown = {
@@ -80,51 +81,199 @@ export class ProfessionalScoringEngine {
     // Parse all numeric values safely
     const currentPrice = this.parseNumber(stockData.price)
     const changePercent = stockData.changePercent || this.parsePercent(stockData.change || '0')
-    const relativeVolume = this.parseNumber(stockData.relVolume || '1')
+    const relativeVolume = this.parseNumber(stockData.relVolume || '0') // Changed default from '1' to '0'
     const sma20 = this.parseNumber(stockData.sma20 || '0')
     const sma50 = this.parseNumber(stockData.sma50 || '0')
     const sma200 = this.parseNumber(stockData.sma200 || '0')
-    const rsi = this.parseNumber(stockData.rsi || '50')
+    const rsi = this.parseNumber(stockData.rsi || '0') // Changed default from '50' to '0'
     const week52High = this.parseNumber(stockData.week52High || '0')
     const intradayChange = stockData.intradayChange || 0
 
-    // 1. TREND ANALYSIS (Max 25 points)
-    breakdown.trend = this.calculateTrendScore(currentPrice, sma20, sma50, sma200, breakdown)
-
-    // 2. MOMENTUM ANALYSIS (Max 20 points) 
-    breakdown.momentum = this.calculateMomentumScore(rsi, stockData, breakdown)
-
-    // 3. VOLUME ANALYSIS (Max 20 points)
+    // WEIGHTED COMPONENT SYSTEM (Aligned with eodhd.ts)
+    
+    // 1. PRICE MOVEMENT SCORE (35% weight, max 35 points)
+    const priceScore = this.calculatePriceScore(currentPrice, strategy, breakdown)
+    
+    // 2. VOLUME CONFIRMATION SCORE (25% weight, max 25 points)
     breakdown.volume = this.calculateVolumeScore(relativeVolume, stockData, strategy, breakdown)
 
-    // 4. 52-WEEK HIGH PROXIMITY (Max 15 points)
-    breakdown.proximity = this.calculateProximityScore(currentPrice, week52High, breakdown)
+    // 3. TECHNICAL STRENGTH SCORE (20% weight, max 20 points)
+    breakdown.trend = this.calculateTrendScore(currentPrice, sma20, sma50, sma200, breakdown)
+    // 2. MOMENTUM ANALYSIS (Max 20 points) 
+    breakdown.momentum = this.calculateMomentumScore(rsi, stockData, breakdown)
+    const technicalScore = Math.min(breakdown.trend + breakdown.momentum, 20) // Cap combined technical at 20
 
-    // 5. MARKET CONDITIONS (Max 10 points)
-    breakdown.market = this.calculateMarketScore(stockData.marketContext, breakdown)
-
-    // 6. PRICE CRITERIA (Max 5 points)
-    breakdown.price = this.calculatePriceScore(currentPrice, strategy, breakdown)
-
-    // 7. DATA QUALITY (Max 5 points)
-    breakdown.quality = this.calculateQualityScore(stockData.dataQuality, breakdown)
-
-    // 8. CRITICAL RISK PENALTIES
-    breakdown.riskPenalties = this.calculateRiskPenalties(stockData, intradayChange, breakdown)
-
-    // 9. FINAL CALCULATION
-    const rawScore = breakdown.trend + breakdown.momentum + breakdown.volume + 
-                    breakdown.proximity + breakdown.market + breakdown.price + breakdown.quality
+    // 4. RISK ASSESSMENT (20% weight, -20 to 0 points)
+    const riskScore = this.calculateRiskScore(stockData, changePercent, currentPrice, breakdown)
+    // FINAL CALCULATION: Weighted sum with realistic distribution
+    const rawScore = priceScore + breakdown.volume + technicalScore + riskScore
     
-    breakdown.finalScore = Math.max(0, Math.min(100, rawScore - breakdown.riskPenalties))
+    // Apply strategy-specific adjustments (minimal)
+    let strategyMultiplier = 1.0
+    if (strategy === 'technical-momentum' && technicalScore >= 15 && priceScore >= 20) {
+      strategyMultiplier = 1.05 // Slight boost for strong technical momentum
+    }
+    
+    const adjustedScore = rawScore * strategyMultiplier
+    breakdown.finalScore = Math.max(0, Math.min(100, Math.round(adjustedScore)))
 
-    // 10. RELIABILITY ASSESSMENT
+    // Update breakdown for display
+    breakdown.trend = Math.round(technicalScore * 0.6) // Approximate trend portion
+    breakdown.momentum = Math.round(technicalScore * 0.4) // Approximate momentum portion
+    breakdown.proximity = Math.round(priceScore * 0.3) // Approximate proximity portion
+    breakdown.market = Math.round(riskScore * -0.5) // Convert risk to market score
+    breakdown.price = Math.round(priceScore * 0.1) // Small price component
+    breakdown.quality = 0 // Simplified for now
+    breakdown.riskPenalties = Math.max(0, -riskScore) // Convert to positive penalty
+
+    // RELIABILITY ASSESSMENT
     breakdown.reliability = this.assessReliability(stockData, breakdown)
 
-    // 11. Generate final analysis reasoning
+    // Generate final analysis reasoning
     breakdown.analysisReasoning = this.generateAnalysisReasoning(breakdown, stockData)
 
+    // Debug logging for transparency
+    console.log(`📊 ScoreEngine: Price(${priceScore}) + Volume(${breakdown.volume}) + Technical(${technicalScore}) + Risk(${riskScore}) = ${rawScore} → ${breakdown.finalScore}`)
+
     return breakdown
+  }
+
+  /**
+   * PRICE MOVEMENT SCORING - Aligned with eodhd.ts (Max 35 points)
+   */
+  private calculatePriceMovementScore(changePercent: number, strategy: TradingStrategy, breakdown: ScoreBreakdown): number {
+    let score = 0
+    
+    if (strategy === 'technical-momentum') {
+      // Momentum: Reward consistent positive movement with diminishing returns
+      if (changePercent > 0) {
+        if (changePercent >= 20) {
+          score = 35
+          breakdown.signals.push(`Exceptional price movement (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 15) {
+          score = 30
+          breakdown.signals.push(`Excellent price movement (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 10) {
+          score = 25
+          breakdown.signals.push(`Very good price movement (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 7) {
+          score = 20
+          breakdown.signals.push(`Good price movement (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 5) {
+          score = 15
+          breakdown.signals.push(`Decent price movement (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 3) {
+          score = 10
+          breakdown.signals.push(`Moderate price movement (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 1) {
+          score = 5
+          breakdown.signals.push(`Minimal price movement (+${changePercent.toFixed(1)}%)`)
+        } else {
+          score = 2
+          breakdown.signals.push(`Barely positive movement (+${changePercent.toFixed(1)}%)`)
+        }
+      } else {
+        // Penalty for declining stocks
+        if (changePercent <= -5) {
+          score = -15
+          breakdown.warnings.push(`Severe decline (${changePercent.toFixed(1)}%) - high risk`)
+        } else if (changePercent <= -3) {
+          score = -10
+          breakdown.warnings.push(`Moderate decline (${changePercent.toFixed(1)}%) - caution`)
+        } else if (changePercent <= -1) {
+          score = -5
+          breakdown.warnings.push(`Minor decline (${changePercent.toFixed(1)}%) - weak momentum`)
+        } else {
+          score = 0
+          breakdown.warnings.push('Flat price action - no momentum')
+        }
+      }
+    } else {
+      // News momentum: More aggressive thresholds
+      if (changePercent > 0) {
+        if (changePercent >= 25) {
+          score = 35
+          breakdown.signals.push(`Explosive breakout (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 20) {
+          score = 32
+          breakdown.signals.push(`Very strong breakout (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 15) {
+          score = 28
+          breakdown.signals.push(`Strong breakout (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 10) {
+          score = 22
+          breakdown.signals.push(`Good breakout (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 7) {
+          score = 16
+          breakdown.signals.push(`Moderate breakout (+${changePercent.toFixed(1)}%)`)
+        } else if (changePercent >= 5) {
+          score = 10
+          breakdown.signals.push(`Minimal breakout (+${changePercent.toFixed(1)}%)`)
+        } else {
+          score = 3
+          breakdown.warnings.push(`Weak movement for breakout (+${changePercent.toFixed(1)}%)`)
+        }
+      } else {
+        score = -10
+        breakdown.warnings.push(`Declining stock (${changePercent.toFixed(1)}%) - bad for breakouts`)
+      }
+    }
+    
+    return score
+  }
+
+  /**
+   * RISK ASSESSMENT SCORING - Aligned with eodhd.ts (-20 to 0 points)
+   */
+  private calculateRiskScore(stockData: StockData, changePercent: number, currentPrice: number, breakdown: ScoreBreakdown): number {
+    let riskScore = 0
+    
+    // Price range risk (momentum strategy optimized)
+    if (currentPrice <= 1) {
+      riskScore -= 5  // Reduced from -10
+      breakdown.warnings.push('Penny stock risk - very high volatility')
+    } else if (currentPrice <= 2) {
+      riskScore -= 2  // Reduced penalty
+      breakdown.warnings.push('Very low price risk - high volatility')
+    } else if (currentPrice <= 5) {
+      riskScore += 0  // NO PENALTY - momentum sweet spot
+      // No warning for $2-5 stocks in momentum strategy
+    } else if (currentPrice <= 10) {
+      // Sweet spot - no penalty
+    } else if (currentPrice <= 20) {
+      riskScore -= 2
+      breakdown.warnings.push('Moderate price level')
+    } else if (currentPrice > 50) {
+      riskScore -= 5
+      breakdown.warnings.push('High price risk - limited upside potential')
+    }
+    
+    // Market hours risk
+    const currentHour = new Date().getUTCHours() - 5 // ET time
+    if (currentHour >= 9.5 && currentHour < 16 && changePercent < -2) {
+      riskScore -= 8
+      breakdown.warnings.push('Declining during market hours - very risky')
+    }
+    
+    // Momentum risk (momentum strategy optimized - RSI 70-85 is GOOD for momentum)
+    const rsi = this.parseNumber(stockData.rsi || '0')
+    if (rsi > 95) {
+      riskScore -= 5  // Reduced from -15
+      breakdown.warnings.push(`Extremely overbought (RSI: ${rsi.toFixed(1)}) - bubble territory`)
+    } else if (rsi > 90) {
+      riskScore -= 2  // Reduced from -10
+      breakdown.warnings.push(`Very overbought (RSI: ${rsi.toFixed(1)}) - monitor closely`)
+    }
+    // RSI 70-90 gets NO PENALTY - this is momentum territory!
+    
+    // Data quality risk
+    if (stockData.dataQuality?.reliability === 'low') {
+      riskScore -= 5
+      breakdown.warnings.push('Low data reliability - verify manually')
+    }
+    
+    // Cap risk score
+    return Math.max(riskScore, -20)
   }
 
   /**
@@ -186,65 +335,86 @@ export class ProfessionalScoringEngine {
       }
     }
 
-    // MACD Analysis (Max 8 points)
+    // Enhanced MACD Analysis (Max 8 points)
     if (stockData.macd && stockData.macdSignal) {
       const macd = this.parseNumber(stockData.macd)
       const macdSignal = this.parseNumber(stockData.macdSignal)
       
-      if (macd > macdSignal && macd > 0) {
-        score += 8
-        breakdown.signals.push('MACD bullish crossover - momentum confirmation')
-      } else if (macd < macdSignal) {
-        breakdown.warnings.push('MACD bearish - momentum divergence')
+      // Enhanced MACD scoring with trend context (simplified version)
+      const isBullish = macd > macdSignal;
+      const isAboveZero = macd > 0;
+      const separation = Math.abs(macd - macdSignal);
+      
+      if (isBullish && isAboveZero && separation > 0.01) {
+        score += 8; // Strong bullish momentum confirmed
+        breakdown.signals.push(`Strong MACD bullish: ${macd.toFixed(3)} > ${macdSignal.toFixed(3)} above zero`);
+      } else if (isBullish && separation > 0.005) {
+        score += 6; // Bullish momentum
+        breakdown.signals.push(`MACD bullish: ${macd.toFixed(3)} > ${macdSignal.toFixed(3)}`);
+      } else if (!isBullish && separation > 0.01) {
+        score -= 3; // Bearish momentum (penalty)
+        breakdown.warnings.push(`MACD bearish: ${macd.toFixed(3)} < ${macdSignal.toFixed(3)}`);
+      } else {
+        // Neutral MACD - no score change
+        breakdown.signals.push(`MACD neutral: ${macd.toFixed(3)} ≈ ${macdSignal.toFixed(3)}`);
       }
+      
+      // TODO: Integrate full enhanced MACD analysis in future async version
     }
 
     return Math.min(score, 20) // Cap at 20
   }
 
   /**
-   * VOLUME SCORING - Relative volume analysis (Max 20 points)
+   * VOLUME SCORING - Aligned with eodhd.ts weighted system (Max 25 points)
    */
   private calculateVolumeScore(relativeVolume: number, stockData: StockData, strategy: TradingStrategy, breakdown: ScoreBreakdown): number {
     let score = 0
-    const isReliable = stockData.dataQuality?.reliability !== 'low'
-
-    if (strategy === 'technical-momentum') {
-      // Technical momentum: More conservative thresholds
-      if (relativeVolume >= 3 && isReliable) {
-        score += 20
-        breakdown.signals.push(`Exceptional relative volume (${relativeVolume.toFixed(1)}x) - very strong interest`)
+    
+    // Only score if we have real relative volume data (> 0)
+    if (relativeVolume > 0) {
+      // Diminishing returns for extreme relative volume (aligned with eodhd.ts)
+      if (relativeVolume >= 20) {
+        score = 25
+        breakdown.signals.push(`Exceptional volume (${relativeVolume.toFixed(1)}x) - massive interest`)
+      } else if (relativeVolume >= 10) {
+        score = 22
+        breakdown.signals.push(`Very high volume (${relativeVolume.toFixed(1)}x) - strong interest`)
+      } else if (relativeVolume >= 5) {
+        score = 18
+        breakdown.signals.push(`High volume (${relativeVolume.toFixed(1)}x) - good interest`)
+      } else if (relativeVolume >= 3) {
+        score = 14
+        breakdown.signals.push(`Good volume (${relativeVolume.toFixed(1)}x) - above average`)
       } else if (relativeVolume >= 2) {
-        score += 15
-        breakdown.signals.push(`High relative volume (${relativeVolume.toFixed(1)}x) - strong interest`)
+        score = 10
+        breakdown.signals.push(`Above average volume (${relativeVolume.toFixed(1)}x)`)
       } else if (relativeVolume >= 1.5) {
-        score += 10
-        breakdown.signals.push(`Above average volume (${relativeVolume.toFixed(1)}x) - meets criteria`)
-      } else if (relativeVolume < 1.5 && relativeVolume > 0) {
-        breakdown.warnings.push(`Below 1.5x relative volume (${relativeVolume.toFixed(1)}x) - weak interest`)
+        score = 6
+        breakdown.signals.push(`Meets minimum volume (${relativeVolume.toFixed(1)}x)`)
+      } else if (relativeVolume >= 1) {
+        score = 3
+        breakdown.warnings.push(`Average volume (${relativeVolume.toFixed(1)}x) - no edge`)
+      } else if (relativeVolume >= 0.5) {
+        score = 0
+        breakdown.warnings.push(`Below average volume (${relativeVolume.toFixed(1)}x)`)
+      } else {
+        score = -5
+        breakdown.warnings.push(`Very low volume (${relativeVolume.toFixed(1)}x) - risky`)
       }
     } else {
-      // News momentum: Higher thresholds required
-      if (relativeVolume >= 10 && isReliable) {
-        score += 20
-        breakdown.signals.push(`Massive volume spike (${relativeVolume.toFixed(1)}x) - news momentum`)
-      } else if (relativeVolume >= 5) {
-        score += 15
-        breakdown.signals.push(`Very high volume (${relativeVolume.toFixed(1)}x) - strong news interest`)
-      } else if (relativeVolume >= 3) {
-        score += 8
-        breakdown.signals.push(`High volume (${relativeVolume.toFixed(1)}x) - decent news interest`)
-      } else if (relativeVolume < 5) {
-        breakdown.warnings.push(`Insufficient volume for news momentum (${relativeVolume.toFixed(1)}x)`)
-      }
+      // NO REAL VOLUME DATA: Neutral score (don't penalize, don't reward)
+      score = 0
+      breakdown.warnings.push('No real relative volume data - volume component neutral')
     }
 
-    if (!isReliable) {
-      breakdown.warnings.push('Volume data estimated - verify manually')
-      score *= 0.7 // Reduce score for unreliable volume
+    // Data quality adjustment
+    if (stockData.dataQuality?.reliability === 'low') {
+      score *= 0.7 // Reduce score for unreliable data
+      breakdown.warnings.push('Volume data reliability low - verify manually')
     }
 
-    return Math.min(score, 20) // Cap at 20
+    return Math.round(score)
   }
 
   /**

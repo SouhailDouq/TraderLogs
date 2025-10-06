@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eodhd } from '@/utils/eodhd';
+import { eodhd, calculateScore } from '@/utils/eodhd';
 import { momentumValidator } from '@/utils/momentumValidator';
 import { scoringEngine, type StockData } from '@/utils/scoringEngine';
+import { computePredictiveSignals } from '@/utils/predictiveSignals';
 
 // Create a comprehensive EODHD client mock for enhanced methods not yet implemented
 const eodhdEnhanced = {
@@ -139,9 +140,15 @@ const eodhdEnhanced = {
     }
   },
   getStockNews: async (symbol: string, limit: number) => {
-    // Use REAL news data from EODHD instead of dangerous mock data
+    // Use REAL news data from EODHD API
     try {
-      return await eodhd.getStockNews(symbol, limit);
+      const news = await eodhd.getStockNews(symbol, limit);
+      if (news.length > 0) {
+        console.log(`📰 Got ${news.length} real news articles for ${symbol}`);
+      } else {
+        console.log(`📰 No news articles available for ${symbol}`);
+      }
+      return news;
     } catch (error) {
       console.error(`❌ REAL news data failed for ${symbol}:`, error);
       // Return empty array instead of fake news - no mock data for trading decisions!
@@ -208,6 +215,17 @@ interface PremarketStock {
     macd: number | null
     macdSignal: number | null
     histogram: number | null
+  }
+  predictiveSetup?: {
+    setupScore: number
+    notes: string[]
+    flags: {
+      tightBase: boolean
+      rsUptrend: boolean
+      nearPivot: boolean
+      dryUpVolume: boolean
+      atrContracting: boolean
+    }
   }
 }
 
@@ -298,6 +316,8 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
  */
 async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 'momentum' | 'breakout' = 'momentum'): Promise<{
   realTime: any;
+  currentVolume: number;
+  avgVolume: number;
   relativeVolume: number;
   gapAnalysis: { gapPercent: number; isSignificant: boolean; urgencyScore: number };
   momentumCriteria?: { isNear20DayHigh: boolean; isAboveSMAs: boolean; momentumScore: number; highProximity: number; smaAlignment: string };
@@ -318,9 +338,28 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
     const previousClose = realTimeData.previousClose || currentPrice;
     
     // 1. Calculate real relative volume using historical data
-    // 1. Calculate TRUE intraday relative volume
     const avgVolume = await eodhd.getHistoricalAverageVolume(symbol, 30);
-    const currentVolume = realTimeData.volume || 0;
+
+    // Use screen/live data first; if tiny or zero, fall back to cumulative intraday sum
+    let currentVolume = Number(realTimeData.volume) || 0;
+    if (currentVolume <= 0 || currentVolume < 10000) {
+      try {
+        const intraday = await eodhd.getIntradayData(symbol, '1m');
+        const now = new Date();
+        const etNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const todayET = etNow.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+        let sum = 0;
+        for (const rec of intraday) {
+          const recET = new Date(rec.datetime).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+          if (recET === todayET) sum += Number(rec.volume) || 0;
+        }
+        if (sum > currentVolume) currentVolume = sum;
+        console.log(`📊 Volume sources (${symbol}): live=${(realTimeData.volume||0).toLocaleString()} | intradaySum=${sum.toLocaleString()}`);
+      } catch {
+        // keep currentVolume
+      }
+    }
+    
     const relativeVolume = avgVolume > 0 ? currentVolume / avgVolume : 0;
     console.log(`📊 ${symbol}: RelVol ${relativeVolume.toFixed(2)}x (Current: ${currentVolume.toLocaleString()}, Avg: ${avgVolume.toLocaleString()})`);
     
@@ -352,6 +391,8 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
     
     return {
       realTime: realTimeData,
+      currentVolume,
+      avgVolume,
       relativeVolume,
       gapAnalysis,
       momentumCriteria,
@@ -706,13 +747,13 @@ export async function POST(request: NextRequest) {
           return null;
         }
         
-        // CRITICAL: Verify data source and freshness for accurate scoring
+        const { relativeVolume, gapAnalysis, momentumCriteria, timeUrgency, currentVolume, avgVolume } = enhancedData;
+
+        // CRITICAL: Verify data source and freshness for accurate scoring (after we have enhanced data)
         const dataAge = Date.now() - (stock.timestamp * 1000);
         const isLiveData = dataAge < 60000; // Less than 1 minute old
         const dataSource = isLiveData ? '🔴 LIVE WebSocket' : '📡 REST API';
-        console.log(`🔴 SCORING ${symbol}: Using ${dataSource} data (${Math.round(dataAge/1000)}s old) - Price: $${stock.close}, Vol: ${stock.volume?.toLocaleString()}, Change: ${stock.change_p?.toFixed(2)}%`);
-        
-        const { relativeVolume, gapAnalysis, momentumCriteria, timeUrgency } = enhancedData;
+        console.log(`🔴 SCORING ${symbol}: Using ${dataSource} data (${Math.round(dataAge/1000)}s old) - Price: $${stock.close}, Vol: ${currentVolume.toLocaleString()}, Change: ${stock.change_p?.toFixed(2)}%`);
         
         // Get technical data for MACD analysis
         const technicalsData = await eodhd.getTechnicals(symbol);
@@ -733,7 +774,7 @@ export async function POST(request: NextRequest) {
           const momentumData = {
             symbol,
             currentPrice: stock.close || stock.price || 0,
-            volume: stock.volume || 0,
+            volume: currentVolume || 0,
             relativeVolume: relativeVolume,
             changePercent: stock.change_p || 0,
             technicalData: technicals ? {
@@ -804,7 +845,7 @@ export async function POST(request: NextRequest) {
         const scoringData = {
           realRelativeVolume: relativeVolume,
           gapPercent: gapAnalysis.gapPercent,
-          avgVolume: (stock.volume || 0) / (relativeVolume || 1),
+          avgVolume: avgVolume || ((currentVolume || 0) / (relativeVolume || 1)),
           isPremarket: eodhdEnhanced.getMarketHoursStatus() === 'premarket'
         };
         
@@ -813,7 +854,7 @@ export async function POST(request: NextRequest) {
           symbol: stock.code.replace('.US', ''),
           price: stock.close, // LIVE WebSocket price
           changePercent: stock.change_p, // LIVE WebSocket change
-          volume: stock.volume, // LIVE WebSocket volume (enhanced with daily data)
+          volume: currentVolume, // Daily cumulative volume used for scoring
           relVolume: relativeVolume, // Calculated from LIVE data
           sma20: technicals.SMA_20 || 0,
           sma50: technicals.SMA_50 || 0,
@@ -823,38 +864,99 @@ export async function POST(request: NextRequest) {
           week52High: stock.high || stock.close
         };
         
-        const scoreBreakdown = scoringEngine.calculateScore(stockDataForScoring, strategy);
-        const score = scoreBreakdown.finalScore;
-        const analysisReasoning = scoreBreakdown.analysisReasoning;
-        const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : 'Avoid';
+        // Use the FIXED scoring system from eodhd.ts (not the old scoringEngine)
+        const baseScore = calculateScore(stock, technicals, strategy === 'technical-momentum' ? 'momentum' : 'breakout', scoringData);
+
+        // Predictive setup signals (near-term 1-5 day breakout readiness) with timeout protection
+        let predictiveSetup: PremarketStock['predictiveSetup'] | undefined = undefined;
+        const predictiveEligible =
+          relativeVolume >= Math.max(1.5, filters.minRelativeVolume) &&
+          (
+            (momentumCriteria?.isAboveSMAs) ||
+            ((technicals.SMA_20 || 0) > 0 && (technicals.SMA_50 || 0) > 0 && stock.close > (technicals.SMA_20 || 0) && stock.close > (technicals.SMA_50 || 0))
+          );
+        if (predictiveEligible) {
+          try {
+            const pred = await Promise.race([
+              computePredictiveSignals(symbol),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('predictive timeout')), 1500))
+            ]) as any;
+            if (pred && typeof pred.setupScore === 'number') {
+              predictiveSetup = {
+                setupScore: pred.setupScore,
+                notes: pred.notes || [],
+                flags: pred.flags || { tightBase: false, rsUptrend: false, nearPivot: false, dryUpVolume: false, atrContracting: false }
+              };
+            }
+          } catch (_) {
+            // Ignore predictive timeout
+          }
+        }
+
+        // Modest, capped boost from predictive readiness (max +8)
+        const predictiveBoost = predictiveSetup ? Math.min(8, Math.round(predictiveSetup.setupScore * 0.3)) : 0;
+        const score = Math.min(100, Math.max(0, baseScore + predictiveBoost));
+        
+        // Create analysis reasoning based on the enhanced data (+ predictive)
+        const analysisReasoning = [
+          `Relative Volume: ${relativeVolume.toFixed(1)}x (${relativeVolume >= 1.5 ? 'Good' : 'Low'})`,
+          `Gap: ${gapAnalysis.gapPercent.toFixed(1)}% (${gapAnalysis.isSignificant ? 'Significant' : 'Small'})`,
+          `Momentum: ${momentumCriteria?.momentumScore || 0}/13 criteria met`,
+          `Technical: ${technicalsData ? 'Available' : 'Limited data'}`,
+          ...(predictiveSetup ? [
+            `Setup Readiness: ${predictiveSetup.setupScore}/25 (${predictiveSetup.flags.tightBase ? 'Tight base' : 'Loose'}, ${predictiveSetup.flags.nearPivot ? 'Near pivot' : 'Far'}, ${predictiveSetup.flags.rsUptrend ? 'RS rising' : 'RS flat'})`
+          ] : [])
+        ];
+
+        // Upgrade/downgrade quality tier based on predictive readiness
+        if (predictiveSetup && predictiveSetup.setupScore >= 18 && qualityTier !== 'premium') {
+          qualityTier = 'premium';
+        }
+        
+        // UPDATED: Realistic signal thresholds aligned with new weighted scoring (+ predictive boost)
+        let signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid';
+        if (strategy === 'momentum') {
+          if (score >= 70) signal = 'Strong';    // Top 10% - high confidence
+          else if (score >= 50) signal = 'Moderate'; // Top 30% - good with confirmation
+          else if (score >= 30) signal = 'Weak';     // Middle tier - watch list
+          else signal = 'Avoid';                     // Bottom tier - skip
+        } else {
+          // Breakout strategy - higher thresholds
+          if (score >= 75) signal = 'Strong';    // Top 5% - explosive potential
+          else if (score >= 55) signal = 'Moderate'; // Top 20% - solid breakout
+          else if (score >= 35) signal = 'Weak';     // Middle tier - marginal
+          else signal = 'Avoid';                     // Bottom tier - insufficient
+        }
 
         console.log(`🔴 LIVE SCORE ${symbol}: ${score}/100 (${signal}) ${dataSource} - Price: $${stock.close}, Change: ${stock.change_p?.toFixed(2)}%, Gap: ${gapAnalysis.gapPercent.toFixed(1)}%, RelVol: ${relativeVolume.toFixed(1)}x`);
 
-        // Get news data with timeout protection
+        // Get news data with timeout protection (gate to premium/strong to reduce duplicates and latency)
         let newsData = undefined;
-        try {
-          const newsPromise = eodhdEnhanced.getStockNews(symbol, 3);
-          const newsTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('news timeout')), 2000));
-          const news = await Promise.race([newsPromise, newsTimeout]) as any[];
+        if (qualityTier === 'premium' || signal === 'Strong') {
+          try {
+            const newsPromise = eodhdEnhanced.getStockNews(symbol, 3);
+            const newsTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('news timeout')), 2000));
+            const news = await Promise.race([newsPromise, newsTimeout]) as any[];
 
-          if (news && news.length > 0) {
-            const recentNews = news.filter(article => {
-              const articleDate = new Date(article.date);
-              const hoursSinceArticle = (Date.now() - articleDate.getTime()) / (1000 * 60 * 60);
-              return hoursSinceArticle <= 24;
-            });
+            if (news && news.length > 0) {
+              const recentNews = news.filter(article => {
+                const articleDate = new Date(article.date);
+                const hoursSinceArticle = (Date.now() - articleDate.getTime()) / (1000 * 60 * 60);
+                return hoursSinceArticle <= 24;
+              });
 
-            if (recentNews.length > 0) {
-              newsData = {
-                count: news.length,
-                sentiment: 0,
-                topCatalyst: 'General',
-                recentCount: recentNews.length
-              };
+              if (recentNews.length > 0) {
+                newsData = {
+                  count: news.length,
+                  sentiment: 0,
+                  topCatalyst: 'General',
+                  recentCount: recentNews.length
+                };
+              }
             }
+          } catch (error) {
+            console.log(`${symbol}: Skipping news due to timeout/error`);
           }
-        } catch (error) {
-          console.log(`${symbol}: Skipping news due to timeout/error`);
         }
 
         return {
@@ -862,7 +964,7 @@ export async function POST(request: NextRequest) {
           price: stock.close,
           change: stock.change,
           changePercent: stock.change_p,
-          volume: stock.volume,
+          volume: currentVolume,
           relativeVolume: relativeVolume,
           score,
           signal,
@@ -891,6 +993,7 @@ export async function POST(request: NextRequest) {
             macdSignal: technicals.MACD_Signal || null,
             histogram: technicals.MACD_Histogram || null
           },
+          predictiveSetup,
           qualityTier,
           warnings,
           analysisReasoning

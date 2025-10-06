@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { eodhd } from '@/utils/eodhd'
-import { apiCache } from '@/utils/apiCache'
-import { rateLimiter } from '@/utils/rateLimiter'
-import { formatMarketCap } from '@/utils/eodhd';
+import { NextRequest, NextResponse } from 'next/server';
+import { eodhd, calculateScore } from '@/utils/eodhd';
 import { scoringEngine, type StockData as ScoringStockData } from '@/utils/scoringEngine';
+import { rateLimiter } from '@/utils/rateLimiter';
+import { apiCache } from '@/utils/apiCache';
+import { formatMarketCap } from '@/utils/eodhd';
+import { computePredictiveSignals } from '@/utils/predictiveSignals';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -19,18 +20,10 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Check cache first (unless force refresh is requested)
+    // ALWAYS use live data for Trade Analyzer - no caching for trading decisions
     const cacheKey = `stock_data_${symbol.toUpperCase()}`
-    if (!forceRefresh) {
-      const cached = apiCache.get(cacheKey)
-      if (cached) {
-        console.log(`Using cached data for ${symbol}`)
-        return NextResponse.json(cached)
-      }
-    } else {
-      console.log(`Force refresh requested for ${symbol} - bypassing cache`)
-      apiCache.delete(cacheKey)
-    }
+    console.log(`🔴 LIVE DATA REQUEST for ${symbol} - bypassing cache for trading analysis`)
+    apiCache.delete(cacheKey) // Always clear cache for fresh data
 
     // Check rate limit
     if (!rateLimiter.canMakeCall()) {
@@ -44,14 +37,16 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log(`Fetching stock data for ${symbol}...`)
-    
     // Record API call
     rateLimiter.recordCall()
-    
-    // Get real-time data from EODHD
+
+    // Get real-time data from EODHD with error handling
+    console.log(`Fetching stock data for ${symbol}...`)
     const [realTimeData, fundamentals, technicals] = await Promise.all([
-      eodhd.getRealTimeQuote(symbol.toUpperCase()),
+      eodhd.getRealTimeQuote(symbol.toUpperCase()).catch((error) => {
+        console.error(`Error fetching real-time data for ${symbol}:`, error)
+        return null
+      }),
       eodhd.getFundamentals(symbol.toUpperCase()).catch(() => null),
       eodhd.getTechnicals(symbol.toUpperCase()).catch(() => null)
     ])
@@ -115,16 +110,57 @@ You can still analyze this stock by entering data manually.`,
       week52High: fundData?.['52WeekHigh'] || techData?.['52WeekHigh'] || realTimeData.close
     };
 
-    const scoreBreakdown = scoringEngine.calculateScore(stockDataForScoring, 'technical-momentum');
-    const score = scoreBreakdown.finalScore;
-    const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : 'Avoid';
-    const analysisReasoning = scoreBreakdown.analysisReasoning;
+    // Use the FIXED scoring system from eodhd.ts (same as premarket scanner)
+    const scoringEnhancedData = {
+      realRelativeVolume: relativeVolume,
+      gapPercent: realTimeData.change_p || 0,
+      avgVolume: avgVolume,
+      isPremarket: false // Trade analyzer is for regular hours
+    };
     
-    // Convert to expected format for trade analyzer
+    const baseScore = calculateScore(realTimeData, techData, 'momentum', scoringEnhancedData);
+
+    // Predictive setup signals for next 1-5 days with timeout protection
+    let predictiveSetup: { setupScore: number; notes: string[]; flags: any } | undefined = undefined;
+    try {
+      const pred = await Promise.race([
+        computePredictiveSignals(symbol.toUpperCase()),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('predictive timeout')), 1500))
+      ]) as any;
+      if (pred && typeof pred.setupScore === 'number') {
+        predictiveSetup = {
+          setupScore: pred.setupScore,
+          notes: pred.notes || [],
+          flags: pred.flags || { tightBase: false, rsUptrend: false, nearPivot: false, dryUpVolume: false, atrContracting: false }
+        };
+      }
+    } catch (_) {
+      // ignore predictive timeout
+    }
+
+    const predictiveBoost = predictiveSetup ? Math.min(8, Math.round(predictiveSetup.setupScore * 0.3)) : 0;
+    const score = Math.min(100, Math.max(0, baseScore + predictiveBoost));
+    const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : 'Avoid';
+    
+    // Create analysis reasoning based on the enhanced data
+    const analysisReasoning = [
+      `Relative Volume: ${relativeVolume >= 1.5 ? 'PASS' : 'FAIL'} (Has: ${relativeVolume.toFixed(2)}x / Needs: > 1.5x)`,
+      `Trend Alignment: ${score >= 50 ? 'PASS' : 'FAIL'} (Score: ${score}/100 / Needs: > 50)`,
+      `Momentum Strength: ${(techData.RSI_14 || 0) >= 40 && (techData.RSI_14 || 0) <= 90 ? 'PASS' : 'FAIL'} (RSI is ${techData.RSI_14?.toFixed(1) || 'N/A'})`,
+      `Risk Assessment: ${score >= 30 ? 'PASS' : 'FAIL'} (Overall score indicates ${signal} setup)`,
+      ...(predictiveSetup ? [
+        `Setup Readiness: ${predictiveSetup.setupScore}/25 (${predictiveSetup.flags.tightBase ? 'Tight base' : 'Loose'}, ${predictiveSetup.flags.nearPivot ? 'Near pivot' : 'Far'}, ${predictiveSetup.flags.rsUptrend ? 'RS rising' : 'RS flat'})`
+      ] : [])
+    ];
+    
+    // Convert to expected format for trade analyzer with null safety
+    const change = realTimeData.change || 0;
+    const changePercent = realTimeData.change_p || 0;
+    
     const response = {
-      symbol: realTimeData.code.replace('.US', ''),
-      price: realTimeData.close,
-      change: `${realTimeData.change >= 0 ? '+' : ''}${realTimeData.change.toFixed(2)} (${realTimeData.change_p >= 0 ? '+' : ''}${realTimeData.change_p.toFixed(2)}%)`,
+      symbol: realTimeData.code?.replace('.US', '') || symbol,
+      price: realTimeData.close || 0,
+      change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`,
       volume: realTimeData.volume ? realTimeData.volume.toLocaleString() : 'N/A',
       avgVolume: avgVolume ? avgVolume.toLocaleString() : 'N/A',
       marketCap: fundData.MarketCapitalization ? formatMarketCap(fundData.MarketCapitalization) : 'Unknown',
@@ -170,6 +206,7 @@ You can still analyze this stock by entering data manually.`,
       signal: signal,
       analysisReasoning: analysisReasoning,
       strategy: 'breakout',
+      predictiveSetup,
       
       // Enhanced scoring data for consistency
       enhancedScoring: {

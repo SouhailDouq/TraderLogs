@@ -303,7 +303,9 @@ async function calculateMACD(symbol: string): Promise<{macd: string, signal: str
       return null
     }
 
-    const prices = data.chart.result[0].indicators.quote[0].close.filter((p: number) => p !== null)
+    const result = data?.chart?.result?.[0]
+    const quote = result?.indicators?.quote?.[0]
+    const prices = Array.isArray(quote?.close) ? quote!.close.filter((p: number) => p !== null) : []
     
     if (prices.length < 26) {
       return null
@@ -471,9 +473,13 @@ export async function fetchStockDataYahoo(symbol: string): Promise<AlphaVantageS
       throw new Error('Invalid symbol')
     }
 
-    const result = data.chart.result[0]
-    const meta = result.meta
-    const quote = result.indicators.quote[0]
+    const result = data?.chart?.result?.[0]
+    if (!result) {
+      throw new Error('Invalid Yahoo chart structure')
+    }
+    const meta = result.meta || {}
+    const indicators = result.indicators || {}
+    const quote = Array.isArray(indicators.quote) ? indicators.quote[0] : undefined
     
     const currentPrice = meta.regularMarketPrice || 0
     const previousClose = meta.previousClose || currentPrice
@@ -481,8 +487,8 @@ export async function fetchStockDataYahoo(symbol: string): Promise<AlphaVantageS
     const changePercent = ((change / previousClose) * 100).toFixed(2)
     
     // Get latest volume
-    const volumes = quote.volume.filter((v: number) => v !== null)
-    const latestVolume = volumes[volumes.length - 1] || 0
+    const volumes = quote && Array.isArray(quote.volume) ? quote.volume.filter((v: number) => v !== null) : []
+    const latestVolume = volumes.length > 0 ? volumes[volumes.length - 1] : 0
 
     // Calculate real SMAs from available data
     const smaData = await calculateRealSMAs(symbol, currentPrice)
