@@ -29,8 +29,8 @@ export default function BacktestRunner() {
   const [error, setError] = useState<string | null>(null)
 
   const [config, setConfig] = useState({
-    startDate: '2024-01-01',
-    endDate: '2024-06-30',
+    startDate: '2024-07-01',
+    endDate: '2024-12-31',
     initialCapital: 10000,
     positionSize: 2000,
     profitTarget: 15,

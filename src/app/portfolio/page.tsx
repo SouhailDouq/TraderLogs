@@ -24,10 +24,19 @@ export default function MonitorPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [momentumAlerts, setMomentumAlerts] = useState<any[]>([]);
   const [marketStatus, setMarketStatus] = useState<'premarket' | 'open' | 'closed'>('closed');
+  const [previousAlertStates, setPreviousAlertStates] = useState<{ [symbol: string]: string }>({});
+  const [newCriticalAlerts, setNewCriticalAlerts] = useState<any[]>([]);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
 
   // Fix hydration issue by ensuring component is mounted before showing time
   useEffect(() => {
     setIsMounted(true);
+    
+    // Check notification permission
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
     
     // Check market status
     const checkMarketStatus = () => {
@@ -50,6 +59,26 @@ export default function MonitorPage() {
     const statusInterval = setInterval(checkMarketStatus, 60000);
     return () => clearInterval(statusInterval);
   }, []);
+
+  // Handle notification permission requests
+  useEffect(() => {
+    if (notificationsEnabled && typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(permission => {
+          setNotificationPermission(permission);
+          if (permission === 'granted') {
+            console.log('✅ Browser notifications enabled!');
+          } else if (permission === 'denied') {
+            console.warn('❌ Browser notifications blocked. Enable in browser settings.');
+            setNotificationsEnabled(false);
+          }
+        });
+      } else if (Notification.permission === 'denied') {
+        console.warn('❌ Browser notifications are blocked. Enable in browser settings.');
+        setNotificationsEnabled(false);
+      }
+    }
+  }, [notificationsEnabled]);
 
   // Auto-refresh every 30 seconds and fetch real market data
   useEffect(() => {
@@ -123,6 +152,8 @@ export default function MonitorPage() {
   // Generate momentum alerts based on market data
   const generateMomentumAlerts = (marketDataMap: { [symbol: string]: UnifiedStockData }, openTrades: any[]) => {
     const alerts: any[] = [];
+    const currentStates: { [symbol: string]: string } = {};
+    const newCriticals: any[] = [];
     
     openTrades.forEach(trade => {
       const marketInfo = marketDataMap[trade.symbol];
@@ -132,6 +163,76 @@ export default function MonitorPage() {
       const entryPrice = trade.price;
       const changePercent = ((currentPrice - entryPrice) / entryPrice) * 100;
       
+      // Determine current state
+      let currentState = 'safe';
+      if (changePercent <= -10) {
+        currentState = 'critical';
+      } else if (changePercent <= -5) {
+        currentState = 'warning';
+      } else if (changePercent >= 15) {
+        currentState = 'target_aggressive';
+      } else if (changePercent >= 8) {
+        currentState = 'target_moderate';
+      } else if (changePercent >= 3) {
+        currentState = 'target_conservative';
+      }
+      
+      currentStates[trade.symbol] = currentState;
+      
+      // Check if this is a NEW critical alert (just crossed -10%)
+      const previousState = previousAlertStates[trade.symbol];
+      if (currentState === 'critical' && previousState !== 'critical') {
+        newCriticals.push({
+          symbol: trade.symbol,
+          changePercent: changePercent.toFixed(2),
+          currentPrice: currentPrice.toFixed(2),
+          entryPrice: entryPrice.toFixed(2),
+          timestamp: new Date()
+        });
+        
+        // Send browser notification for NEW critical alert
+        if (notificationsEnabled && typeof window !== 'undefined' && 'Notification' in window) {
+          if (Notification.permission === 'granted') {
+            new Notification(`🚨 CRITICAL: ${trade.symbol}`, {
+              body: `Just crossed -10% threshold!\nNow at ${changePercent.toFixed(2)}% (${currentPrice.toFixed(2)})`,
+              icon: '/icon-192x192.png',
+              badge: '/icon-192x192.png',
+              tag: trade.symbol,
+              requireInteraction: true,
+              silent: false
+            });
+          }
+        }
+        
+        // Play alarm sound for NEW critical alert
+        if (typeof window !== 'undefined') {
+          // Try to play custom alert sound, fallback to system beep
+          try {
+            const audio = new Audio('/sounds/alert.mp3');
+            audio.play().catch(() => {
+              // Fallback: Use Web Audio API to create a beep sound
+              const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const oscillator = audioContext.createOscillator();
+              const gainNode = audioContext.createGain();
+              
+              oscillator.connect(gainNode);
+              gainNode.connect(audioContext.destination);
+              
+              oscillator.frequency.value = 800; // Frequency in Hz
+              oscillator.type = 'sine';
+              
+              gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+              gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+              
+              oscillator.start(audioContext.currentTime);
+              oscillator.stop(audioContext.currentTime + 0.5);
+            });
+          } catch (e) {
+            console.log('Audio play failed:', e);
+          }
+        }
+      }
+      
       // Momentum target alerts (3%, 8%, 15%)
       if (changePercent >= 15) {
         alerts.push({
@@ -140,7 +241,8 @@ export default function MonitorPage() {
           symbol: trade.symbol,
           message: `🎯 ${trade.symbol} hit 15% target! Consider taking profits.`,
           changePercent: changePercent.toFixed(2),
-          priority: 'high'
+          priority: 'high',
+          isNew: previousState !== 'target_aggressive'
         });
       } else if (changePercent >= 8) {
         alerts.push({
@@ -149,7 +251,8 @@ export default function MonitorPage() {
           symbol: trade.symbol,
           message: `📈 ${trade.symbol} hit 8% target! Momentum building.`,
           changePercent: changePercent.toFixed(2),
-          priority: 'medium'
+          priority: 'medium',
+          isNew: previousState !== 'target_moderate'
         });
       } else if (changePercent >= 3) {
         alerts.push({
@@ -158,7 +261,8 @@ export default function MonitorPage() {
           symbol: trade.symbol,
           message: `✅ ${trade.symbol} hit 3% target! Early momentum confirmed.`,
           changePercent: changePercent.toFixed(2),
-          priority: 'low'
+          priority: 'low',
+          isNew: previousState !== 'target_conservative'
         });
       }
       
@@ -169,7 +273,8 @@ export default function MonitorPage() {
           symbol: trade.symbol,
           message: `⚠️ ${trade.symbol} down ${Math.abs(changePercent).toFixed(2)}%! Consider exit strategy.`,
           changePercent: changePercent.toFixed(2),
-          priority: 'high'
+          priority: 'high',
+          isNew: previousState !== 'critical'
         });
       } else if (changePercent <= -5) {
         alerts.push({
@@ -177,7 +282,8 @@ export default function MonitorPage() {
           symbol: trade.symbol,
           message: `📉 ${trade.symbol} down ${Math.abs(changePercent).toFixed(2)}%. Monitor closely.`,
           changePercent: changePercent.toFixed(2),
-          priority: 'medium'
+          priority: 'medium',
+          isNew: previousState !== 'warning'
         });
       }
       
@@ -187,12 +293,15 @@ export default function MonitorPage() {
           type: 'volume_spike',
           symbol: trade.symbol,
           message: `🔥 ${trade.symbol} high volume detected! ${(marketInfo.volume / 1000000).toFixed(1)}M shares.`,
-          priority: 'medium'
+          priority: 'medium',
+          isNew: false
         });
       }
     });
     
     setMomentumAlerts(alerts);
+    setPreviousAlertStates(currentStates);
+    setNewCriticalAlerts(newCriticals);
   };
 
   // Calculate portfolio metrics from open positions with real market data
@@ -369,6 +478,32 @@ export default function MonitorPage() {
               </div>
             </div>
             <div className="flex items-center gap-4">
+              {/* Notification Toggle */}
+              <button
+                onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  notificationsEnabled
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/40'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+                title={
+                  notificationPermission === 'denied' 
+                    ? 'Notifications blocked - Enable in browser settings' 
+                    : notificationsEnabled 
+                    ? 'Notifications enabled' 
+                    : 'Click to enable notifications'
+                }
+              >
+                {notificationsEnabled ? '🔔' : '🔕'}
+                <span className="hidden sm:inline">
+                  {notificationPermission === 'denied' 
+                    ? 'Blocked' 
+                    : notificationsEnabled 
+                    ? 'Notifications ON' 
+                    : 'Notifications OFF'}
+                </span>
+              </button>
+              
               {marketDataLoading && (
                 <div className="flex items-center gap-2">
                   <div className="animate-spin w-4 h-4 border-2 border-slate-500 border-t-transparent rounded-full"></div>
@@ -388,6 +523,81 @@ export default function MonitorPage() {
             </div>
           </div>
         </div>
+
+        {/* NEW CRITICAL ALERTS - Prominent notification */}
+        {newCriticalAlerts.length > 0 && (
+          <div className="mb-8">
+            <div className={`rounded-2xl shadow-2xl border-4 p-8 transition-all duration-300 backdrop-blur-sm animate-pulse ${
+              isDarkMode ? 'bg-red-900/90 border-red-500' : 'bg-red-50/90 border-red-500'
+            }`}>
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-600 to-red-700 flex items-center justify-center animate-bounce">
+                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className={`text-3xl font-black mb-2 ${
+                    isDarkMode ? 'text-red-100' : 'text-red-900'
+                  }`}>
+                    🚨 NEW CRITICAL ALERT!
+                  </h2>
+                  <p className={`text-lg font-semibold ${
+                    isDarkMode ? 'text-red-200' : 'text-red-700'
+                  }`}>
+                    {newCriticalAlerts.length} stock{newCriticalAlerts.length > 1 ? 's' : ''} just crossed -10% threshold
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-4">
+                {newCriticalAlerts.map((alert, index) => (
+                  <div
+                    key={index}
+                    className={`p-6 rounded-2xl border-2 transition-all duration-300 ${
+                      isDarkMode 
+                        ? 'bg-red-800/50 border-red-400' 
+                        : 'bg-white border-red-400'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className={`text-2xl font-black mb-1 ${
+                          isDarkMode ? 'text-red-100' : 'text-red-900'
+                        }`}>
+                          {alert.symbol}
+                        </h3>
+                        <p className={`text-sm font-medium ${
+                          isDarkMode ? 'text-red-300' : 'text-red-700'
+                        }`}>
+                          Just went critical at {format(alert.timestamp, 'HH:mm:ss')}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-3xl font-black text-red-600 mb-1">
+                          {alert.changePercent}%
+                        </div>
+                        <div className={`text-xs ${
+                          isDarkMode ? 'text-red-300' : 'text-red-600'
+                        }`}>
+                          ${alert.currentPrice} (entry: ${alert.entryPrice})
+                        </div>
+                      </div>
+                    </div>
+                    <div className={`p-4 rounded-xl ${
+                      isDarkMode ? 'bg-red-700/50' : 'bg-red-100'
+                    }`}>
+                      <p className={`text-sm font-semibold ${
+                        isDarkMode ? 'text-red-100' : 'text-red-800'
+                      }`}>
+                        ⚠️ This stock just crossed the -10% critical threshold. Consider reviewing your exit strategy.
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Momentum Alerts */}
         {momentumAlerts.length > 0 && (
@@ -418,13 +628,20 @@ export default function MonitorPage() {
                     }`}
                   >
                     <div className="flex justify-between items-start">
-                      <p className={`text-sm font-medium ${
-                        alert.priority === 'high' ? 'text-red-800' :
-                        alert.priority === 'medium' ? 'text-blue-800' :
-                        'text-green-800'
-                      }`}>
-                        {alert.message}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className={`text-sm font-medium ${
+                          alert.priority === 'high' ? 'text-red-800 dark:text-red-200' :
+                          alert.priority === 'medium' ? 'text-blue-800 dark:text-blue-200' :
+                          'text-green-800 dark:text-green-200'
+                        }`}>
+                          {alert.message}
+                        </p>
+                        {alert.isNew && (
+                          <span className="px-2 py-0.5 text-xs font-bold bg-yellow-400 text-yellow-900 rounded-full animate-pulse">
+                            NEW
+                          </span>
+                        )}
+                      </div>
                       {alert.changePercent && (
                         <span className={`text-xs font-bold ${
                           parseFloat(alert.changePercent) >= 0 ? 'text-green-600' : 'text-red-600'

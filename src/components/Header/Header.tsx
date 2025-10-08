@@ -10,8 +10,8 @@ const workflowSteps = [
   { id: 'premarket', title: 'Premarket', path: '/premarket-scanner', icon: '🌅' },
   { id: 'research', title: 'Research', path: '/trade-analyzer', icon: '📊' },
   { id: 'risk', title: 'Risk', path: '/risk-management', icon: '🛡️' },
-  { id: 'execute', title: 'Execute', path: '/trade-entry', icon: '⚡' },
   { id: 'monitor', title: 'Monitor', path: '/portfolio', icon: '👁️' },
+  { id: 'guardian', title: 'Guardian', path: '/position-monitor', icon: '🚨' },
   { id: 'review', title: 'Review', path: '/performance', icon: '📈' }
 ];
 
