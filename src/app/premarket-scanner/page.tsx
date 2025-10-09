@@ -50,6 +50,14 @@ interface PremarketStock {
     macdSignal: number | null
     histogram: number | null
   }
+  unusualVolume?: {
+    category: 'extreme' | 'very_high' | 'high' | 'normal' | 'low'
+    isUnusual: boolean
+    description: string
+    emoji: string
+    currentVolume: number
+    avgVolume: number
+  }
 }
 
 type TradingStrategy = 'momentum' | 'breakout'
@@ -1378,12 +1386,19 @@ export default function PremarketScanner() {
                       </td>
                       <td className="px-6 py-5">
                         <div className="text-center">
-                          <div className={`font-bold text-lg ${
-                            stock.relativeVolume >= 5 ? 'text-red-600' :
-                            stock.relativeVolume >= 3 ? 'text-orange-600' :
-                            stock.relativeVolume >= 2 ? 'text-yellow-600' : 'text-blue-600'
-                          }`}>{stock.relativeVolume.toFixed(1)}x</div>
-                          <div className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>rel vol</div>
+                          <div className="flex items-center justify-center gap-1">
+                            {stock.unusualVolume?.emoji && (
+                              <span className="text-lg">{stock.unusualVolume.emoji}</span>
+                            )}
+                            <div className={`font-bold text-lg ${
+                              stock.relativeVolume >= 5 ? 'text-red-600' :
+                              stock.relativeVolume >= 3 ? 'text-orange-600' :
+                              stock.relativeVolume >= 2 ? 'text-yellow-600' : 'text-blue-600'
+                            }`}>{stock.relativeVolume.toFixed(1)}x</div>
+                          </div>
+                          <div className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            {stock.unusualVolume?.isUnusual ? 'UNUSUAL' : 'rel vol'}
+                          </div>
                         </div>
                       </td>
                       <td className="px-6 py-5">
@@ -1605,12 +1620,19 @@ export default function PremarketScanner() {
                       <div className="text-lg font-bold">{(stock.volume / 1000000).toFixed(1)}M</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-xs font-medium text-gray-500 mb-1">Rel Vol</div>
-                      <div className={`text-lg font-bold ${
-                        stock.relativeVolume >= 5 ? 'text-red-600' :
-                        stock.relativeVolume >= 3 ? 'text-orange-600' :
-                        stock.relativeVolume >= 2 ? 'text-yellow-600' : 'text-blue-600'
-                      }`}>{stock.relativeVolume.toFixed(1)}x</div>
+                      <div className="text-xs font-medium text-gray-500 mb-1">
+                        {stock.unusualVolume?.isUnusual ? 'UNUSUAL VOL' : 'Rel Vol'}
+                      </div>
+                      <div className="flex items-center justify-center gap-1">
+                        {stock.unusualVolume?.emoji && (
+                          <span className="text-base">{stock.unusualVolume.emoji}</span>
+                        )}
+                        <div className={`text-lg font-bold ${
+                          stock.relativeVolume >= 5 ? 'text-red-600' :
+                          stock.relativeVolume >= 3 ? 'text-orange-600' :
+                          stock.relativeVolume >= 2 ? 'text-yellow-600' : 'text-blue-600'
+                        }`}>{stock.relativeVolume.toFixed(1)}x</div>
+                      </div>
                     </div>
                   </div>
                   

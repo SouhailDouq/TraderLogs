@@ -114,3 +114,54 @@ model Watchlist {
   @@index([date])
   @@index([userId])
 }
+
+model UnusualActivity {
+  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId               String   @db.ObjectId
+  symbol               String
+  timestamp            DateTime
+  
+  // Core metrics
+  volumeRatio          Float
+  priceChange          Float
+  currentPrice         Float
+  currentVolume        Float
+  
+  // Flow analysis
+  largeTradeCount      Int
+  totalLargeTradeValue Float
+  buyPressure          Float
+  sellPressure         Float
+  
+  // Momentum
+  accelerating         Boolean
+  momentumScore        Float
+  priceChangeRate      Float
+  
+  // Context
+  newsCount            Int      @default(0)
+  technicalSetup       String   // 'breakout', 'breakdown', 'consolidation', 'unknown'
+  
+  // Scoring
+  unusualScore         Float
+  alertLevel           String   // 'extreme', 'high', 'moderate'
+  
+  // Additional data
+  reasons              Json     // Array of reason strings
+  isAboveSMAs          Boolean
+  rsi                  Float?
+  
+  // User interaction
+  viewed               Boolean  @default(false)
+  traded               Boolean  @default(false)
+  tradeOutcome         String?  // 'win', 'loss', 'breakeven', null
+  tradeProfit          Float?
+  
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([userId, timestamp])
+  @@index([symbol, timestamp])
+  @@index([alertLevel, timestamp])
+  @@index([userId, viewed])
+}

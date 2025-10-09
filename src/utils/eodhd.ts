@@ -1596,6 +1596,84 @@ class EODHDClient {
       return [];
     }
   }
+
+  /**
+   * Get top gainers/losers for unusual flow detection
+   * Returns symbols with highest volume and price movement
+   */
+  async getTopMovers(limit: number = 100): Promise<string[]> {
+    try {
+      console.log(`🔍 Fetching top ${limit} market movers from EODHD...`);
+      
+      // Use EODHD's screener API to get high volume stocks with movement
+      const url = `${this.baseUrl}/screener?api_token=${this.apiKey}&filters=[["exchange","=","us"],["volume",">",1000000],["market_capitalization",">",100000000]]&limit=${limit}&sort=volume.desc`;
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`EODHD screener failed: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (Array.isArray(data) && data.length > 0) {
+        const symbols = data
+          .map((item: any) => item.code?.split('.')[0]) // Remove .US suffix
+          .filter((symbol: string) => symbol && symbol.length <= 5); // Valid symbols only
+        
+        console.log(`✅ Found ${symbols.length} high-volume market movers`);
+        return symbols.slice(0, limit);
+      }
+      
+      console.log('⚠️ No movers found from EODHD screener');
+      return [];
+      
+    } catch (error) {
+      console.error('Error fetching top movers:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get actively traded symbols across all exchanges
+   * Combines multiple sources for comprehensive market coverage
+   */
+  async getActiveSymbols(limit: number = 100): Promise<string[]> {
+    try {
+      console.log(`🌐 Discovering ${limit} active market symbols...`);
+      
+      const symbols = new Set<string>();
+      
+      // 1. Get top movers from screener
+      const movers = await this.getTopMovers(limit);
+      movers.forEach(s => symbols.add(s));
+      
+      // 2. Add popular high-volume stocks (always active)
+      const popular = [
+        'SPY', 'QQQ', 'IWM', 'DIA', // ETFs
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'AMD', // Mega caps
+        'NFLX', 'DIS', 'BABA', 'COIN', 'HOOD', 'SOFI', 'PLTR', 'SNOW', // Growth
+        'RIVN', 'LCID', 'NIO', 'XPEV', 'PLUG', 'FCEL', 'ENPH', // EVs/Clean
+        'GME', 'AMC', 'BB', 'BBBY', 'CLOV', 'SPCE', // Meme
+        'ROKU', 'SNAP', 'PINS', 'UBER', 'LYFT', 'ABNB', 'DASH', // Tech
+        'MARA', 'RIOT', 'CLSK', 'COIN', // Crypto-related
+      ];
+      popular.forEach(s => symbols.add(s));
+      
+      const result = Array.from(symbols).slice(0, limit);
+      console.log(`✅ Discovered ${result.length} active symbols for monitoring`);
+      
+      return result;
+      
+    } catch (error) {
+      console.error('Error getting active symbols:', error);
+      // Return popular stocks as fallback
+      return [
+        'SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA', 'AMD', 'MSFT', 'GOOGL', 'AMZN', 'META',
+        'NFLX', 'SOFI', 'PLTR', 'RIVN', 'LCID', 'NIO', 'PLUG', 'GME', 'AMC', 'SNAP'
+      ];
+    }
+  }
 }
 
 // Export a default instance for backward compatibility

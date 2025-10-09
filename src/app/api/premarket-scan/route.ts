@@ -227,6 +227,14 @@ interface PremarketStock {
       atrContracting: boolean
     }
   }
+  unusualVolume?: {
+    category: 'extreme' | 'very_high' | 'high' | 'normal' | 'low'
+    isUnusual: boolean
+    description: string
+    emoji: string
+    currentVolume: number
+    avgVolume: number
+  }
 }
 
 /**
@@ -297,6 +305,76 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
 }
 
 /**
+ * UNUSUAL VOLUME ANALYSIS
+ * 
+ * PURPOSE: Detect unusual volume activity that signals institutional interest
+ * STRATEGY: Compare current volume to historical patterns with smart thresholds
+ * 
+ * VOLUME CATEGORIES:
+ * - 🔥 Extreme (5x+): Major institutional activity, breaking news, earnings
+ * - 🚀 Very High (3-5x): Strong unusual activity, momentum building
+ * - 📈 High (2-3x): Above average interest, worth monitoring
+ * - 📊 Normal (1-2x): Regular trading activity
+ * - ⚪ Low (<1x): Below average, may indicate weak interest
+ * 
+ * SCORING IMPACT:
+ * - Extreme volume: +20 points (major signal)
+ * - Very high volume: +15 points (strong signal)
+ * - High volume: +10 points (moderate signal)
+ * - Normal volume: +5 points (baseline)
+ * - Low volume: -5 points (penalty)
+ */
+function analyzeUnusualVolume(relativeVolume: number, currentVolume: number, avgVolume: number): {
+  category: 'extreme' | 'very_high' | 'high' | 'normal' | 'low';
+  scoreBonus: number;
+  description: string;
+  isUnusual: boolean;
+  emoji: string;
+} {
+  let category: 'extreme' | 'very_high' | 'high' | 'normal' | 'low';
+  let scoreBonus: number;
+  let description: string;
+  let emoji: string;
+  
+  if (relativeVolume >= 5.0) {
+    category = 'extreme';
+    scoreBonus = 20;
+    description = `Extreme volume: ${relativeVolume.toFixed(1)}x average (${(currentVolume / 1000000).toFixed(1)}M vs ${(avgVolume / 1000000).toFixed(1)}M avg)`;
+    emoji = '🔥';
+  } else if (relativeVolume >= 3.0) {
+    category = 'very_high';
+    scoreBonus = 15;
+    description = `Very high volume: ${relativeVolume.toFixed(1)}x average (${(currentVolume / 1000000).toFixed(1)}M vs ${(avgVolume / 1000000).toFixed(1)}M avg)`;
+    emoji = '🚀';
+  } else if (relativeVolume >= 2.0) {
+    category = 'high';
+    scoreBonus = 10;
+    description = `High volume: ${relativeVolume.toFixed(1)}x average (${(currentVolume / 1000000).toFixed(1)}M vs ${(avgVolume / 1000000).toFixed(1)}M avg)`;
+    emoji = '📈';
+  } else if (relativeVolume >= 1.0) {
+    category = 'normal';
+    scoreBonus = 5;
+    description = `Normal volume: ${relativeVolume.toFixed(1)}x average (${(currentVolume / 1000000).toFixed(1)}M vs ${(avgVolume / 1000000).toFixed(1)}M avg)`;
+    emoji = '📊';
+  } else {
+    category = 'low';
+    scoreBonus = -5;
+    description = `Low volume: ${relativeVolume.toFixed(1)}x average (${(currentVolume / 1000000).toFixed(1)}M vs ${(avgVolume / 1000000).toFixed(1)}M avg)`;
+    emoji = '⚪';
+  }
+  
+  const isUnusual = relativeVolume >= 2.0; // 2x or higher is considered unusual
+  
+  return {
+    category,
+    scoreBonus,
+    description,
+    isUnusual,
+    emoji
+  };
+}
+
+/**
  * CORE BUSINESS LOGIC: Stock Analysis Engine
  * 
  * PURPOSE: Enriches basic stock data with advanced momentum/breakout indicators
@@ -304,12 +382,14 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
  * 
  * KEY CALCULATIONS:
  * - Real Relative Volume: Current volume / 30-day average volume (not fake estimates)
+ * - Unusual Volume Detection: Categorizes volume activity (extreme/very high/high/normal/low)
  * - Premarket Gap Analysis: Gap %, significance (>3%), urgency scoring
  * - Momentum Criteria: 20-day high proximity, SMA alignment (matches Finviz criteria)
  * - Time Urgency: France timezone advantage (4:00-6:00 AM ET = 1.8x multiplier)
  * 
  * BUSINESS IMPACT:
  * - Provides accurate momentum scoring based on real historical data
+ * - Detects unusual volume that signals institutional interest
  * - Aligns with user's proven Finviz screening criteria
  * - Prioritizes early premarket opportunities for France timezone trading
  * - Prevents false signals from fake/estimated data
@@ -749,6 +829,10 @@ export async function POST(request: NextRequest) {
         
         const { relativeVolume, gapAnalysis, momentumCriteria, timeUrgency, currentVolume, avgVolume } = enhancedData;
 
+        // UNUSUAL VOLUME ANALYSIS - Detect institutional interest
+        const volumeAnalysis = analyzeUnusualVolume(relativeVolume, currentVolume, avgVolume);
+        console.log(`${volumeAnalysis.emoji} ${symbol}: ${volumeAnalysis.description}`);
+
         // CRITICAL: Verify data source and freshness for accurate scoring (after we have enhanced data)
         const dataAge = Date.now() - (stock.timestamp * 1000);
         const isLiveData = dataAge < 60000; // Less than 1 minute old
@@ -806,10 +890,24 @@ export async function POST(request: NextRequest) {
           }
         }
         
+        // Unusual volume detection - upgrade quality for extreme activity
+        if (volumeAnalysis.isUnusual) {
+          if (volumeAnalysis.category === 'extreme') {
+            console.log(`🔥 ${symbol}: EXTREME UNUSUAL VOLUME - Institutional activity detected!`);
+            qualityTier = 'premium'; // Force premium for extreme volume
+          } else if (volumeAnalysis.category === 'very_high') {
+            console.log(`🚀 ${symbol}: Very high unusual volume - Strong momentum signal`);
+            if (qualityTier === 'caution') qualityTier = 'standard';
+          }
+        }
+        
         // Enhanced relative volume filter
         if (relativeVolume < filters.minRelativeVolume) {
           warnings.push(`⚠️ Low relative volume: ${relativeVolume.toFixed(2)}x < ${filters.minRelativeVolume}x`);
           if (qualityTier === 'premium') qualityTier = 'standard';
+        } else if (volumeAnalysis.category === 'low') {
+          warnings.push(`⚪ Below average volume: ${volumeAnalysis.description}`);
+          if (qualityTier === 'premium') qualityTier = 'caution';
         }
         
         // MACD momentum validation
@@ -866,6 +964,10 @@ export async function POST(request: NextRequest) {
         
         // Use the FIXED scoring system from eodhd.ts (not the old scoringEngine)
         const baseScore = calculateScore(stock, technicals, strategy === 'technical-momentum' ? 'momentum' : 'breakout', scoringData);
+        
+        // Add unusual volume bonus to score
+        const volumeBonus = volumeAnalysis.scoreBonus;
+        console.log(`📊 ${symbol}: Base score ${baseScore} + Volume bonus ${volumeBonus} = ${baseScore + volumeBonus}`);
 
         // Predictive setup signals (near-term 1-5 day breakout readiness) with timeout protection
         let predictiveSetup: PremarketStock['predictiveSetup'] | undefined = undefined;
@@ -895,7 +997,10 @@ export async function POST(request: NextRequest) {
 
         // Modest, capped boost from predictive readiness (max +8)
         const predictiveBoost = predictiveSetup ? Math.min(8, Math.round(predictiveSetup.setupScore * 0.3)) : 0;
-        const score = Math.min(100, Math.max(0, baseScore + predictiveBoost));
+        
+        // Apply volume bonus and cap at 100
+        const score = Math.min(100, Math.max(0, baseScore + volumeBonus + predictiveBoost));
+        console.log(`🎯 ${symbol}: FINAL SCORE = ${score} (base: ${baseScore}, volume: +${volumeBonus}, predictive: +${predictiveBoost})`);
         
         // Create analysis reasoning based on the enhanced data (+ predictive)
         const analysisReasoning = [
@@ -994,6 +1099,14 @@ export async function POST(request: NextRequest) {
             histogram: technicals.MACD_Histogram || null
           },
           predictiveSetup,
+          unusualVolume: {
+            category: volumeAnalysis.category,
+            isUnusual: volumeAnalysis.isUnusual,
+            description: volumeAnalysis.description,
+            emoji: volumeAnalysis.emoji,
+            currentVolume,
+            avgVolume
+          },
           qualityTier,
           warnings,
           analysisReasoning

@@ -8,6 +8,7 @@ import { UserMenu } from '@/components/UserMenu';
 const workflowSteps = [
   { id: 'calendar', title: 'Calendar', path: '/', icon: '📅' },
   { id: 'premarket', title: 'Premarket', path: '/premarket-scanner', icon: '🌅' },
+  { id: 'unusual', title: 'Unusual Flow', path: '/unusual-flow', icon: '🔴' },
   { id: 'research', title: 'Research', path: '/trade-analyzer', icon: '📊' },
   { id: 'risk', title: 'Risk', path: '/risk-management', icon: '🛡️' },
   { id: 'monitor', title: 'Monitor', path: '/portfolio', icon: '👁️' },
