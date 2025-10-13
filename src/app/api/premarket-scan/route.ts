@@ -1035,33 +1035,37 @@ export async function POST(request: NextRequest) {
 
         console.log(`🔴 LIVE SCORE ${symbol}: ${score}/100 (${signal}) ${dataSource} - Price: $${stock.close}, Change: ${stock.change_p?.toFixed(2)}%, Gap: ${gapAnalysis.gapPercent.toFixed(1)}%, RelVol: ${relativeVolume.toFixed(1)}x`);
 
-        // Get news data with timeout protection (gate to premium/strong to reduce duplicates and latency)
+        // Get news data with timeout protection for ALL stocks
         let newsData = undefined;
-        if (qualityTier === 'premium' || signal === 'Strong') {
-          try {
-            const newsPromise = eodhdEnhanced.getStockNews(symbol, 3);
-            const newsTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('news timeout')), 2000));
-            const news = await Promise.race([newsPromise, newsTimeout]) as any[];
+        try {
+          console.log(`📰 Fetching news for ${symbol}...`);
+          const newsPromise = eodhdEnhanced.getStockNews(symbol, 3);
+          const newsTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('news timeout')), 3000));
+          const news = await Promise.race([newsPromise, newsTimeout]) as any[];
 
-            if (news && news.length > 0) {
-              const recentNews = news.filter(article => {
-                const articleDate = new Date(article.date);
-                const hoursSinceArticle = (Date.now() - articleDate.getTime()) / (1000 * 60 * 60);
-                return hoursSinceArticle <= 24;
-              });
+          if (news && news.length > 0) {
+            const recentNews = news.filter(article => {
+              const articleDate = new Date(article.date);
+              const hoursSinceArticle = (Date.now() - articleDate.getTime()) / (1000 * 60 * 60);
+              return hoursSinceArticle <= 24;
+            });
 
-              if (recentNews.length > 0) {
-                newsData = {
-                  count: news.length,
-                  sentiment: 0,
-                  topCatalyst: 'General',
-                  recentCount: recentNews.length
-                };
-              }
+            if (recentNews.length > 0) {
+              newsData = {
+                count: news.length,
+                sentiment: 0,
+                topCatalyst: 'General',
+                recentCount: recentNews.length
+              };
+              console.log(`✅ ${symbol}: Found ${news.length} news articles (${recentNews.length} recent)`);
+            } else {
+              console.log(`⚠️ ${symbol}: ${news.length} articles found but none recent (24h)`);
             }
-          } catch (error) {
-            console.log(`${symbol}: Skipping news due to timeout/error`);
+          } else {
+            console.log(`⚠️ ${symbol}: No news articles available`);
           }
+        } catch (error) {
+          console.log(`❌ ${symbol}: News fetch failed - ${error}`);
         }
 
         return {
@@ -1121,10 +1125,24 @@ export async function POST(request: NextRequest) {
     // Wait for all stocks to process in parallel
     const processedResults = await Promise.allSettled(stockPromises)
     
-    // Filter successful results and sort by quality tier
-    const stocks = processedResults
+    // Filter successful results and remove stale data during premarket
+    const allStocks = processedResults
       .filter(result => result.status === 'fulfilled' && result.value !== null)
-      .map(result => (result as PromiseFulfilledResult<PremarketStock>).value)
+      .map(result => (result as PromiseFulfilledResult<PremarketStock>).value);
+    
+    // FRESH DATA FILTER: During premarket, only show stocks with data less than 2 hours old
+    const maxStaleMinutes = marketStatus === 'premarket' ? 120 : 1440; // 2 hours premarket, 24 hours otherwise
+    const stocks = allStocks
+      .filter(stock => {
+        const dataAge = Date.now() - new Date(stock.lastUpdated).getTime();
+        const dataAgeMinutes = Math.round(dataAge / 60000);
+        
+        if (dataAgeMinutes > maxStaleMinutes && marketStatus === 'premarket') {
+          console.log(`🚫 FILTERED OUT ${stock.symbol}: Data is ${dataAgeMinutes} minutes old (stale during premarket)`);
+          return false;
+        }
+        return true;
+      })
       .sort((a, b) => {
         // Sort by quality tier: premium > standard > caution
         const tierOrder = { premium: 3, standard: 2, caution: 1 };
@@ -1156,7 +1174,13 @@ export async function POST(request: NextRequest) {
       dataFreshness: liveDataCount > 0 ? '🔴 LIVE WebSocket' : '📡 REST API Fallback'
     };
     
-    console.log(`🎯 ${scanMode} momentum scan completed: ${stocks.length} stocks found during ${marketStatus} hours`);
+    // Log filtering statistics
+    const filteredCount = allStocks.length - stocks.length;
+    if (filteredCount > 0) {
+      console.log(`🚫 Filtered out ${filteredCount} stocks with stale data (>${maxStaleMinutes} minutes old)`);
+    }
+    
+    console.log(`🎯 ${scanMode} momentum scan completed: ${stocks.length} stocks found during ${marketStatus} hours (${filteredCount} filtered for stale data)`);
     console.log(`🏆 Quality breakdown: ${qualityBreakdown.premium} premium, ${qualityBreakdown.standard} standard, ${qualityBreakdown.caution} caution`);
     console.log(`🔴 WebSocket Stats: ${liveDataCount}/${stocks.length} stocks using live data (${webSocketStats.liveDataPercentage}%)`);
     
@@ -1168,6 +1192,7 @@ export async function POST(request: NextRequest) {
       scanMode,
       marketStatus,
       count: stocks.length,
+      filteredCount,
       qualityBreakdown,
       webSocketStats
     })

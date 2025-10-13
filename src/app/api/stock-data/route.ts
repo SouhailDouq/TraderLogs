@@ -5,6 +5,7 @@ import { rateLimiter } from '@/utils/rateLimiter';
 import { apiCache } from '@/utils/apiCache';
 import { formatMarketCap } from '@/utils/eodhd';
 import { computePredictiveSignals } from '@/utils/predictiveSignals';
+import { dataFreshnessMonitor } from '@/utils/dataFreshnessMonitor';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -24,6 +25,9 @@ export async function GET(request: NextRequest) {
     const cacheKey = `stock_data_${symbol.toUpperCase()}`
     console.log(`🔴 LIVE DATA REQUEST for ${symbol} - bypassing cache for trading analysis`)
     apiCache.delete(cacheKey) // Always clear cache for fresh data
+
+    // Check data freshness BEFORE fetching to inform user of expected quality
+    console.log(`📊 Checking data freshness for ${symbol}...`)
 
     // Check rate limit
     if (!rateLimiter.canMakeCall()) {
@@ -111,12 +115,15 @@ You can still analyze this stock by entering data manually.`,
     };
 
     // Use the FIXED scoring system from eodhd.ts (same as premarket scanner)
+    // IMPORTANT: Use actual market status (already detected above) for consistent scoring
     const scoringEnhancedData = {
       realRelativeVolume: relativeVolume,
       gapPercent: realTimeData.change_p || 0,
       avgVolume: avgVolume,
-      isPremarket: false // Trade analyzer is for regular hours
+      isPremarket: isPremarket // Use actual market status for context-aware scoring
     };
+    
+    console.log(`📊 Trade Analyzer Scoring: Market=${marketStatus}, isPremarket=${isPremarket}, Gap=${realTimeData.change_p?.toFixed(2)}%`);
     
     const baseScore = calculateScore(realTimeData, techData, 'momentum', scoringEnhancedData);
 
@@ -246,7 +253,29 @@ You can still analyze this stock by entering data manually.`,
         ],
         dataTimestamp: new Date().toISOString(),
         cacheStatus: forceRefresh ? 'fresh' : 'fresh'
-      }
+      },
+      
+      // DATA FRESHNESS MONITORING - Critical for live trading decisions
+      dataFreshness: await (async () => {
+        try {
+          const freshnessReport = await dataFreshnessMonitor.checkDataFreshness(
+            symbol.toUpperCase(),
+            realTimeData.timestamp
+          );
+          
+          console.log(`📊 Data Freshness Report for ${symbol}:`);
+          console.log(`  Overall Quality: ${freshnessReport.overallQuality}`);
+          console.log(`  Trading Recommendation: ${freshnessReport.tradingRecommendation}`);
+          console.log(`  WebSocket: ${freshnessReport.websocket.connectionQuality}`);
+          console.log(`  Data Age: ${freshnessReport.dataAge.ageInMinutes} minutes`);
+          console.log(`  S/R Ready: ${freshnessReport.supportResistanceReady}`);
+          
+          return freshnessReport;
+        } catch (error) {
+          console.error('Error checking data freshness:', error);
+          return null;
+        }
+      })()
     }
 
     // Cache the response

@@ -156,15 +156,49 @@ class EODHDClient {
     return etHour >= 16 || etHour < 4;
   }
 
-  // Yahoo Finance fallback method
-  private async fetchYahooFinanceQuote(symbol: string): Promise<any> {
+  // Yahoo Finance fallback method for fresh premarket data
+  private async fetchYahooFinanceQuote(symbol: string): Promise<EODHDRealTimeData | null> {
     try {
-      // This would need to be implemented with Yahoo Finance API
-      // For now, return null to avoid build errors
-      console.log(`⚠️ Yahoo Finance fallback not implemented for ${symbol}`);
-      return null;
+      // Use the proper Yahoo Finance API that handles premarket data correctly
+      const quotes = await yahooFinance.getQuotes([symbol]);
+      
+      if (!quotes || quotes.length === 0) {
+        console.log(`⚠️ Yahoo Finance: No data for ${symbol}`);
+        return null;
+      }
+      
+      const quote = quotes[0];
+      const isPremarket = quote.marketState === 'PRE';
+      
+      // Use premarket price during premarket, regular price otherwise
+      const currentPrice = isPremarket ? (quote.preMarketPrice || quote.regularMarketPrice) : quote.regularMarketPrice;
+      const currentChange = isPremarket ? (quote.preMarketChange || quote.regularMarketChange) : quote.regularMarketChange;
+      const currentChangePercent = isPremarket ? (quote.preMarketChangePercent || quote.regularMarketChangePercent) : quote.regularMarketChangePercent;
+      const currentVolume = isPremarket ? (quote.preMarketVolume || quote.regularMarketVolume) : quote.regularMarketVolume;
+      
+      if (!currentPrice || currentPrice <= 0) {
+        return null;
+      }
+      
+      const previousClose = currentPrice - currentChange;
+      
+      console.log(`✅ Yahoo Finance ${isPremarket ? 'PREMARKET' : 'REGULAR'}: ${symbol} at $${currentPrice.toFixed(2)} (${currentChangePercent.toFixed(2)}%)`);
+      
+      return {
+        code: symbol.replace('.US', ''),
+        timestamp: Math.floor(Date.now() / 1000),
+        gmtoffset: 0,
+        open: currentPrice,
+        high: currentPrice,
+        low: currentPrice,
+        close: currentPrice,
+        volume: currentVolume || 0,
+        previousClose: previousClose,
+        change: currentChange || 0,
+        change_p: currentChangePercent || 0
+      };
     } catch (error) {
-      console.error(`Yahoo Finance fallback failed for ${symbol}:`, error);
+      console.log(`⚠️ Yahoo Finance failed for ${symbol}: ${error}`);
       return null;
     }
   }
@@ -259,20 +293,20 @@ class EODHDClient {
           return convertedData;
         }
       } catch (error) {
-        console.log(`⚠️ WebSocket failed for ${symbol}, trying alternatives`);
-      }
-    }
-    
-    // Try Yahoo Finance for premarket hours when EODHD data is stale
-    if (this.isPremarketHours() || this.isAfterHours()) {
-      try {
-        const yahooData = await this.fetchYahooFinanceQuote(symbol);
-        if (yahooData && yahooData.close > 0) {
-          console.log(`✅ Using fresh Yahoo Finance data for ${symbol} during premarket/after hours`);
-          return yahooData;
+        console.log(`⚠️ WebSocket failed for ${symbol}, trying intraday API...`);
+        
+        // Try EODHD Intraday API immediately after WebSocket failure during premarket
+        if (this.isPremarketHours() || this.isAfterHours()) {
+          try {
+            const intradayData = await this.getLatestPremarketPrice(symbol);
+            if (intradayData && intradayData.close > 0) {
+              console.log(`✅ Using fresh EODHD intraday data for ${symbol} during ${marketStatus} hours`);
+              return intradayData;
+            }
+          } catch (intradayError) {
+            console.log(`⚠️ EODHD intraday also failed for ${symbol}`);
+          }
         }
-      } catch (error) {
-        console.log(`⚠️ Yahoo Finance failed for ${symbol}, falling back to EODHD`);
       }
     }
     
@@ -354,8 +388,9 @@ class EODHDClient {
           // Subscribe to all symbols
           symbols.forEach(symbol => wsManager.subscribe(symbol, callback));
           
-          // MAXIMUM COLLECTION TIME: Wait 12 seconds for maximum live data capture
-          setTimeout(() => {
+          // MAXIMUM COLLECTION TIME: Wait 30 seconds for maximum live data capture
+          // Premarket trades are sparse, need longer window for all 19 stocks
+          setTimeout(async () => {
             // Unsubscribe and return collected data
             symbols.forEach(symbol => wsManager.unsubscribe(symbol, callback));
             
@@ -363,14 +398,37 @@ class EODHDClient {
               this.convertWebSocketToRealTimeData(wsData)
             );
             
-            console.log(`🔴 LIVE WebSocket collected ${results.length}/${symbols.length} quotes after 12s aggressive collection`);
+            console.log(`🔴 LIVE WebSocket collected ${results.length}/${symbols.length} quotes after 30s aggressive collection`);
             
             // Log which symbols failed to get WebSocket data
             const failedSymbols = symbols.filter(symbol => 
               !Array.from(collectedData.keys()).includes(symbol)
             );
+            
+            // Try EODHD Intraday API for failed symbols during premarket
+            if (failedSymbols.length > 0 && marketStatus === 'premarket') {
+              console.log(`🔄 Trying EODHD Intraday API for ${failedSymbols.length} failed symbols...`);
+              
+              try {
+                // Fetch intraday data for each failed symbol
+                const intradayPromises = failedSymbols.map(symbol => 
+                  this.getLatestPremarketPrice(symbol).catch(() => null)
+                );
+                
+                const intradayResults = await Promise.all(intradayPromises);
+                const validIntradayData = intradayResults.filter(d => d !== null) as EODHDRealTimeData[];
+                
+                if (validIntradayData.length > 0) {
+                  console.log(`✅ EODHD Intraday API provided ${validIntradayData.length} fresh PREMARKET quotes`);
+                  results.push(...validIntradayData);
+                }
+              } catch (error) {
+                console.log(`⚠️ EODHD Intraday batch failed: ${error}`);
+              }
+            }
+            
             if (failedSymbols.length > 0) {
-              console.log(`⚠️ WebSocket failed for: ${failedSymbols.join(', ')} - will use REST API fallback`);
+              console.log(`⚠️ Still missing data for: ${failedSymbols.filter(s => !results.find(r => r.code === s.replace('.US', ''))).join(', ')}`);
             }
             
             // Enhance WebSocket data with daily volumes from REST API
@@ -380,7 +438,7 @@ class EODHDClient {
               // If volume enhancement fails, return WebSocket data as-is
               resolve(results);
             });
-          }, 12000); // Increased to 12 seconds for maximum live data collection
+          }, 30000); // Increased to 30 seconds for maximum premarket coverage
         });
         
         const wsResults = await collectWebSocketData;
@@ -1894,14 +1952,27 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
   else if (currentPrice <= 20) riskScore -= 2; // Moderate price
   else if (currentPrice > 50) riskScore -= 5;  // High price risk
   
-  // Gap risk (premarket context)
-  if (enhancedData?.gapPercent !== undefined && enhancedData.isPremarket) {
+  // Gap assessment (premarket context)
+  // IMPORTANT: During premarket, gaps are OPPORTUNITIES not risks
+  // Only penalize gaps during regular hours (gap-and-crap pattern)
+  if (enhancedData?.gapPercent !== undefined) {
     const gap = Math.abs(enhancedData.gapPercent);
-    if (gap > 25) riskScore -= 10;      // Extreme gap risk
-    else if (gap > 15) riskScore -= 5;  // High gap risk
-    else if (gap > 10) riskScore -= 2;  // Moderate gap risk
-    else if (gap > 5) riskScore += 0;   // Acceptable gap
-    else riskScore -= 3; // Too small gap for momentum
+    
+    if (enhancedData.isPremarket) {
+      // PREMARKET: Reward significant gaps (momentum opportunity)
+      if (gap > 25) riskScore += 0;       // Extreme gap - neutral (could be news-driven)
+      else if (gap > 15) riskScore += 2;  // Large gap - slight bonus (strong momentum)
+      else if (gap > 10) riskScore += 3;  // Good gap - bonus (ideal premarket setup)
+      else if (gap > 5) riskScore += 2;   // Moderate gap - slight bonus
+      else if (gap > 3) riskScore += 0;   // Small gap - neutral
+      else riskScore -= 2; // Too small gap for premarket momentum
+    } else {
+      // REGULAR HOURS: Penalize large gaps (gap-and-crap risk)
+      if (gap > 25) riskScore -= 10;      // Extreme gap risk (likely to fill)
+      else if (gap > 15) riskScore -= 5;  // High gap risk
+      else if (gap > 10) riskScore -= 2;  // Moderate gap risk
+      else riskScore += 0;                // Normal intraday movement
+    }
   }
   
   // Market hours risk
