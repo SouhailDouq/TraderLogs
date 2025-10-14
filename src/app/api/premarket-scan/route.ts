@@ -962,12 +962,15 @@ export async function POST(request: NextRequest) {
           week52High: stock.high || stock.close
         };
         
+        console.log(`📊 Premarket Scanner Scoring: Market=${eodhdEnhanced.getMarketHoursStatus()}, isPremarket=${scoringData.isPremarket}, Gap=${gapAnalysis.gapPercent.toFixed(2)}%, RelVol=${relativeVolume.toFixed(2)}x`);
+        console.log(`📊 Premarket Scanner Data: Price=$${stock.close}, Change=${stock.change_p?.toFixed(2)}%, Volume=${currentVolume.toLocaleString()}, AvgVol=${avgVolume.toLocaleString()}`);
+        
         // Use the FIXED scoring system from eodhd.ts (not the old scoringEngine)
         const baseScore = calculateScore(stock, technicals, strategy === 'technical-momentum' ? 'momentum' : 'breakout', scoringData);
         
-        // Add unusual volume bonus to score
-        const volumeBonus = volumeAnalysis.scoreBonus;
-        console.log(`📊 ${symbol}: Base score ${baseScore} + Volume bonus ${volumeBonus} = ${baseScore + volumeBonus}`);
+        // REMOVED: Volume bonus was double-counting volume (already included in calculateScore)
+        // Keep volumeAnalysis for display purposes only
+        console.log(`📊 ${symbol}: Volume Analysis: ${volumeAnalysis.emoji} ${volumeAnalysis.description}`);
 
         // Predictive setup signals (near-term 1-5 day breakout readiness) with timeout protection
         let predictiveSetup: PremarketStock['predictiveSetup'] | undefined = undefined;
@@ -998,13 +1001,13 @@ export async function POST(request: NextRequest) {
         // Modest, capped boost from predictive readiness (max +8)
         const predictiveBoost = predictiveSetup ? Math.min(8, Math.round(predictiveSetup.setupScore * 0.3)) : 0;
         
-        // Apply volume bonus and cap at 100
-        const score = Math.min(100, Math.max(0, baseScore + volumeBonus + predictiveBoost));
-        console.log(`🎯 ${symbol}: FINAL SCORE = ${score} (base: ${baseScore}, volume: +${volumeBonus}, predictive: +${predictiveBoost})`);
+        // FIXED: Removed volumeBonus to match Trade Analyzer scoring exactly
+        const score = Math.min(100, Math.max(0, baseScore + predictiveBoost));
+        console.log(`🎯 Premarket Scanner FINAL SCORE: ${score}/100 (base: ${baseScore}, predictive: +${predictiveBoost}) → ${score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : score >= 30 ? 'Weak' : 'Avoid'}`);
         
         // Create analysis reasoning based on the enhanced data (+ predictive)
         const analysisReasoning = [
-          `Relative Volume: ${relativeVolume.toFixed(1)}x (${relativeVolume >= 1.5 ? 'Good' : 'Low'})`,
+          `Relative Volume: ${relativeVolume >= 1.5 ? 'PASS' : 'FAIL'} (Has: ${relativeVolume.toFixed(2)}x / Needs: > 1.5x)`,
           `Gap: ${gapAnalysis.gapPercent.toFixed(1)}% (${gapAnalysis.isSignificant ? 'Significant' : 'Small'})`,
           `Momentum: ${momentumCriteria?.momentumScore || 0}/13 criteria met`,
           `Technical: ${technicalsData ? 'Available' : 'Limited data'}`,

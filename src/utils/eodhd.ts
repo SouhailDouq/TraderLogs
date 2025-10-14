@@ -1042,10 +1042,30 @@ class EODHDClient {
       
       if (intradayData.length === 0) return null;
       
-      // Get the most recent data point
+      // Get the most recent data point for price
       const latest = intradayData[intradayData.length - 1];
       
-      // Convert to EODHDRealTimeData format
+      // Calculate cumulative daily volume from all intraday bars
+      const cumulativeVolume = intradayData.reduce((sum, bar) => sum + toNumber(bar.volume), 0);
+      
+      // Get previous close from REST API for accurate change calculation
+      let previousClose = toNumber(latest.close);
+      let change = 0;
+      let change_p = 0;
+      
+      try {
+        const restData = await this.makeRequest(`/real-time/${symbol.replace('.US', '')}.US`);
+        if (restData?.previousClose) {
+          previousClose = toNumber(restData.previousClose);
+          change = toNumber(latest.close) - previousClose;
+          change_p = previousClose > 0 ? ((change / previousClose) * 100) : 0;
+        }
+      } catch (error) {
+        // If REST API fails, use intraday data only
+        console.log(`⚠️ Could not fetch previousClose for ${symbol}, using intraday data only`);
+      }
+      
+      // Convert to EODHDRealTimeData format with cumulative volume
       return {
         code: `${symbol.replace('.US', '')}.US`,
         timestamp: new Date(latest.datetime).getTime() / 1000,
@@ -1054,10 +1074,10 @@ class EODHDClient {
         high: toNumber(latest.high),
         low: toNumber(latest.low),
         close: toNumber(latest.close),
-        volume: toNumber(latest.volume),
-        previousClose: toNumber(latest.close), // Will be enriched later
-        change: 0, // Will be calculated
-        change_p: 0 // Will be calculated
+        volume: cumulativeVolume, // FIXED: Use cumulative daily volume, not per-minute
+        previousClose: previousClose,
+        change: change,
+        change_p: change_p
       };
     } catch (error) {
       console.error(`Error getting latest premarket price for ${symbol}:`, error);
@@ -1841,8 +1861,11 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
       volumeScore = 10;
       console.log(`📊 Above average volume (${relVol.toFixed(1)}x)`);
     } else if (relVol >= 1.5) {
-      volumeScore = 6;
-      console.log(`📊 Meets minimum volume (${relVol.toFixed(1)}x)`);
+      volumeScore = 8;
+      console.log(`📊 Good volume (${relVol.toFixed(1)}x) - meets threshold`);
+    } else if (relVol >= 1.2) {
+      volumeScore = 5;
+      console.log(`📊 Acceptable volume (${relVol.toFixed(1)}x) - close to threshold`);
     } else if (relVol >= 1) {
       volumeScore = 3;
       console.log(`⚠️ Average volume (${relVol.toFixed(1)}x) - no edge`);
@@ -1924,16 +1947,48 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
       }
     } else if (rsi > 0) {
       // Fallback to RSI scoring when MACD unavailable
-      if (rsi >= 55 && rsi <= 65) macdScore = 8;      // Optimal momentum zone
-      else if (rsi >= 50 && rsi <= 70) macdScore = 6; // Good momentum
-      else if (rsi >= 45 && rsi <= 75) macdScore = 4; // Acceptable
-      else if (rsi >= 40 && rsi <= 80) macdScore = 2; // Marginal
-      else if (rsi > 85) macdScore = -5; // Extremely overbought (dangerous)
-      else if (rsi > 80) macdScore = -3; // Overbought warning
-      else if (rsi < 25) macdScore = -3; // Oversold (but could be falling knife)
-      else macdScore = 0; // Neutral
+      // CONTEXT MATTERS: High RSI during strong price moves is NORMAL, not a warning
+      const isStrongBreakout = changePercent >= 10; // 10%+ move
+      const isModerateBreakout = changePercent >= 5; // 5-10% move
       
-      console.log(`📊 RSI fallback scoring: ${rsi.toFixed(1)} → ${macdScore} points`);
+      if (rsi >= 55 && rsi <= 65) {
+        macdScore = 8; // Optimal momentum zone
+      } else if (rsi >= 50 && rsi <= 70) {
+        macdScore = 6; // Good momentum
+      } else if (rsi >= 70 && rsi <= 80) {
+        // RSI 70-80: Context-dependent scoring
+        if (isStrongBreakout) {
+          macdScore = 6; // High RSI is EXPECTED during breakouts - reward it!
+          console.log(`✅ RSI ${rsi.toFixed(1)} during ${changePercent.toFixed(1)}% breakout = HEALTHY momentum`);
+        } else if (isModerateBreakout) {
+          macdScore = 4; // Still acceptable
+        } else {
+          macdScore = 2; // Marginal if no strong move
+        }
+      } else if (rsi > 80 && rsi <= 85) {
+        // RSI 80-85: Still acceptable during strong moves
+        if (isStrongBreakout) {
+          macdScore = 4; // Reward strong momentum
+          console.log(`✅ RSI ${rsi.toFixed(1)} during ${changePercent.toFixed(1)}% breakout = Strong momentum`);
+        } else {
+          macdScore = 0; // Neutral without strong move
+        }
+      } else if (rsi > 85) {
+        // RSI >85: Only penalize if no strong move
+        if (isStrongBreakout) {
+          macdScore = 2; // Still some credit for the momentum
+        } else {
+          macdScore = -5; // Extremely overbought without justification
+        }
+      } else if (rsi < 25) {
+        macdScore = -3; // Oversold (but could be falling knife)
+      } else {
+        macdScore = 0; // Neutral
+      }
+      
+      if (!isStrongBreakout && !isModerateBreakout) {
+        console.log(`📊 RSI fallback scoring: ${rsi.toFixed(1)} → ${macdScore} points`);
+      }
     }
     
     // TODO: Integrate full enhanced MACD analysis in future version

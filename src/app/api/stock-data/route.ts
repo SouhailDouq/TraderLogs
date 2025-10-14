@@ -118,12 +118,13 @@ You can still analyze this stock by entering data manually.`,
     // IMPORTANT: Use actual market status (already detected above) for consistent scoring
     const scoringEnhancedData = {
       realRelativeVolume: relativeVolume,
-      gapPercent: realTimeData.change_p || 0,
+      gapPercent: gapPercent, // Use calculated gap, not change_p
       avgVolume: avgVolume,
       isPremarket: isPremarket // Use actual market status for context-aware scoring
     };
     
-    console.log(`📊 Trade Analyzer Scoring: Market=${marketStatus}, isPremarket=${isPremarket}, Gap=${realTimeData.change_p?.toFixed(2)}%`);
+    console.log(`📊 Trade Analyzer Scoring: Market=${marketStatus}, isPremarket=${isPremarket}, Gap=${gapPercent.toFixed(2)}%, RelVol=${relativeVolume.toFixed(2)}x`);
+    console.log(`📊 Trade Analyzer Data: Price=$${realTimeData.close}, Change=${realTimeData.change_p?.toFixed(2)}%, Volume=${currentVolume.toLocaleString()}, AvgVol=${avgVolume.toLocaleString()}`);
     
     const baseScore = calculateScore(realTimeData, techData, 'momentum', scoringEnhancedData);
 
@@ -147,7 +148,9 @@ You can still analyze this stock by entering data manually.`,
 
     const predictiveBoost = predictiveSetup ? Math.min(8, Math.round(predictiveSetup.setupScore * 0.3)) : 0;
     const score = Math.min(100, Math.max(0, baseScore + predictiveBoost));
-    const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : 'Avoid';
+    const signal = score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : score >= 30 ? 'Weak' : 'Avoid';
+    
+    console.log(`🎯 Trade Analyzer FINAL SCORE: ${score}/100 (base: ${baseScore}, predictive: +${predictiveBoost}) → ${signal}`);
     
     // Create analysis reasoning based on the enhanced data
     const analysisReasoning = [

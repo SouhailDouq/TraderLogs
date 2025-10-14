@@ -9,7 +9,14 @@ import PortfolioChart from '@/components/Charts/PortfolioChart';
 import AssetAllocationChart from '@/components/Charts/AssetAllocationChart';
 import PortfolioHeatMap from '@/components/Charts/PortfolioHeatMap';
 import BenchmarkComparison from '@/components/Charts/BenchmarkComparison';
+import PortfolioTriage from '@/components/PortfolioTriage';
+import StopLossMonitor from '@/components/StopLossMonitor';
+import EntryQualityGate from '@/components/EntryQualityGate';
+import ProfitTakingCalculator from '@/components/ProfitTakingCalculator';
+import PerformanceMetrics from '@/components/Performance/PerformanceMetrics';
 import { UnifiedStockData } from '@/services/marketstackService';
+import { useTrading212 } from '@/hooks/useTrading212';
+import toast from 'react-hot-toast';
 
 export default function MonitorPage() {
   const isDarkMode = useDarkMode();
@@ -20,7 +27,7 @@ export default function MonitorPage() {
   const [marketData, setMarketData] = useState<{ [symbol: string]: UnifiedStockData }>({});
   const [marketDataLoading, setMarketDataLoading] = useState(false);
   const [marketDataError, setMarketDataError] = useState<string | null>(null);
-  const [selectedView, setSelectedView] = useState<'overview' | 'heatmap' | 'benchmark'>('overview');
+  const [selectedView, setSelectedView] = useState<'positions' | 'triage' | 'tools' | 'analytics'>('positions');
   const [isMounted, setIsMounted] = useState(false);
   const [momentumAlerts, setMomentumAlerts] = useState<any[]>([]);
   const [marketStatus, setMarketStatus] = useState<'premarket' | 'open' | 'closed'>('closed');
@@ -28,6 +35,152 @@ export default function MonitorPage() {
   const [newCriticalAlerts, setNewCriticalAlerts] = useState<any[]>([]);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  
+  // Trading 212 API Configuration
+  const [dataSource, setDataSource] = useState<'csv' | 'api'>('csv');
+  const [apiKey, setApiKey] = useState('');
+  const [apiSecret, setApiSecret] = useState('');
+  const [accountType, setAccountType] = useState<'LIVE' | 'DEMO'>('LIVE');
+  const [showApiConfig, setShowApiConfig] = useState(false);
+  const [apiConfigured, setApiConfigured] = useState(false);
+  
+  // Load API config from localStorage or environment variables
+  useEffect(() => {
+    // Try environment variables first (more secure)
+    const envApiKey = process.env.NEXT_PUBLIC_TRADING212_API_KEY;
+    const envApiSecret = process.env.NEXT_PUBLIC_TRADING212_API_SECRET;
+    const envAccountType = process.env.NEXT_PUBLIC_TRADING212_ACCOUNT_TYPE as 'LIVE' | 'DEMO';
+    
+    // Fallback to localStorage
+    const savedApiKey = localStorage.getItem('trading212_api_key');
+    const savedApiSecret = localStorage.getItem('trading212_api_secret');
+    const savedAccountType = localStorage.getItem('trading212_account_type') as 'LIVE' | 'DEMO';
+    const savedDataSource = localStorage.getItem('portfolio_data_source') as 'csv' | 'api';
+    
+    // Prefer environment variables over localStorage
+    if (envApiKey && envApiSecret) {
+      // Create Basic Auth token from env variables
+      const credentials = `${envApiKey}:${envApiSecret}`;
+      const encodedCredentials = btoa(credentials);
+      const authToken = `Basic ${encodedCredentials}`;
+      
+      setApiKey(authToken);
+      setApiSecret(envApiSecret);
+      setAccountType(envAccountType || 'LIVE');
+      setApiConfigured(true);
+      setDataSource('api'); // Automatically use API when env vars are configured
+      console.log('✅ Using Trading 212 credentials from environment variables');
+      console.log('✅ Data source set to: API');
+    } else if (savedApiKey && savedApiSecret) {
+      setApiKey(savedApiKey);
+      setApiSecret(savedApiSecret);
+      setAccountType(savedAccountType || 'LIVE');
+      setApiConfigured(true);
+      console.log('✅ Using Trading 212 credentials from localStorage');
+      
+      // Use saved data source preference or default to API if configured
+      if (savedDataSource) {
+        setDataSource(savedDataSource);
+        console.log(`✅ Data source set to: ${savedDataSource.toUpperCase()}`);
+      } else {
+        setDataSource('api');
+        console.log('✅ Data source set to: API (default)');
+      }
+    } else if (savedDataSource) {
+      // No API configured, use saved data source (likely CSV)
+      setDataSource(savedDataSource);
+      console.log(`✅ Data source set to: ${savedDataSource.toUpperCase()}`);
+    }
+  }, []);
+  
+  // Trading 212 API Hook
+  const trading212 = useTrading212({
+    apiKey: apiConfigured && dataSource === 'api' ? apiKey : '',
+    accountType,
+    autoRefresh: dataSource === 'api',
+    refreshInterval: 30000 // 30 seconds
+  });
+  
+  // Convert Trading 212 API positions to trade format
+  const apiPositions = useMemo(() => {
+    console.log('🔄 Converting API positions:', {
+      dataSource,
+      trading212PositionsCount: trading212.positions.length,
+      willConvert: dataSource === 'api' && trading212.positions.length > 0
+    });
+    
+    if (dataSource !== 'api' || !trading212.positions.length) return [];
+    
+    return trading212.positions.map((pos, index) => {
+      // Clean up ticker: Remove _US_EQ suffix to get clean symbol
+      const cleanSymbol = pos.ticker.replace(/_US_EQ$/, '').replace(/_US$/, '');
+      
+      return {
+        id: `api-${pos.ticker}-${index}`,
+        symbol: cleanSymbol,
+        type: 'BUY' as const,
+        quantity: pos.quantity,
+        price: pos.averagePrice,
+        date: new Date().toISOString().split('T')[0],
+        total: pos.averagePrice * pos.quantity,
+        fees: 0,
+        notes: 'Live position from Trading 212 API',
+        currentPrice: pos.currentPrice,
+        profitLoss: pos.ppl,
+        isOpen: true,
+        side: 'LONG' as const,
+        marketValue: pos.marketValue || pos.currentPrice * pos.quantity,
+        costBasis: pos.averagePrice * pos.quantity,
+        unrealizedPnL: pos.ppl,
+        unrealizedPnLPercent: pos.pplPercent || 0,
+        marketInfo: {
+          price: pos.currentPrice,
+          change: pos.ppl / pos.quantity, // Daily change per share
+          changePercent: pos.pplPercent || 0,
+          volume: 0,
+          timestamp: new Date().toISOString()
+        }
+      };
+    });
+  }, [dataSource, trading212.positions]);
+  
+  // Save API configuration
+  const handleSaveApiConfig = () => {
+    if (!apiKey.trim()) {
+      toast.error('Please enter your Trading 212 API key');
+      return;
+    }
+    if (!apiSecret.trim()) {
+      toast.error('Please enter your Trading 212 API secret');
+      return;
+    }
+    
+    // Create Basic Auth token
+    const credentials = `${apiKey}:${apiSecret}`;
+    const encodedCredentials = btoa(credentials);
+    const authToken = `Basic ${encodedCredentials}`;
+    
+    localStorage.setItem('trading212_api_key', authToken);
+    localStorage.setItem('trading212_api_secret', apiSecret);
+    localStorage.setItem('trading212_account_type', accountType);
+    localStorage.setItem('portfolio_data_source', dataSource);
+    setApiConfigured(true);
+    setShowApiConfig(false);
+    toast.success(`Connected to Trading 212 ${accountType} account`);
+  };
+  
+  // Clear API configuration
+  const handleClearApiConfig = () => {
+    localStorage.removeItem('trading212_api_key');
+    localStorage.removeItem('trading212_api_secret');
+    localStorage.removeItem('trading212_account_type');
+    setApiKey('');
+    setApiSecret('');
+    setApiConfigured(false);
+    setDataSource('csv');
+    localStorage.setItem('portfolio_data_source', 'csv');
+    toast.success('API configuration cleared');
+  };
 
   // Fix hydration issue by ensuring component is mounted before showing time
   useEffect(() => {
@@ -306,10 +459,26 @@ export default function MonitorPage() {
 
   // Calculate portfolio metrics from open positions with real market data
   const portfolioMetrics = useMemo(() => {
-    const openTrades = trades.filter(trade => trade.isOpen);
+    // Use API positions if available, otherwise use CSV trades
+    const openTrades = dataSource === 'api' && apiPositions.length > 0 
+      ? apiPositions 
+      : trades.filter(trade => trade.isOpen);
     
-    console.log('Portfolio Debug - Open trades:', openTrades.length);
-    console.log('Portfolio Debug - All trades:', trades.length);
+    console.log('📊 Portfolio Data Source:', {
+      dataSource,
+      apiPositionsCount: apiPositions.length,
+      csvTradesCount: trades.filter(t => t.isOpen).length,
+      usingApiData: dataSource === 'api' && apiPositions.length > 0,
+      actualPositionsUsed: openTrades.length
+    });
+    
+    if (openTrades.length > 0) {
+      console.log('📋 First 3 positions:', openTrades.slice(0, 3).map(t => ({
+        symbol: t.symbol,
+        quantity: t.quantity,
+        price: t.currentPrice || t.price
+      })));
+    }
     
     // Debug open positions by symbol
     const openPositionsBySymbol = openTrades.reduce((acc, trade) => {
@@ -373,12 +542,27 @@ export default function MonitorPage() {
       unrealizedPnL,
       realizedPnL
     };
-  }, [trades, marketData, refreshTime]);
+  }, [trades, marketData, refreshTime, dataSource, apiPositions]);
 
   const openPositions = useMemo(() => {
-    return trades.filter(trade => trade.isOpen).map(trade => {
+    // Use API positions if available, otherwise use CSV trades
+    const positionsToUse = dataSource === 'api' && apiPositions.length > 0 
+      ? apiPositions 
+      : trades.filter(trade => trade.isOpen);
+    
+    return positionsToUse.map(trade => {
+      // If this is from Trading 212 API, it already has correct currentPrice and unrealizedPnLPercent
+      // Don't recalculate!
+      if (dataSource === 'api' && trade.currentPrice && 'unrealizedPnLPercent' in trade && trade.unrealizedPnLPercent !== undefined) {
+        console.log('✅ Using Trading 212 data for', trade.symbol, {
+          currentPrice: trade.currentPrice,
+          unrealizedPnLPercent: trade.unrealizedPnLPercent
+        });
+        return trade as any;
+      }
+      
+      // For CSV trades, calculate from market data
       const marketInfo = marketData[trade.symbol];
-      // Use real market price if available, otherwise use original trade price (no gain/loss)
       const currentPrice = marketInfo?.price || trade.price;
       const marketValue = currentPrice * trade.quantity;
       const costBasis = trade.price * trade.quantity;
@@ -395,7 +579,7 @@ export default function MonitorPage() {
         marketInfo
       };
     });
-  }, [trades, marketData, refreshTime]);
+  }, [trades, marketData, refreshTime, dataSource, apiPositions]);
 
   const StatCard = ({ title, value, subtitle, color = 'default', icon }: { title: string; value: string | number; subtitle: string; color?: string; icon: string }) => (
     <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
@@ -521,6 +705,185 @@ export default function MonitorPage() {
                 Last updated: {isMounted ? format(lastUpdated, 'HH:mm:ss') : '--:--:--'}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* API Configuration Section */}
+        <div className="mb-6">
+          <div className={`rounded-xl border p-4 transition-all ${
+            isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`px-3 py-1 rounded-lg text-sm font-medium ${
+                  dataSource === 'api' && apiConfigured
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                }`}>
+                  {dataSource === 'api' && apiConfigured ? '🔗 Live API' : '📁 CSV Data'}
+                </div>
+                {dataSource === 'api' && trading212.lastUpdated && (
+                  <span className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Updated: {format(trading212.lastUpdated, 'HH:mm:ss')}
+                  </span>
+                )}
+                {dataSource === 'api' && trading212.isLoading && (
+                  <span className="text-sm text-blue-500 animate-pulse">Refreshing...</span>
+                )}
+                {dataSource === 'api' && trading212.error && (
+                  <span className="text-sm text-red-500">⚠️ {trading212.error}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {apiConfigured && (
+                  <button
+                    onClick={() => {
+                      const newSource = dataSource === 'csv' ? 'api' : 'csv';
+                      setDataSource(newSource);
+                      localStorage.setItem('portfolio_data_source', newSource);
+                      toast.success(`Switched to ${newSource === 'api' ? 'Live API' : 'CSV'} data`);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                      isDarkMode
+                        ? 'bg-blue-900/30 text-blue-300 hover:bg-blue-900/50'
+                        : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                    }`}
+                  >
+                    Switch to {dataSource === 'csv' ? 'API' : 'CSV'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowApiConfig(!showApiConfig)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    isDarkMode
+                      ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                  }`}
+                >
+                  {showApiConfig ? 'Hide' : 'Configure'} API
+                </button>
+              </div>
+            </div>
+
+            {/* API Configuration Form */}
+            {showApiConfig && (
+              <div className="mt-4 pt-4 border-t border-slate-700">
+                <div className="grid gap-4">
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                    }`}>
+                      Trading 212 API Key
+                    </label>
+                    <input
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="Enter your Trading 212 API key"
+                      className={`w-full px-4 py-2 rounded-lg border transition-all ${
+                        isDarkMode
+                          ? 'bg-slate-900 border-slate-600 text-slate-100 placeholder-slate-500'
+                          : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
+                      } focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                    }`}>
+                      Trading 212 API Secret
+                    </label>
+                    <input
+                      type="password"
+                      value={apiSecret}
+                      onChange={(e) => setApiSecret(e.target.value)}
+                      placeholder="Enter your Trading 212 API secret"
+                      className={`w-full px-4 py-2 rounded-lg border transition-all ${
+                        isDarkMode
+                          ? 'bg-slate-900 border-slate-600 text-slate-100 placeholder-slate-500'
+                          : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
+                      } focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                    }`}>
+                      Account Type
+                    </label>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setAccountType('LIVE')}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                          accountType === 'LIVE'
+                            ? isDarkMode
+                              ? 'bg-green-900/50 text-green-300 border-2 border-green-500'
+                              : 'bg-green-100 text-green-800 border-2 border-green-500'
+                            : isDarkMode
+                            ? 'bg-slate-700 text-slate-400 border border-slate-600'
+                            : 'bg-slate-100 text-slate-600 border border-slate-300'
+                        }`}
+                      >
+                        🟢 Live Account
+                      </button>
+                      <button
+                        onClick={() => setAccountType('DEMO')}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                          accountType === 'DEMO'
+                            ? isDarkMode
+                              ? 'bg-blue-900/50 text-blue-300 border-2 border-blue-500'
+                              : 'bg-blue-100 text-blue-800 border-2 border-blue-500'
+                            : isDarkMode
+                            ? 'bg-slate-700 text-slate-400 border border-slate-600'
+                            : 'bg-slate-100 text-slate-600 border border-slate-300'
+                        }`}
+                      >
+                        🔵 Demo Account
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleSaveApiConfig}
+                      className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                        isDarkMode
+                          ? 'bg-green-900/50 text-green-300 hover:bg-green-900/70'
+                          : 'bg-green-600 text-white hover:bg-green-700'
+                      }`}
+                    >
+                      Save & Connect
+                    </button>
+                    {apiConfigured && (
+                      <button
+                        onClick={handleClearApiConfig}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                          isDarkMode
+                            ? 'bg-red-900/30 text-red-300 hover:bg-red-900/50'
+                            : 'bg-red-100 text-red-700 hover:bg-red-200'
+                        }`}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className={`mt-4 p-3 rounded-lg text-xs ${
+                  isDarkMode ? 'bg-blue-900/20 text-blue-300' : 'bg-blue-50 text-blue-700'
+                }`}>
+                  <p className="font-semibold mb-1">ℹ️ How to get your API credentials:</p>
+                  <ol className="list-decimal list-inside space-y-1 ml-2">
+                    <li>Log in to Trading 212</li>
+                    <li>Go to Settings → API (Beta)</li>
+                    <li>Generate a new API key (you'll get both key and secret)</li>
+                    <li>Copy the <strong>API Key</strong> to the first field</li>
+                    <li>Copy the <strong>API Secret</strong> to the second field</li>
+                  </ol>
+                  <p className="mt-2 text-xs opacity-75">
+                    Your credentials are stored locally and never sent to our servers. They're only used for direct Trading 212 API calls.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -689,13 +1052,27 @@ export default function MonitorPage() {
           />
         </div>
 
+        {/* Stop-Loss Monitor - Always visible at top */}
+        <div className="mb-8">
+          <StopLossMonitor positions={openPositions.map(p => {
+            console.log('🚨 Passing to StopLossMonitor:', {
+              symbol: p.symbol,
+              unrealizedPnLPercent: p.unrealizedPnLPercent,
+              price: p.price,
+              currentPrice: p.currentPrice
+            });
+            return p;
+          })} />
+        </div>
+
         {/* View Selector */}
         <div className="mb-8">
           <div className="flex flex-wrap gap-3">
             {[
-              { key: 'overview', label: '📊 Overview', icon: '📊' },
-              { key: 'heatmap', label: '🔥 Heat Map', icon: '🔥' },
-              { key: 'benchmark', label: '📈 Benchmark', icon: '📈' }
+              { key: 'positions', label: '📊 Positions & Stop-Loss', icon: '📊' },
+              { key: 'triage', label: '🔍 Position Triage', icon: '🔍' },
+              { key: 'analytics', label: '📈 Performance Review', icon: '📈' },
+              { key: 'tools', label: '🛠️ Trading Tools', icon: '🛠️' }
             ].map((view) => (
               <button
                 key={view.key}
@@ -712,107 +1089,75 @@ export default function MonitorPage() {
           </div>
         </div>
 
-        {/* Charts Section */}
+        {/* Main Content Section */}
         {openPositions.length > 0 && (
           <div className="mb-6 sm:mb-8">
-            {selectedView === 'overview' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className={`lg:col-span-2 rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
-                  isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
-                }`}>
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-700 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                      </svg>
-                    </div>
-                    <h3 className={`text-xl font-bold transition-colors ${
-                      isDarkMode ? 'text-white' : 'text-gray-900'
-                    }`}>
-                      Portfolio Performance
-                    </h3>
-                  </div>
-                  <div className="h-48 sm:h-64">
-                    <PortfolioChart 
-                      trades={trades} 
-                      portfolioValue={portfolioMetrics.totalValue}
-                      className="w-full h-full"
-                    />
-                  </div>
-                </div>
-
-                <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
-                  isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
-                }`}>
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-700 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
-                      </svg>
-                    </div>
-                    <h3 className={`text-xl font-bold transition-colors ${
-                      isDarkMode ? 'text-white' : 'text-gray-900'
-                    }`}>
-                      Asset Allocation
-                    </h3>
-                  </div>
-                  <div className="h-48 sm:h-64 relative">
-                    <AssetAllocationChart 
-                      positions={openPositions}
-                      totalValue={portfolioMetrics.totalValue}
-                      className="w-full h-full"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {selectedView === 'heatmap' && (
+            {selectedView === 'positions' && (
               <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
-                isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
+                isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
               }`}>
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-red-500 to-pink-600 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-700 flex items-center justify-center">
                     <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
                   <h3 className={`text-xl font-bold transition-colors ${
                     isDarkMode ? 'text-white' : 'text-gray-900'
                   }`}>
-                    Risk Heat Map
+                    Position Summary
                   </h3>
                 </div>
-                <PortfolioHeatMap 
-                  positions={openPositions}
-                  totalValue={portfolioMetrics.totalValue}
-                  className="min-h-96"
-                />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100/50'}`}>
+                    <div className={`text-sm mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Total Positions</div>
+                    <div className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      {openPositions.length}
+                    </div>
+                  </div>
+                  <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100/50'}`}>
+                    <div className={`text-sm mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Total Value</div>
+                    <div className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      {formatCurrency(portfolioMetrics.totalValue)}
+                    </div>
+                  </div>
+                  <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100/50'}`}>
+                    <div className={`text-sm mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Unrealized P/L</div>
+                    <div className={`text-2xl font-bold ${portfolioMetrics.unrealizedPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {portfolioMetrics.unrealizedPnL >= 0 ? '+' : ''}{formatCurrency(portfolioMetrics.unrealizedPnL)}
+                    </div>
+                  </div>
+                  <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100/50'}`}>
+                    <div className={`text-sm mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>At Risk (&gt;8%)</div>
+                    <div className={`text-2xl font-bold ${
+                      openPositions.filter(p => p.unrealizedPnLPercent < -8).length > 0 ? 'text-red-500' : 'text-green-500'
+                    }`}>
+                      {openPositions.filter(p => p.unrealizedPnLPercent < -8).length}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
-            {selectedView === 'benchmark' && (
+            {selectedView === 'triage' && (
+              <PortfolioTriage positions={openPositions} />
+            )}
+
+            {selectedView === 'analytics' && (
               <div className={`rounded-2xl shadow-lg border p-6 transition-all duration-300 backdrop-blur-sm ${
-                isDarkMode ? 'bg-gray-800/90 border-gray-700/50' : 'bg-white/90 border-gray-200/50'
+                isDarkMode ? 'bg-slate-800/90 border-slate-700/50' : 'bg-white/90 border-slate-200/50'
               }`}>
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-teal-600 flex items-center justify-center">
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                  </div>
-                  <h3 className={`text-xl font-bold transition-colors ${
-                    isDarkMode ? 'text-white' : 'text-gray-900'
-                  }`}>
-                    Benchmark Comparison
-                  </h3>
-                </div>
-                <BenchmarkComparison 
-                  portfolioData={[]}
-                  className="min-h-96"
-                />
+                <h3 className={`text-xl font-bold mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  📈 Performance Review
+                </h3>
+                <PerformanceMetrics />
+              </div>
+            )}
+
+            {selectedView === 'tools' && (
+              <div className="space-y-8">
+                <EntryQualityGate openPositionsCount={openPositions.length} maxPositions={5} />
+                <ProfitTakingCalculator />
               </div>
             )}
           </div>
@@ -925,6 +1270,33 @@ export default function MonitorPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        ) : trading212.isLoading && dataSource === 'api' ? (
+          <div className={`rounded-2xl shadow-lg border transition-all duration-300 backdrop-blur-sm ${
+            isDarkMode ? 'bg-slate-800/90 border-slate-700/60' : 'bg-white/90 border-slate-200/60'
+          }`}>
+            <div className="p-12 text-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="relative">
+                  <div className="animate-spin w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full"></div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-2xl">📊</div>
+                  </div>
+                </div>
+                <div>
+                  <h3 className={`text-lg font-bold mb-2 ${
+                    isDarkMode ? 'text-slate-200' : 'text-slate-800'
+                  }`}>
+                    Loading Your Positions...
+                  </h3>
+                  <p className={`text-sm ${
+                    isDarkMode ? 'text-slate-400' : 'text-slate-600'
+                  }`}>
+                    Fetching live data from Trading 212 API
+                  </p>
+                </div>
               </div>
             </div>
           </div>
