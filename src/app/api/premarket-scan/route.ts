@@ -680,10 +680,10 @@ export async function POST(request: NextRequest) {
     
     // Adaptive filters based on market session and strategy
     const baselineFilters: ScanFilters = scanMode === 'premarket' ? 
-      // PREMARKET MODE: Focus on overnight movers with live data potential
+      // PREMARKET MODE: EARLY BREAKOUT DETECTION (1-3 days before breakout)
       (strategy === 'momentum' ? {
-        minChange: 0, // No minimum - focus on 20-day highs
-        maxChange: 100,
+        minChange: -5, // Allow slight pullbacks (building phase)
+        maxChange: 8,  // ❌ CRITICAL: Exclude stocks already up 10%+ (too late!)
         minVolume: 1000000, // >1M volume for momentum
         maxPrice: 20, // <$20 price - CONSISTENT WITH REGULAR HOURS
         minPrice: 1.00, // Avoid penny stocks
@@ -704,10 +704,10 @@ export async function POST(request: NextRequest) {
         maxMarketCap: 0,
         maxFloat: 50000000
       }) :
-      // REGULAR HOURS MODE: Focus on intraday momentum (UPDATED PRICE RANGE)
+      // REGULAR HOURS MODE: EARLY BREAKOUT DETECTION (building setups)
       (strategy === 'momentum' ? {
-        minChange: 0, // No minimum - we want 20-day highs regardless of daily change
-        maxChange: 100,
+        minChange: -5, // Allow consolidation/pullbacks
+        maxChange: 8,  // ❌ Exclude stocks already up 10%+ (late entries)
         minVolume: 1000000, // >1M avg volume (matches sh_avgvol_o1000)
         maxPrice: 20, // <$20 price - EXPANDED RANGE for more opportunities
         minPrice: 1.00,

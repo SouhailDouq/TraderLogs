@@ -53,7 +53,8 @@ interface MomentumConfig {
   minRelativeVolume: number;  // Default: 1.5
   
   // Technical criteria
-  minHighProximity: number;   // Default: 90 (90% of 20-day high)
+  minHighProximity: number;   // Default: 70 (70% of 20-day high for EARLY detection)
+  maxHighProximity: number;   // Default: 89 (exclude stocks already broken out)
   requireSMAAlignment: boolean; // Default: true
   
   // Movement criteria
@@ -61,8 +62,8 @@ interface MomentumConfig {
   maxPremarketChange: number; // Default: 15
   
   // Scoring thresholds
-  earlyBreakoutThreshold: number; // Default: 8 (out of 13)
-  goodSetupThreshold: number;     // Default: 6 (out of 13)
+  earlyBreakoutThreshold: number; // Default: 10 (out of 16)
+  goodSetupThreshold: number;     // Default: 8 (out of 16)
 }
 
 export class MomentumValidator {
@@ -73,12 +74,13 @@ export class MomentumValidator {
       maxPrice: 10,
       minVolume: 1000000,
       minRelativeVolume: 1.5,
-      minHighProximity: 90,
+      minHighProximity: 70,  // EARLY detection: 70-89% range (building phase)
+      maxHighProximity: 89,  // Exclude stocks already at 90%+ (too late)
       requireSMAAlignment: true,
-      minPremarketChange: 3,
-      maxPremarketChange: 15,
-      earlyBreakoutThreshold: 8,
-      goodSetupThreshold: 6,
+      minPremarketChange: -5, // Allow pullbacks/consolidation
+      maxPremarketChange: 8,  // Exclude stocks already up 10%+
+      earlyBreakoutThreshold: 10, // Out of 16 (was 8 out of 13)
+      goodSetupThreshold: 8,      // Out of 16 (was 6 out of 13)
       ...config
     };
   }
@@ -91,7 +93,7 @@ export class MomentumValidator {
     const warnings: string[] = [];
     const reasoning: string[] = [];
     let momentumScore = 0;
-    const maxScore = 13; // Total possible points
+    const maxScore = 16; // Total possible points (increased from 13 due to SMA200 weight)
     
     // 1. PRICE CRITERIA (2 points)
     const priceUnder10 = stockData.currentPrice > 0 && stockData.currentPrice <= this.config.maxPrice;
@@ -123,62 +125,104 @@ export class MomentumValidator {
       reasoning.push(`❌ Low relative volume vs average`);
     }
     
-    // 4. 20-DAY HIGH PROXIMITY (2 points)
+    // 4. 20-DAY HIGH PROXIMITY (3 points - EARLY SETUP DETECTION)
     const proximityToHigh = stockData.technicalData?.proximityToHigh || 0;
-    const near20DayHigh = proximityToHigh >= this.config.minHighProximity;
-    if (near20DayHigh) {
-      momentumScore += 2;
-      reasoning.push(`✅ Near 20-day high (${proximityToHigh.toFixed(1)}% proximity)`);
+    const inEarlySetupRange = proximityToHigh >= this.config.minHighProximity && 
+                              proximityToHigh <= this.config.maxHighProximity;
+    const alreadyBrokenOut = proximityToHigh > this.config.maxHighProximity;
+    
+    if (inEarlySetupRange) {
+      momentumScore += 3; // Full points for EARLY setup (70-89%)
+      reasoning.push(`🎯 EARLY SETUP: ${proximityToHigh.toFixed(1)}% of 20-day high (building phase)`);
+    } else if (alreadyBrokenOut) {
+      momentumScore += 1; // Minimal points - already broken out
+      warnings.push(`⚠️ Already at ${proximityToHigh.toFixed(1)}% of high - may be late entry`);
+      reasoning.push(`⏰ Stock already near/at highs (${proximityToHigh.toFixed(1)}%) - late entry risk`);
     } else {
-      warnings.push(`Only ${proximityToHigh.toFixed(1)}% of 20-day high (need ${this.config.minHighProximity}%+)`);
-      reasoning.push(`❌ Not near recent highs`);
+      warnings.push(`Only ${proximityToHigh.toFixed(1)}% of 20-day high (need ${this.config.minHighProximity}-${this.config.maxHighProximity}%)`);
+      reasoning.push(`❌ Too far from recent highs for breakout setup`);
     }
     
-    // 5. SMA ALIGNMENT (3 points - most important)
+    // 5. SMA ALIGNMENT (6 points total - CRITICAL for momentum)
+    // Based on EODHD guidance: SMA200 indicates long-term trend direction
     let aboveAllSMAs = false;
     const tech = stockData.technicalData;
+    
     if (tech && tech.sma20 > 0 && tech.sma50 > 0) {
       const aboveSMA20 = stockData.currentPrice > tech.sma20;
       const aboveSMA50 = stockData.currentPrice > tech.sma50;
-      const aboveSMA200 = tech.sma200 > 0 ? stockData.currentPrice > tech.sma200 : true; // Allow missing SMA200
-      const smaAlignment = tech.sma20 > tech.sma50 && (tech.sma200 > 0 ? tech.sma50 > tech.sma200 : true);
       
-      if (aboveSMA20 && aboveSMA50 && aboveSMA200 && smaAlignment) {
-        momentumScore += 3;
-        aboveAllSMAs = true;
-        if (tech.sma200 > 0) {
-          reasoning.push(`✅ Perfect SMA alignment (20>${tech.sma20.toFixed(2)}, 50>${tech.sma50.toFixed(2)}, 200>${tech.sma200.toFixed(2)})`);
-        } else {
-          reasoning.push(`✅ Good SMA alignment (20>${tech.sma20.toFixed(2)}, 50>${tech.sma50.toFixed(2)}, SMA200 unavailable)`);
-        }
-      } else if (aboveSMA20 && aboveSMA50) {
-        momentumScore += 2; // Give more credit when SMA200 is missing
-        reasoning.push(`⚠️ Partial SMA alignment (above 20&50${tech.sma200 > 0 ? ', below 200' : ', SMA200 unavailable'})`);
+      // A) Short-term alignment: SMA20 & SMA50 (2 points)
+      if (aboveSMA20 && aboveSMA50) {
+        momentumScore += 2;
+        reasoning.push(`✅ Above short-term SMAs (20: $${tech.sma20.toFixed(2)}, 50: $${tech.sma50.toFixed(2)})`);
+      } else if (aboveSMA20) {
+        momentumScore += 1;
+        reasoning.push(`⚠️ Above SMA20 only (below SMA50: $${tech.sma50.toFixed(2)})`);
       } else {
-        warnings.push(`Poor SMA alignment - not above key moving averages`);
-        reasoning.push(`❌ Below critical SMAs (20:${aboveSMA20}, 50:${aboveSMA50})`);
+        warnings.push(`Below short-term SMAs - weak momentum`);
+        reasoning.push(`❌ Below SMA20 ($${tech.sma20.toFixed(2)}) - no short-term momentum`);
       }
+      
+      // B) Long-term trend: SMA200 (2 points - MANDATORY per EODHD)
+      if (tech.sma200 > 0) {
+        const aboveSMA200 = stockData.currentPrice > tech.sma200;
+        if (aboveSMA200) {
+          momentumScore += 2;
+          reasoning.push(`✅ Above SMA200 ($${tech.sma200.toFixed(2)}) - long-term uptrend confirmed`);
+        } else {
+          warnings.push(`🚫 CRITICAL: Below SMA200 ($${tech.sma200.toFixed(2)}) - long-term downtrend`);
+          reasoning.push(`❌ Below SMA200 - avoid trading against long-term trend`);
+        }
+      } else {
+        warnings.push(`⚠️ SMA200 unavailable - cannot confirm long-term trend`);
+        reasoning.push(`❓ Missing SMA200 - trend direction uncertain`);
+      }
+      
+      // C) Perfect alignment: 20 > 50 > 200 (2 points bonus)
+      const sma200Valid = tech.sma200 > 0;
+      const perfectAlignment = aboveSMA20 && aboveSMA50 && 
+                              (sma200Valid ? stockData.currentPrice > tech.sma200 : false) &&
+                              tech.sma20 > tech.sma50 && 
+                              (sma200Valid ? tech.sma50 > tech.sma200 : false);
+      
+      if (perfectAlignment) {
+        momentumScore += 2;
+        aboveAllSMAs = true;
+        reasoning.push(`🎯 PERFECT SMA ALIGNMENT: 20>50>200 (strongest momentum setup)`);
+      } else if (aboveSMA20 && aboveSMA50 && tech.sma20 > tech.sma50) {
+        momentumScore += 1;
+        reasoning.push(`⚠️ Partial alignment (20>50 but ${sma200Valid ? 'not above 200' : 'SMA200 missing'})`);
+      }
+      
     } else {
-      warnings.push(`SMA data unavailable for technical validation`);
-      reasoning.push(`❓ Missing SMA data (20:${tech?.sma20 || 0}, 50:${tech?.sma50 || 0})`);
+      warnings.push(`Critical SMA data missing - cannot validate momentum`);
+      reasoning.push(`❌ Missing SMA data (20:${tech?.sma20 || 0}, 50:${tech?.sma50 || 0}, 200:${tech?.sma200 || 0})`);
     }
     
-    // 6. PREMARKET MOVEMENT (2 points)
-    const changePercent = Math.abs(stockData.changePercent);
-    const premarketMovement = changePercent >= this.config.minPremarketChange && 
-                             changePercent <= this.config.maxPremarketChange;
-    if (premarketMovement) {
+    // 6. DAILY MOVEMENT (2 points - EARLY SETUP FOCUS)
+    const changePercent = stockData.changePercent; // Keep sign for pullback detection
+    const absChange = Math.abs(changePercent);
+    const inBuildingRange = changePercent >= this.config.minPremarketChange && 
+                           changePercent <= this.config.maxPremarketChange;
+    const alreadyRunning = absChange > this.config.maxPremarketChange;
+    
+    if (inBuildingRange) {
       momentumScore += 2;
-      reasoning.push(`✅ Ideal premarket movement ${stockData.changePercent.toFixed(2)}% (${this.config.minPremarketChange}-${this.config.maxPremarketChange}% range)`);
-    } else if (changePercent > this.config.maxPremarketChange) {
-      warnings.push(`Already moved ${changePercent.toFixed(2)}% - may be late entry`);
-      reasoning.push(`⚠️ Large move already - late entry risk`);
-    } else if (changePercent < this.config.minPremarketChange) {
-      warnings.push(`Minimal movement ${changePercent.toFixed(2)}% - no momentum yet`);
-      reasoning.push(`❌ Insufficient premarket momentum`);
+      if (changePercent < 0) {
+        reasoning.push(`✅ Healthy pullback ${changePercent.toFixed(2)}% (consolidation before breakout)`);
+      } else {
+        reasoning.push(`✅ Building momentum ${changePercent.toFixed(2)}% (early phase)`);
+      }
+    } else if (alreadyRunning) {
+      warnings.push(`⚠️ Already moved ${absChange.toFixed(2)}% - LATE ENTRY (missed early phase)`);
+      reasoning.push(`🚫 Stock already running ${changePercent.toFixed(2)}% - too late for early entry`);
+    } else if (absChange < Math.abs(this.config.minPremarketChange)) {
+      warnings.push(`Minimal movement ${changePercent.toFixed(2)}% - still building`);
+      reasoning.push(`⏳ Quiet consolidation - watch for volume increase`);
     }
     
-    // DETERMINE BREAKOUT STATUS
+    // DETERMINE BREAKOUT STATUS (adjusted thresholds for new max score of 16)
     const isEarlyBreakout = momentumScore >= this.config.earlyBreakoutThreshold;
     const isGoodSetup = momentumScore >= this.config.goodSetupThreshold;
     
@@ -210,9 +254,9 @@ export class MomentumValidator {
         priceUnder10,
         volumeOver1M,
         relativeVolumeOk,
-        near20DayHigh,
+        near20DayHigh: inEarlySetupRange, // Renamed: checks if in 70-89% range
         aboveAllSMAs,
-        premarketMovement
+        premarketMovement: inBuildingRange // Renamed: checks if in -5% to +8% range
       },
       confidence,
       reasoning
@@ -278,17 +322,32 @@ export class MomentumValidator {
  * PREDEFINED CONFIGURATIONS
  */
 export const MOMENTUM_CONFIGS = {
-  // Your current Finviz-based criteria
+  // EARLY BREAKOUT DETECTION (1-3 days before breakout)
+  EARLY_BREAKOUT: {
+    maxPrice: 10,
+    minVolume: 1000000,
+    minRelativeVolume: 1.5,
+    minHighProximity: 70,  // Building phase: 70-89% of highs
+    maxHighProximity: 89,  // Exclude already broken out (90%+)
+    requireSMAAlignment: true,
+    minPremarketChange: -5, // Allow pullbacks
+    maxPremarketChange: 8,  // Exclude stocks already running 10%+
+    earlyBreakoutThreshold: 10, // Out of 16 points
+    goodSetupThreshold: 8       // Out of 16 points
+  },
+  
+  // Your current Finviz-based criteria (LATE - catches after breakout)
   FINVIZ_CLASSIC: {
     maxPrice: 10,
     minVolume: 1000000,
     minRelativeVolume: 1.5,
-    minHighProximity: 90,
+    minHighProximity: 90,  // Already broken out
+    maxHighProximity: 100,
     requireSMAAlignment: true,
     minPremarketChange: 0,
     maxPremarketChange: 100,
-    earlyBreakoutThreshold: 8,
-    goodSetupThreshold: 6
+    earlyBreakoutThreshold: 10, // Out of 16 points
+    goodSetupThreshold: 8       // Out of 16 points
   },
   
   // More conservative approach
@@ -296,33 +355,36 @@ export const MOMENTUM_CONFIGS = {
     maxPrice: 20,
     minVolume: 2000000,
     minRelativeVolume: 2.0,
-    minHighProximity: 95,
+    minHighProximity: 75,
+    maxHighProximity: 89,
     requireSMAAlignment: true,
-    minPremarketChange: 3,
-    maxPremarketChange: 12,
-    earlyBreakoutThreshold: 10,
-    goodSetupThreshold: 8
+    minPremarketChange: -3,
+    maxPremarketChange: 6,
+    earlyBreakoutThreshold: 12, // Out of 16 points (higher threshold)
+    goodSetupThreshold: 10      // Out of 16 points
   },
   
-  // More aggressive for early detection
+  // More aggressive for very early detection
   AGGRESSIVE: {
     maxPrice: 15,
     minVolume: 500000,
     minRelativeVolume: 1.2,
-    minHighProximity: 85,
+    minHighProximity: 65,  // Even earlier: 65-89%
+    maxHighProximity: 89,
     requireSMAAlignment: false,
-    minPremarketChange: 1,
-    maxPremarketChange: 20,
-    earlyBreakoutThreshold: 6,
-    goodSetupThreshold: 4
+    minPremarketChange: -8,
+    maxPremarketChange: 8,
+    earlyBreakoutThreshold: 8,  // Out of 16 points (lower threshold)
+    goodSetupThreshold: 6       // Out of 16 points
   }
 };
 
 /**
  * GLOBAL MOMENTUM VALIDATOR INSTANCE
  * Used across the application for consistency
+ * SWITCHED TO EARLY_BREAKOUT: Catches stocks 1-3 days BEFORE they break out
  */
-export const momentumValidator = new MomentumValidator(MOMENTUM_CONFIGS.FINVIZ_CLASSIC);
+export const momentumValidator = new MomentumValidator(MOMENTUM_CONFIGS.EARLY_BREAKOUT);
 
 /**
  * CONVENIENCE FUNCTIONS

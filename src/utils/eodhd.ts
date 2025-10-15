@@ -1884,7 +1884,8 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
     console.log(`⚠️ No real relative volume data - volume component neutral`);
   }
   
-  // COMPONENT 3: ENHANCED TECHNICAL STRENGTH SCORE (Max 20 points, 20% weight)
+  // COMPONENT 3: ENHANCED TECHNICAL STRENGTH SCORE (Max 23 points, 23% weight)
+  // Increased from 20 to 23 to account for perfect alignment bonus
   let technicalScore = 0;
   
   if (technicals) {
@@ -1893,33 +1894,53 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
     const sma200 = technicals.SMA_200 || 0;
     const rsi = technicals.RSI_14 || 0;
     
-    // SMA Alignment (max 12 points) - PROPER MOMENTUM ALIGNMENT
+    // SMA Alignment (max 15 points) - STRICT MOMENTUM ALIGNMENT (per EODHD guidance)
     let smaScore = 0;
     console.log(`📊 SMA Analysis: Price=${currentPrice.toFixed(2)}, SMA20=${sma20.toFixed(2)}, SMA50=${sma50.toFixed(2)}, SMA200=${sma200.toFixed(2)}`);
     
-    // Check if price is above each SMA (momentum requirement)
-    if (currentPrice > sma200 && sma200 > 0) {
-      smaScore += 5; // Long-term trend
-      console.log(`✅ Price above SMA200: +5 points`);
+    // A) SMA200 - MANDATORY for long-term trend confirmation (per EODHD)
+    if (sma200 > 0) {
+      if (currentPrice > sma200) {
+        smaScore += 5; // Long-term uptrend confirmed
+        console.log(`✅ Price above SMA200: +5 points`);
+      } else {
+        smaScore -= 8; // PENALTY: Trading against long-term trend (CRITICAL)
+        console.log(`🚫 CRITICAL: Price below SMA200 ($${sma200.toFixed(2)}) - PENALTY -8 points (long-term downtrend)`);
+      }
     } else {
-      console.log(`❌ Price below SMA200: 0 points`);
+      smaScore -= 3; // Missing SMA200 = cannot confirm trend
+      console.log(`⚠️ SMA200 unavailable - PENALTY -3 points (trend uncertain)`);
     }
     
+    // B) SMA50 - Medium-term trend
     if (currentPrice > sma50 && sma50 > 0) {
       smaScore += 4; // Medium-term trend  
       console.log(`✅ Price above SMA50: +4 points`);
-    } else {
-      console.log(`❌ Price below SMA50: 0 points`);
+    } else if (sma50 > 0) {
+      smaScore -= 2; // Below medium-term trend
+      console.log(`❌ Price below SMA50: -2 points`);
     }
     
+    // C) SMA20 - Short-term trend
     if (currentPrice > sma20 && sma20 > 0) {
       smaScore += 3; // Short-term trend
       console.log(`✅ Price above SMA20: +3 points`);
-    } else {
-      console.log(`❌ Price below SMA20: 0 points`);
+    } else if (sma20 > 0) {
+      smaScore -= 1; // Below short-term trend
+      console.log(`❌ Price below SMA20: -1 point`);
     }
     
-    console.log(`📊 Total SMA Score: ${smaScore}/12 points`);
+    // D) Perfect alignment bonus (20>50>200)
+    if (sma20 > 0 && sma50 > 0 && sma200 > 0) {
+      const perfectAlignment = currentPrice > sma20 && currentPrice > sma50 && currentPrice > sma200 &&
+                              sma20 > sma50 && sma50 > sma200;
+      if (perfectAlignment) {
+        smaScore += 3; // Bonus for perfect alignment
+        console.log(`🎯 PERFECT SMA ALIGNMENT (20>50>200): +3 bonus points`);
+      }
+    }
+    
+    console.log(`📊 Total SMA Score: ${smaScore}/15 points (range: -11 to +15)`);
     
     // Enhanced MACD Analysis (max 8 points, with enhanced logic)
     let macdScore = 0;
@@ -1993,7 +2014,7 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
     
     // TODO: Integrate full enhanced MACD analysis in future version
     
-    technicalScore = Math.min(smaScore + macdScore, 20); // Cap at 20 points
+    technicalScore = Math.min(smaScore + macdScore, 23); // Cap at 23 points (increased for alignment bonus)
   }
   
   // COMPONENT 4: RISK ASSESSMENT SCORE (-20 to 0 points, 20% weight)
