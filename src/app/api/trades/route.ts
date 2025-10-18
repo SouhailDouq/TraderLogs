@@ -11,14 +11,19 @@ const tradeService = new TradeService()
 export async function GET() {
   try {
     const user = await getAuthenticatedUser()
+    console.log('🔍 GET /api/trades - Authenticated user:', user ? { id: user.id, email: user.email } : 'null')
+    
     if (!user) {
+      console.warn('⚠️ GET /api/trades - No authenticated user, returning 401')
       return createUnauthorizedResponse()
     }
 
+    console.log('📊 GET /api/trades - Fetching trades for user:', user.id)
     const trades = await tradeService.getAllTrades(user.id)
+    console.log('✅ GET /api/trades - Found', trades.trades?.length || 0, 'trades')
     return NextResponse.json(trades)
   } catch (error) {
-    console.error('Error fetching trades:', error)
+    console.error('❌ GET /api/trades - Error:', error)
     return NextResponse.json({ error: 'Failed to fetch trades' }, { status: 500 })
   }
 }

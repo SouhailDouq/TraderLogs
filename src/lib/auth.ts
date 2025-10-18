@@ -17,15 +17,24 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    session: async ({ session, token }) => {
-      if (session?.user && token?.sub) {
-        (session.user as any).id = token.sub
+    session: async ({ session, token, user }) => {
+      if (session?.user) {
+        // Use token.sub which is the standard JWT subject claim
+        // This is set by NextAuth automatically from the database user ID
+        if (token?.sub) {
+          (session.user as any).id = token.sub
+          console.log('✅ Session callback - User ID set:', token.sub)
+        } else {
+          console.warn('⚠️ Session callback - No token.sub found')
+        }
       }
       return session
     },
-    jwt: async ({ user, token }) => {
+    jwt: async ({ token, user, account }) => {
+      // When user signs in, add their ID to the token
       if (user) {
-        token.uid = user.id
+        token.sub = user.id
+        console.log('✅ JWT callback - User signed in, ID:', user.id)
       }
       return token
     },

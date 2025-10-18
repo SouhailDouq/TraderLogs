@@ -7,7 +7,8 @@
     "build": "npx prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "npx prisma generate"
+    "postinstall": "npx prisma generate",
+    "verify-auth": "node scripts/verify-auth.js"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.10.0",
