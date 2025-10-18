@@ -159,6 +159,10 @@ export class TradeService {
             profitLoss: trade.profitLoss || 0,
             source,
             sourceId,
+            // Position tracking fields
+            positionOpenedAt: trade.positionOpenedAt ? new Date(trade.positionOpenedAt) : null,
+            exitDeadline: trade.exitDeadline ? new Date(trade.exitDeadline) : null,
+            exitReason: trade.exitReason || null,
             createdAt: new Date(),
             updatedAt: new Date()
           }
@@ -310,16 +314,42 @@ export class TradeService {
       }
       
       // Prepare the update data with proper typing for Prisma
-      const { journal, ...otherData } = updateData
+      const { journal, positionOpenedAt, exitDeadline, exitReason, ...otherData } = updateData
       const updatePayload: any = {
-        ...otherData,
         updatedAt: new Date()
       }
+      
+      // Only include fields that are explicitly provided
+      Object.keys(otherData).forEach(key => {
+        if (otherData[key as keyof typeof otherData] !== undefined) {
+          updatePayload[key] = otherData[key as keyof typeof otherData]
+        }
+      })
       
       // Handle journal field separately to ensure proper JSON serialization
       if (journal !== undefined) {
         updatePayload.journal = journal
+        console.log('📝 Setting journal')
       }
+      
+      // Handle position tracking date fields - convert strings to Date objects
+      if (positionOpenedAt !== undefined) {
+        const openedDate = positionOpenedAt ? new Date(positionOpenedAt) : null
+        updatePayload.positionOpenedAt = openedDate
+        console.log('📅 Setting positionOpenedAt:', positionOpenedAt, '→', openedDate)
+      }
+      if (exitDeadline !== undefined) {
+        const deadlineDate = exitDeadline ? new Date(exitDeadline) : null
+        updatePayload.exitDeadline = deadlineDate
+        console.log('📅 Setting exitDeadline:', exitDeadline, '→', deadlineDate)
+      }
+      if (exitReason !== undefined) {
+        updatePayload.exitReason = exitReason
+        console.log('📝 Setting exitReason:', exitReason)
+      }
+      
+      console.log('💾 Final update payload keys:', Object.keys(updatePayload))
+      console.log('💾 Final update payload:', JSON.stringify(updatePayload, null, 2))
       
       const updatedTrade = await prisma.trade.update({
         where: { id },

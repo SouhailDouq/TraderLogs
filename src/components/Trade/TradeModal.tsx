@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import { Trade, useTradeStore } from '@/utils/store'
 import TradeAnalysis from './TradeAnalysis'
 import TradeJournal from './TradeJournal'
+import PositionTracker from './PositionTracker'
 import { formatCurrency } from '@/utils/formatters'
 import { toast } from 'react-hot-toast'
 import { createPortal } from 'react-dom'
@@ -33,6 +34,51 @@ export default function TradeModal({ isOpen, date, trades, onClose }: TradeModal
   }, [])
 
   if (!isOpen || !mounted) return null
+
+  const handlePositionTrackerSave = async (tradeId: string, positionData: {
+    positionOpenedAt: string
+    exitDeadline?: string
+    exitReason?: string
+  }) => {
+    try {
+      console.log('💾 Saving position tracking:', { tradeId, positionData })
+      
+      // Save to database
+      const response = await fetch(`/api/trades/${tradeId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          positionOpenedAt: positionData.positionOpenedAt,
+          exitDeadline: positionData.exitDeadline,
+          exitReason: positionData.exitReason
+        }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('❌ API Error response:', errorText)
+        throw new Error(`Failed to save position tracking: ${response.status} ${errorText}`)
+      }
+
+      const savedTrade = await response.json()
+      console.log('✅ Position tracking saved to DB:', savedTrade)
+
+      // Fetch fresh data from API to ensure we have the latest
+      const refreshResponse = await fetch('/api/trades')
+      if (refreshResponse.ok) {
+        const refreshData = await refreshResponse.json()
+        setTrades(refreshData.trades || [])
+        console.log('🔄 Refreshed all trades from database')
+      }
+
+      toast.success('Position tracking saved!')
+    } catch (error) {
+      console.error('❌ Error saving position tracking:', error)
+      toast.error('Failed to save position tracking')
+    }
+  }
 
   const handleJournalSave = async (tradeId: string, journalData: {
     notes: string
@@ -202,6 +248,20 @@ export default function TradeModal({ isOpen, date, trades, onClose }: TradeModal
                   </div>
                 </div>
               </div>
+
+              {trade.isOpen && (
+                <div className="mt-4 border-t border-gray-600 pt-4">
+                  <PositionTracker
+                    tradeId={trade.id || ''}
+                    symbol={trade.symbol}
+                    openDate={trade.date}
+                    positionOpenedAt={trade.positionOpenedAt}
+                    exitDeadline={trade.exitDeadline}
+                    exitReason={trade.exitReason}
+                    onSave={(data) => handlePositionTrackerSave(trade.id || '', data)}
+                  />
+                </div>
+              )}
 
               {trade.type === 'BUY' && (
                 <div className="mt-4 border-t pt-4">

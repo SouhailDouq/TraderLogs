@@ -19,6 +19,8 @@ interface CalendarDay {
   hasOpenPositions: boolean
   closedTradesCount: number
   openTradesCount: number
+  hasDeadlineWarning: boolean // True if open position has deadline approaching
+  daysHeld: number // Days position has been held
 }
 
 const selectProcessedTrades = (state: TradeStore) => {
@@ -56,6 +58,21 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
       const openTrades = dayTrades.filter(t => t.isOpen === true || (t.isOpen === null && t.profitLoss === 0))
       const profit = closedTrades.reduce((sum: number, t: Trade) => sum + (t.profitLoss ?? 0), 0)
 
+      // Check for deadline warnings on open positions
+      const today = new Date()
+      const hasDeadlineWarning = openTrades.some(t => {
+        if (!t.exitDeadline) return false
+        const deadline = new Date(t.exitDeadline)
+        const daysUntilDeadline = Math.ceil((deadline.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+        return daysUntilDeadline <= 3 && daysUntilDeadline >= 0 // Warning within 3 days
+      })
+
+      // Calculate days held for oldest open position
+      const daysHeld = openTrades.length > 0 ? Math.max(...openTrades.map(t => {
+        const openDate = new Date(t.positionOpenedAt || t.date)
+        return Math.floor((today.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24))
+      })) : 0
+
       days.push({
         date: dateStr,
         isCurrentMonth: isSameMonth(day, currentMonth),
@@ -66,7 +83,9 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
         isProfitable: profit > 0,
         hasOpenPositions: openTrades.length > 0,
         closedTradesCount: closedTrades.length,
-        openTradesCount: openTrades.length
+        openTradesCount: openTrades.length,
+        hasDeadlineWarning,
+        daysHeld
       })
 
       day = addDays(day, 1)
@@ -310,7 +329,7 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
             <div
               key={idx}
               onClick={() => handleDateClick(day.date)}
-              title={day.hasData ? `${day.trades.length} trade${day.trades.length !== 1 ? 's' : ''} - ${day.closedTradesCount} closed, ${day.openTradesCount} open` : ''}
+              title={day.hasData ? `${day.trades.length} trade${day.trades.length !== 1 ? 's' : ''} - ${day.closedTradesCount} closed, ${day.openTradesCount} open${day.hasOpenPositions && day.daysHeld > 0 ? ` (${day.daysHeld}d held)` : ''}${day.hasDeadlineWarning ? ' ⚠️ Deadline approaching' : ''}` : ''}
               className={`
                 relative min-h-[60px] sm:min-h-[80px] p-1 sm:p-3 cursor-pointer 
                 transition-all duration-200 border rounded-lg sm:rounded-xl
@@ -338,9 +357,13 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
                       <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full shadow-sm" 
                            title={`${day.closedTradesCount} closed trades`}></div>
                     )}
-                    {day.openTradesCount > 0 && (
+                    {day.openTradesCount > 0 && !day.hasDeadlineWarning && (
                       <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gradient-to-r from-blue-400 to-cyan-500 rounded-full shadow-sm animate-pulse" 
                            title={`${day.openTradesCount} open positions`}></div>
+                    )}
+                    {day.hasDeadlineWarning && (
+                      <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full shadow-sm animate-pulse" 
+                           title="Deadline approaching - consider exit"></div>
                     )}
                   </div>
                 )}
@@ -361,12 +384,14 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
                 </div>
               )}
               
-              {/* Open positions indicator */}
+              {/* Open positions indicator with duration */}
               {day.hasOpenPositions && day.closedTradesCount === 0 && (
                 <div className={`text-xs font-semibold ${
-                  isDarkMode ? 'text-blue-400' : 'text-blue-600'
+                  day.hasDeadlineWarning
+                    ? (isDarkMode ? 'text-yellow-400' : 'text-orange-600')
+                    : (isDarkMode ? 'text-blue-400' : 'text-blue-600')
                 }`}>
-                  <span className="hidden sm:inline">Open</span>
+                  <span className="hidden sm:inline">{day.daysHeld > 0 ? `${day.daysHeld}d` : 'Open'}</span>
                   <span className="sm:hidden">•</span>
                 </div>
               )}

@@ -56,9 +56,25 @@ export default function Home() {
               emotion: 'neutral',
               rating: 3,
               createdAt: new Date().toISOString()
-            }
+            },
+            // Position tracking fields
+            positionOpenedAt: dbTrade.positionOpenedAt,
+            exitDeadline: dbTrade.exitDeadline,
+            exitReason: dbTrade.exitReason
           }))
           console.log('Mapped trades with database IDs:', mappedTrades)
+          
+          // Log trades with deadlines for debugging
+          const tradesWithDeadlines = mappedTrades.filter((t: any) => t.exitDeadline)
+          if (tradesWithDeadlines.length > 0) {
+            console.log('📅 Trades with deadlines loaded:', tradesWithDeadlines.map((t: any) => ({
+              symbol: t.symbol,
+              exitDeadline: t.exitDeadline,
+              positionOpenedAt: t.positionOpenedAt,
+              exitReason: t.exitReason
+            })))
+          }
+          
           setTrades(mappedTrades)
           
           // Set date range from trades

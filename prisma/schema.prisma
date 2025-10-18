@@ -83,6 +83,12 @@ model Trade {
   journal      Json?    // Journal entry with notes, tags, emotion, rating, etc.
   source       String?  // 'CSV' or 'API'
   sourceId     String?  // Original ID from source (e.g., Trading212 order ID)
+  
+  // Position tracking for open trades
+  positionOpenedAt DateTime? // When position was opened
+  exitDeadline     DateTime? // Target date to exit if not profitable
+  exitReason       String?   // Reason for setting deadline (e.g., "Move capital elsewhere")
+  
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

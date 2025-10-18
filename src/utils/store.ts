@@ -35,6 +35,10 @@ export interface Trade {
   takeProfit?: number
   time?: string
   createdAt?: string
+  // Position tracking for open trades
+  positionOpenedAt?: string // When position was opened
+  exitDeadline?: string // Target date to exit if not profitable
+  exitReason?: string // Reason for setting deadline
   // Extended analysis fields
   volume?: number
   avgVolume?: number
