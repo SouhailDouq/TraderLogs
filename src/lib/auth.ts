@@ -17,6 +17,25 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
+    signIn: async ({ user, account, profile }) => {
+      // Prevent duplicate user creation
+      // Check if user with this email already exists
+      if (user.email) {
+        const existingUser = await prisma.user.findUnique({
+          where: { email: user.email }
+        })
+        
+        if (existingUser && user.id !== existingUser.id) {
+          console.log('⚠️ User with this email already exists:', existingUser.email)
+          console.log('   Existing user ID:', existingUser.id)
+          console.log('   New user ID:', user.id)
+          console.log('   This should not happen - PrismaAdapter should handle this')
+        }
+      }
+      
+      // Always allow sign in (PrismaAdapter handles the rest)
+      return true
+    },
     session: async ({ session, token, user }) => {
       if (session?.user) {
         // Use token.sub which is the standard JWT subject claim

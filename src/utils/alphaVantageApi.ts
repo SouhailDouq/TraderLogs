@@ -462,6 +462,56 @@ async function calculateRealSMAs(symbol: string, currentPrice: number): Promise<
   }
 }
 
+// Get company fundamentals (float, shares outstanding, institutional ownership)
+export async function getCompanyFundamentals(symbol: string): Promise<{
+  sharesFloat?: number
+  sharesOutstanding?: number
+  institutionalOwnership?: number
+} | null> {
+  try {
+    // Check if API key is configured
+    if (!ALPHA_VANTAGE_API_KEY || ALPHA_VANTAGE_API_KEY === 'demo') {
+      console.log(`⚠️ ${symbol}: Alpha Vantage API key not configured (using demo key)`)
+      return null
+    }
+
+    const response = await fetch(
+      `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`
+    )
+    const data = await response.json()
+
+    // Check for API errors or rate limiting
+    if (data['Error Message']) {
+      console.log(`⚠️ ${symbol}: Alpha Vantage error - ${data['Error Message']}`)
+      return null
+    }
+    
+    if (data['Note']) {
+      console.log(`🚫 ${symbol}: Alpha Vantage rate limited - ${data['Note']}`)
+      return null
+    }
+
+    // Log raw response for debugging
+    console.log(`🔍 ${symbol}: Alpha Vantage response keys:`, Object.keys(data).slice(0, 10).join(', '))
+
+    // Extract fundamental data
+    const sharesOutstanding = data['SharesOutstanding'] ? parseFloat(data['SharesOutstanding']) : undefined
+    const sharesFloat = data['SharesFloat'] ? parseFloat(data['SharesFloat']) : undefined
+    const institutionalOwnership = data['PercentInstitutions'] ? parseFloat(data['PercentInstitutions']) * 100 : undefined
+
+    console.log(`📊 ${symbol}: Parsed data - Float: ${sharesFloat}, Outstanding: ${sharesOutstanding}, Inst: ${institutionalOwnership}`)
+
+    return {
+      sharesFloat,
+      sharesOutstanding,
+      institutionalOwnership
+    }
+  } catch (error) {
+    console.error(`❌ ${symbol}: Error fetching Alpha Vantage fundamentals:`, error)
+    return null
+  }
+}
+
 // Alternative: Fetch from Yahoo Finance (unofficial but free) - improved version
 export async function fetchStockDataYahoo(symbol: string): Promise<AlphaVantageStockData | null> {
   try {

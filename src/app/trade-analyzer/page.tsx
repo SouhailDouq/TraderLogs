@@ -9,6 +9,7 @@ import { convertCurrency, formatCurrencyWithSymbol } from '@/utils/currency'
 import CurrencySwitcher from '@/components/CurrencySwitcher'
 import { StrategySelector, TradingStrategy } from '@/components/Strategy/StrategySelector'
 import TradeValidationPanel from '@/components/TradeValidationPanel'
+import MarketConditionIndicator from '@/components/MarketConditionIndicator'
 import { scoringEngine, type StockData as ScoringStockData } from '@/utils/scoringEngine'
 // Removed direct API import - now using backend route
 
@@ -159,7 +160,7 @@ export default function TradeAnalyzer() {
   const isDarkMode = useDarkMode()
   const { currency, toggleCurrency } = useCurrency()
   const searchParams = useSearchParams()
-  const [selectedStrategy, setSelectedStrategy] = useState<TradingStrategy>('technical-momentum')
+  const [selectedStrategy, setSelectedStrategy] = useState<TradingStrategy>('momentum')
   
   // Helper function to format currency with conversion
   const formatPrice = (amount: number): string => {
@@ -366,8 +367,8 @@ export default function TradeAnalyzer() {
     const warnings: string[] = []
 
     // Strategy-specific analysis adjustments
-    const isNewsStrategy = selectedStrategy === 'news-momentum'
-    const isTechnicalStrategy = selectedStrategy === 'technical-momentum'
+    const isMeanReversionStrategy = selectedStrategy === 'mean-reversion'
+    const isMomentumStrategy = selectedStrategy === 'momentum'
     
     // Use the enhanced score from API (calculated with same logic as premarket scanner)
     const score = stockData.score || 0
@@ -524,10 +525,10 @@ export default function TradeAnalyzer() {
     }
 
     // Price criteria check
-    if (isTechnicalStrategy && currentPrice <= 10) {
-      signals.push('Price under $10 - meets technical momentum criteria')
-    } else if (isNewsStrategy && currentPrice >= 2 && currentPrice <= 20) {
-      signals.push('Price in $2-20 range - meets news momentum criteria')
+    if (isMomentumStrategy && currentPrice <= 20) {
+      signals.push('Price under $20 - meets momentum breakout criteria')
+    } else if (isMeanReversionStrategy && currentPrice >= 5 && currentPrice <= 50) {
+      signals.push('Price in $5-50 range - meets mean reversion criteria')
     }
 
     // Overall assessment
@@ -753,11 +754,21 @@ export default function TradeAnalyzer() {
               <p className={`mt-2 ${
                 isDarkMode ? 'text-gray-300' : 'text-gray-600'
               }`}>
-                Analyze {selectedStrategy === 'technical-momentum' ? 'technical momentum/breakout' : 'news-based momentum'} setups with strategy-specific criteria
+                Analyze {selectedStrategy === 'momentum' ? 'momentum breakout' : 'mean reversion'} setups with strategy-specific criteria
               </p>
             </div>
             <CurrencySwitcher currency={currency} onToggle={toggleCurrency} />
           </div>
+        </div>
+
+        {/* Market Condition Indicator */}
+        <div className="mb-6">
+          <MarketConditionIndicator 
+            onStrategyRecommendation={(strategy) => {
+              setSelectedStrategy(strategy)
+              console.log(`Market recommends: ${strategy} strategy`)
+            }}
+          />
         </div>
 
         {/* Strategy Selection */}

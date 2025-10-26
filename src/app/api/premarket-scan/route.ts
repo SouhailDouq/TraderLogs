@@ -172,6 +172,8 @@ interface ScanFilters {
   minMarketCap?: number
   maxMarketCap?: number
   maxFloat?: number
+  minInstitutionalOwnership?: number
+  maxInstitutionalOwnership?: number
 }
 
 interface PremarketStock {
@@ -185,6 +187,8 @@ interface PremarketStock {
   signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid'
   strategy?: 'momentum' | 'breakout'
   marketCap: string
+  float?: number // Float in shares (e.g., 50000000 = 50M)
+  institutionalOwnership?: number // Percentage (e.g., 25.5 = 25.5%)
   lastUpdated: string
   news?: {
     count: number
@@ -521,7 +525,7 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
       return []
     }
     
-    const qualifiedStocks: { stock: any; score: number }[] = []
+    const qualifiedStocks: { stock: any; score: number; fundamentals?: any }[] = []
     
     // Process all candidates - no backend limiting, let frontend filter
     for (const stock of premarketMovers) {
@@ -570,22 +574,49 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
         let fundamentals = null
         let technicals = null
         
-        if (strategy === 'breakout') {
+        // FLOAT & INSTITUTIONAL OWNERSHIP FILTERING: Only fetch if filters are actually set!
+        // This avoids unnecessary API calls and rate limiting
+        const needsFloatFilter = filters.maxFloat && filters.maxFloat > 0;
+        const needsInstitutionalFilter = filters.maxInstitutionalOwnership || filters.minInstitutionalOwnership;
+        
+        if ((strategy === 'momentum' || strategy === 'breakout' || strategy === 'mean-reversion') && 
+            (needsFloatFilter || needsInstitutionalFilter)) {
           try {
-            // Get fundamental data for float information
+            // Only fetch fundamentals if we actually need to filter by them
             fundamentals = await eodhd.getFundamentals(symbol)
+            console.log(`📊 ${symbol}: Fetched fundamentals for filtering`)
             
-            // Check float size for breakout strategy (only if maxFloat > 0)
-            if (filters.maxFloat && filters.maxFloat > 0 && fundamentals?.General?.SharesFloat) {
+            // Check float size (only if maxFloat > 0)
+            if (needsFloatFilter && fundamentals?.General?.SharesFloat && filters.maxFloat) {
               const floatShares = fundamentals.General.SharesFloat
               if (floatShares > filters.maxFloat) {
-                console.log(`${symbol} filtered: float ${(floatShares/1000000).toFixed(1)}M > ${filters.maxFloat/1000000}M`)
+                console.log(`${symbol} filtered: float ${(floatShares/1000000).toFixed(1)}M > ${(filters.maxFloat/1000000).toFixed(1)}M`)
+                continue
+              }
+            }
+            
+            // Check institutional ownership
+            if (needsInstitutionalFilter && (fundamentals as any)?.SharesStats?.PercentInstitutions !== undefined) {
+              const institutionalPct = (fundamentals as any).SharesStats.PercentInstitutions * 100 // Convert to percentage
+              
+              // Momentum: Filter out high institutional (>30%)
+              if (filters.maxInstitutionalOwnership && institutionalPct > filters.maxInstitutionalOwnership) {
+                console.log(`${symbol} filtered: institutional ${institutionalPct.toFixed(1)}% > ${filters.maxInstitutionalOwnership}% (too high for momentum)`)
+                continue
+              }
+              
+              // Mean Reversion: Filter out low institutional (<50%)
+              if (filters.minInstitutionalOwnership && institutionalPct < filters.minInstitutionalOwnership) {
+                console.log(`${symbol} filtered: institutional ${institutionalPct.toFixed(1)}% < ${filters.minInstitutionalOwnership}% (too low for mean reversion)`)
                 continue
               }
             }
           } catch (error) {
-            console.log(`Could not fetch fundamentals for ${symbol}, continuing without float check`)
+            console.log(`⚠️ ${symbol}: Could not fetch fundamentals for filtering - ${error}`)
+            // Continue without filtering - don't exclude stocks just because API failed
           }
+        } else {
+          console.log(`⏭️ ${symbol}: Skipping fundamentals fetch (no float/institutional filters set)`)
         }
         
         // Get technical indicators for scoring (optional)
@@ -613,7 +644,8 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
           continue
         }
         
-        qualifiedStocks.push({ stock, score: 0 }) // Temporary score, will be calculated properly later
+        // Store fundamentals with stock to avoid duplicate API calls later
+        qualifiedStocks.push({ stock, score: 0, fundamentals }) // Cache fundamentals for later use
         console.log(`${symbol} qualified for enhanced analysis${isStaleData ? ' ⚠️ STALE DATA' : ''}`)
         
       } catch (error) {
@@ -621,12 +653,11 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
       }
     }
     
-    // Return all qualified stocks - no backend limiting for frontend flexibility
+    // Return all qualified stocks with cached fundamentals - no backend limiting for frontend flexibility
     qualifiedStocks.sort((a, b) => b.score - a.score)
-    const topStocks = qualifiedStocks.map(item => item.stock)
     
-    console.log(`🎯 Top ${topStocks.length} high-quality momentum stocks qualified (quality over quantity)`)
-    return topStocks
+    console.log(`🎯 Top ${qualifiedStocks.length} high-quality momentum stocks qualified (quality over quantity)`)
+    return qualifiedStocks // Return full objects with cached fundamentals
     
   } catch (error) {
     console.error('Error using EODHD API:', error)
@@ -667,13 +698,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log('Premarket scan request:', body)
     
+    // Extract weekend mode override from request
+    const forceWeekendMode = body.weekendMode === true
+    
     // Determine scanning mode based on market hours
     const marketStatus = eodhdEnhanced.getMarketHoursStatus()
     const scanMode = marketStatus === 'premarket' ? 'premarket' : 
                     marketStatus === 'regular' ? 'intraday' : 
                     marketStatus === 'afterhours' ? 'afterhours' : 'extended'
     
-    console.log(`Running ${scanMode} momentum scan during ${marketStatus} hours`)
+    console.log(`Running ${scanMode} momentum scan during ${marketStatus} hours${forceWeekendMode ? ' (WEEKEND MODE ENABLED)' : ''}`)
     
     // Extract strategy and filters from request
     const strategy = body.strategy || 'momentum'
@@ -691,7 +725,8 @@ export async function POST(request: NextRequest) {
         minScore: 0,
         minMarketCap: 300000000, // Small cap and over
         maxMarketCap: 0,
-        maxFloat: 0
+        maxFloat: 50000000, // <50M float for explosive breakouts!
+        maxInstitutionalOwnership: 30 // <30% institutional for retail-driven volatility
       } : {
         minChange: 5, // 5%+ for breakout strategy
         maxChange: 100,
@@ -715,7 +750,8 @@ export async function POST(request: NextRequest) {
         minScore: 0,
         minMarketCap: 300000000, // Small cap and over (matches cap_smallover)
         maxMarketCap: 0,
-        maxFloat: 0
+        maxFloat: 50000000, // <50M float for explosive breakouts!
+        maxInstitutionalOwnership: 30 // <30% institutional for retail-driven volatility
       } : {
         minChange: 10, // 10%+ for breakout during regular hours
         maxChange: 100,
@@ -762,7 +798,7 @@ export async function POST(request: NextRequest) {
       
       for (let i = 0; i < momentumStocks.length; i += batchSize) {
         const batch = momentumStocks.slice(i, i + batchSize);
-        const symbols = batch.map(stock => stock.code.replace('.US', ''));
+        const symbols = batch.map((item: any) => (item.stock || item).code.replace('.US', ''));
         
         try {
           console.log(`🚀 WebSocket Batch ${Math.floor(i/batchSize) + 1}: Processing ${symbols.length} stocks for live data...`);
@@ -773,10 +809,12 @@ export async function POST(request: NextRequest) {
           
           // Update ALL stocks in this batch with live data
           liveQuotes.forEach(liveQuote => {
-            const matchingStock = batch.find(stock => 
-              stock.code === liveQuote.code || stock.code === `${liveQuote.code}.US`
-            );
-            if (matchingStock) {
+            const matchingItem = batch.find((item: any) => {
+              const stock = item.stock || item;
+              return stock.code === liveQuote.code || stock.code === `${liveQuote.code}.US`;
+            });
+            if (matchingItem) {
+              const matchingStock = matchingItem.stock || matchingItem;
               // CRITICAL: Update with live WebSocket data for accurate scoring
               matchingStock.close = liveQuote.close;
               matchingStock.volume = liveQuote.volume;
@@ -806,8 +844,10 @@ export async function POST(request: NextRequest) {
     const topStocks = momentumStocks.slice(0, 50) // Increased to 50 for maximum live data coverage
     console.log(`🔴 PROCESSING ${topStocks.length} stocks with LIVE WebSocket data for accurate scoring`)
     
-    const stockPromises = topStocks.map(async (stock) => {
+    const stockPromises = topStocks.map(async (item: any) => {
       try {
+        const stock = item.stock || item; // Handle both formats
+        const cachedFundamentals = item.fundamentals; // Get cached fundamentals
         const symbol = stock.code.replace('.US', '')
         
         // Skip expensive API calls for speed - use only the screener data
@@ -1071,6 +1111,56 @@ export async function POST(request: NextRequest) {
           console.log(`❌ ${symbol}: News fetch failed - ${error}`);
         }
 
+        // Get float and institutional ownership data (use cached if available!)
+        let floatShares: number | undefined = undefined;
+        let institutionalOwnership: number | undefined = undefined;
+        
+        // Use cached fundamentals if available, otherwise fetch from Alpha Vantage
+        if (cachedFundamentals) {
+          console.log(`📊 ${symbol}: Using cached fundamentals`);
+          if (cachedFundamentals?.General?.SharesFloat) {
+            floatShares = cachedFundamentals.General.SharesFloat;
+            if (floatShares !== undefined) {
+              console.log(`📊 ${symbol}: Float = ${(floatShares/1000000).toFixed(1)}M shares (cached)`);
+            }
+          }
+          if ((cachedFundamentals as any)?.SharesStats?.PercentInstitutions !== undefined) {
+            institutionalOwnership = (cachedFundamentals as any).SharesStats.PercentInstitutions * 100;
+            if (institutionalOwnership !== undefined) {
+              console.log(`🏛️ ${symbol}: Institutional Ownership = ${institutionalOwnership.toFixed(1)}% (cached)`);
+            }
+          }
+        } else {
+          // Fetch from Alpha Vantage (separate rate limits from EODHD)
+          // Add delay to avoid rate limiting (300ms between calls)
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          try {
+            console.log(`📊 ${symbol}: Fetching fundamentals from Alpha Vantage...`);
+            const { getCompanyFundamentals } = await import('@/utils/alphaVantageApi');
+            const fundamentals = await getCompanyFundamentals(symbol);
+            
+            if (fundamentals?.sharesFloat) {
+              floatShares = fundamentals.sharesFloat;
+              if (floatShares !== undefined) {
+                console.log(`📊 ${symbol}: Float = ${(floatShares/1000000).toFixed(1)}M shares (Alpha Vantage)`);
+              }
+            }
+            if (fundamentals?.institutionalOwnership !== undefined) {
+              institutionalOwnership = fundamentals.institutionalOwnership;
+              if (institutionalOwnership !== undefined) {
+                console.log(`🏛️ ${symbol}: Institutional Ownership = ${institutionalOwnership.toFixed(1)}% (Alpha Vantage)`);
+              }
+            }
+            
+            if (!fundamentals) {
+              console.log(`⚠️ ${symbol}: No fundamentals data available from Alpha Vantage`);
+            }
+          } catch (error: any) {
+            console.log(`❌ ${symbol}: Error fetching Alpha Vantage fundamentals - ${error?.message || error}`);
+          }
+        }
+
         return {
           symbol: stock.code.replace('.US', ''),
           price: stock.close,
@@ -1082,6 +1172,8 @@ export async function POST(request: NextRequest) {
           signal,
           strategy,
           marketCap: 'Unknown',
+          float: floatShares, // Float in shares (e.g., 50000000 = 50M)
+          institutionalOwnership, // Percentage (e.g., 25.5 = 25.5%)
           lastUpdated: new Date(stock.timestamp * 1000).toISOString(),
           news: newsData,
           gapAnalysis: {
@@ -1134,16 +1226,48 @@ export async function POST(request: NextRequest) {
       .map(result => (result as PromiseFulfilledResult<PremarketStock>).value);
     
     // FRESH DATA FILTER: During premarket, only show stocks with data less than 2 hours old
-    const maxStaleMinutes = marketStatus === 'premarket' ? 120 : 1440; // 2 hours premarket, 24 hours otherwise
+    // On weekends/market closed, allow stale data for testing
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0 = Sunday, 6 = Saturday
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    // Only activate weekend mode if manually enabled OR if it's weekend AND user hasn't disabled it
+    const weekendModeActive = forceWeekendMode;
+    
+    const maxStaleMinutes = weekendModeActive ? 10080 : // 7 days on weekends/forced mode (for testing)
+                           marketStatus === 'premarket' ? 120 : // 2 hours during premarket
+                           1440; // 24 hours otherwise
+    
     const stocks = allStocks
       .filter(stock => {
+        // Stale data filter
         const dataAge = Date.now() - new Date(stock.lastUpdated).getTime();
         const dataAgeMinutes = Math.round(dataAge / 60000);
         
-        if (dataAgeMinutes > maxStaleMinutes && marketStatus === 'premarket') {
+        if (dataAgeMinutes > maxStaleMinutes && marketStatus === 'premarket' && !weekendModeActive) {
           console.log(`🚫 FILTERED OUT ${stock.symbol}: Data is ${dataAgeMinutes} minutes old (stale during premarket)`);
           return false;
         }
+        
+        // Float filter (OPTIONAL - only if user enables it in UI)
+        // When disabled: maxFloat = 0 (show all stocks)
+        // When enabled: maxFloat = user's value (e.g., 50000000 for 50M)
+        if (filters.maxFloat && filters.maxFloat > 0 && stock.float) {
+          if (stock.float > filters.maxFloat) {
+            console.log(`🚫 FILTERED OUT ${stock.symbol}: Float ${(stock.float/1000000).toFixed(1)}M > ${(filters.maxFloat/1000000).toFixed(1)}M (user-enabled filter)`);
+            return false;
+          }
+        }
+        
+        // Institutional ownership filter (OPTIONAL - only if user enables it in UI)
+        // When disabled: maxInstitutionalOwnership = 0 or undefined (show all stocks)
+        // When enabled: maxInstitutionalOwnership = user's value (e.g., 30 for 30%)
+        if (filters.maxInstitutionalOwnership && filters.maxInstitutionalOwnership > 0 && stock.institutionalOwnership !== undefined) {
+          if (stock.institutionalOwnership > filters.maxInstitutionalOwnership) {
+            console.log(`🚫 FILTERED OUT ${stock.symbol}: Institutional ${stock.institutionalOwnership.toFixed(1)}% > ${filters.maxInstitutionalOwnership}% (user-enabled filter)`);
+            return false;
+          }
+        }
+        
         return true;
       })
       .sort((a, b) => {
@@ -1179,6 +1303,11 @@ export async function POST(request: NextRequest) {
     
     // Log filtering statistics
     const filteredCount = allStocks.length - stocks.length;
+    if (weekendModeActive) {
+      console.log(`📅 WEEKEND MODE: Stale data filter disabled (allowing data up to 7 days old for testing) [MANUALLY ENABLED]`);
+    } else if (isWeekend) {
+      console.log(`📅 WEEKEND DETECTED: Stale data filter ACTIVE (enable Weekend Mode checkbox to allow stale data)`);
+    }
     if (filteredCount > 0) {
       console.log(`🚫 Filtered out ${filteredCount} stocks with stale data (>${maxStaleMinutes} minutes old)`);
     }

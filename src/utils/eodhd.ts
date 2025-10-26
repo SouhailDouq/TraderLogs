@@ -218,8 +218,8 @@ class EODHDClient {
       }
     });
 
-    // Add small delay between requests
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Add delay between requests to avoid rate limiting (especially for fundamentals API)
+    await new Promise(resolve => setTimeout(resolve, 150));
     
     // Only log URLs for debugging when needed
     // console.log('EODHD API Request URL:', url.toString());

@@ -8,7 +8,12 @@
     "start": "next start",
     "lint": "next lint",
     "postinstall": "npx prisma generate",
-    "verify-auth": "node scripts/verify-auth.js"
+    "verify-auth": "node scripts/verify-auth.js",
+    "check-users": "node scripts/check-users.js",
+    "migrate-trades": "node scripts/migrate-trades-from-localstorage.js",
+    "check-trades": "node scripts/check-trade-ownership.js",
+    "fix-trades": "node scripts/fix-trade-ownership.js",
+    "cleanup-users": "node scripts/cleanup-duplicate-users.js"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.10.0",
