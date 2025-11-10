@@ -407,23 +407,23 @@ export default function PositionRiskMonitor({
                       </span>
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                      {risk.position.quantity} shares @ ${risk.position.averagePrice.toFixed(2)}
+                      {risk.position.quantity} shares @ ${risk.position.averagePrice?.toFixed(2) || '0.00'}
                     </div>
                   </div>
                   <div className="text-right">
                     <div className={`text-2xl font-bold ${
-                      risk.unrealizedPLPercent >= 0 
+                      (risk.unrealizedPLPercent || 0) >= 0 
                         ? 'text-green-600 dark:text-green-400' 
                         : 'text-red-600 dark:text-red-400'
                     }`}>
-                      {risk.unrealizedPLPercent >= 0 ? '+' : ''}{risk.unrealizedPLPercent.toFixed(2)}%
+                      {(risk.unrealizedPLPercent || 0) >= 0 ? '+' : ''}{(risk.unrealizedPLPercent || 0).toFixed(2)}%
                     </div>
                     <div className={`text-sm ${
-                      risk.unrealizedPL >= 0 
+                      (risk.unrealizedPL || 0) >= 0 
                         ? 'text-green-600 dark:text-green-400' 
                         : 'text-red-600 dark:text-red-400'
                     }`}>
-                      {risk.unrealizedPL >= 0 ? '+' : ''}${risk.unrealizedPL.toFixed(2)}
+                      {(risk.unrealizedPL || 0) >= 0 ? '+' : ''}${(risk.unrealizedPL || 0).toFixed(2)}
                     </div>
                   </div>
                 </div>
@@ -433,19 +433,19 @@ export default function PositionRiskMonitor({
                   <div>
                     <div className="text-xs text-gray-600 dark:text-gray-400">Current Price</div>
                     <div className="text-lg font-bold text-gray-900 dark:text-white">
-                      ${risk.position.currentPrice.toFixed(2)}
+                      ${risk.position.currentPrice?.toFixed(2) || '0.00'}
                     </div>
                   </div>
                   <div>
                     <div className="text-xs text-gray-600 dark:text-gray-400">Entry Price</div>
                     <div className="text-lg font-bold text-gray-900 dark:text-white">
-                      ${risk.position.averagePrice.toFixed(2)}
+                      ${risk.position.averagePrice?.toFixed(2) || '0.00'}
                     </div>
                   </div>
                   <div>
                     <div className="text-xs text-gray-600 dark:text-gray-400">Stop-Loss</div>
                     <div className="text-lg font-bold text-red-600 dark:text-red-400">
-                      ${risk.stopLossPrice.toFixed(2)}
+                      ${risk.stopLossPrice?.toFixed(2) || '0.00'}
                     </div>
                   </div>
                 </div>
@@ -496,7 +496,7 @@ export default function PositionRiskMonitor({
                             </span>
                             {order.limitPrice && (
                               <span className="ml-2 text-gray-600 dark:text-gray-400">
-                                @ ${order.limitPrice.toFixed(2)}
+                                @ ${order.limitPrice?.toFixed(2) || '0.00'}
                               </span>
                             )}
                           </div>
@@ -553,13 +553,13 @@ export default function PositionRiskMonitor({
                 <div className="flex justify-between">
                   <span className="text-gray-600 dark:text-gray-400">Stop Price:</span>
                   <span className="font-bold text-red-600 dark:text-red-400">
-                    ${selectedPosition.stopLossPrice.toFixed(2)}
+                    ${selectedPosition.stopLossPrice?.toFixed(2) || '0.00'}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600 dark:text-gray-400">Est. Loss:</span>
                   <span className="font-bold text-red-600 dark:text-red-400">
-                    ${Math.abs(selectedPosition.stopLossAmount).toFixed(2)}
+                    ${Math.abs(selectedPosition.stopLossAmount || 0).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -568,7 +568,7 @@ export default function PositionRiskMonitor({
                 <strong>This action will:</strong>
                 <ol className="list-decimal ml-4 mt-2 space-y-1">
                   <li>Cancel your existing limit order (if any)</li>
-                  <li>Place a stop-loss order at ${selectedPosition.stopLossPrice.toFixed(2)}</li>
+                  <li>Place a stop-loss order at ${selectedPosition.stopLossPrice?.toFixed(2) || '0.00'}</li>
                   <li>Execute in approximately 3-5 seconds</li>
                 </ol>
               </div>

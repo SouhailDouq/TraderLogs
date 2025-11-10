@@ -516,42 +516,66 @@ export default function PerformancePage() {
                 <tr className={`border-b transition-colors ${
                   isDarkMode ? 'border-gray-700' : 'border-gray-200'
                 }`}>
-                  <th className={`text-left py-2 text-sm font-medium transition-colors ${
+                  <th className={`text-left py-2 px-2 text-sm font-medium transition-colors ${
                     isDarkMode ? 'text-gray-300' : 'text-gray-600'
                   }`}>Strategy</th>
-                  <th className={`text-right py-2 text-sm font-medium transition-colors ${
+                  <th className={`text-right py-2 px-2 text-sm font-medium transition-colors ${
                     isDarkMode ? 'text-gray-300' : 'text-gray-600'
                   }`}>Trades</th>
-                  <th className={`text-right py-2 text-sm font-medium transition-colors ${
+                  <th className={`text-right py-2 px-2 text-sm font-medium transition-colors ${
                     isDarkMode ? 'text-gray-300' : 'text-gray-600'
                   }`}>Win Rate</th>
-                  <th className={`text-right py-2 text-sm font-medium transition-colors ${
+                  <th className={`text-right py-2 px-2 text-sm font-medium transition-colors ${
+                    isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                  }`}>Expectancy</th>
+                  <th className={`text-right py-2 px-2 text-sm font-medium transition-colors ${
                     isDarkMode ? 'text-gray-300' : 'text-gray-600'
                   }`}>P&L</th>
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(performanceData.strategyBreakdown).map(([strategy, data]: [string, any]) => (
-                  <tr key={strategy} className={`border-b transition-colors ${
+                {Object.entries(performanceData.strategyBreakdown)
+                  .sort(([, a]: [string, any], [, b]: [string, any]) => b.expectancy - a.expectancy)
+                  .map(([strategy, data]: [string, any]) => (
+                  <tr key={strategy} className={`border-b transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
                     isDarkMode ? 'border-gray-700' : 'border-gray-200'
                   }`}>
-                    <td className={`py-3 text-sm transition-colors ${
+                    <td className={`py-3 px-2 text-sm font-medium transition-colors ${
                       isDarkMode ? 'text-white' : 'text-gray-900'
                     }`}>
                       {strategy}
+                      {data.expectancy > 10 && (
+                        <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 font-semibold">
+                          🚀 Best
+                        </span>
+                      )}
                     </td>
-                    <td className={`py-3 text-sm text-right transition-colors ${
+                    <td className={`py-3 px-2 text-sm text-right transition-colors ${
                       isDarkMode ? 'text-gray-300' : 'text-gray-600'
                     }`}>
                       {data.trades}
                     </td>
-                    <td className={`py-3 text-sm text-right transition-colors ${
-                      isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                    <td className={`py-3 px-2 text-sm text-right transition-colors ${
+                      data.winRate >= 60 ? 'text-green-600 dark:text-green-400 font-semibold' :
+                      data.winRate >= 50 ? isDarkMode ? 'text-gray-300' : 'text-gray-600' :
+                      'text-red-600 dark:text-red-400'
                     }`}>
-                      {((data.wins / data.trades) * 100).toFixed(1)}%
+                      {data.winRate.toFixed(1)}%
                     </td>
-                    <td className={`py-3 text-sm text-right font-medium ${
-                      data.pnl >= 0 ? 'text-green-600' : 'text-red-600'
+                    <td className={`py-3 px-2 text-sm text-right font-bold ${
+                      data.expectancy > 5 ? 'text-green-600 dark:text-green-400' :
+                      data.expectancy > 0 ? 'text-blue-600 dark:text-blue-400' :
+                      'text-red-600 dark:text-red-400'
+                    }`}>
+                      {formatCurrency(data.expectancy)}
+                      <div className={`text-xs font-normal mt-0.5 ${
+                        isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                      }`}>
+                        per trade
+                      </div>
+                    </td>
+                    <td className={`py-3 px-2 text-sm text-right font-medium ${
+                      data.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                     }`}>
                       {formatCurrency(data.pnl)}
                     </td>
@@ -560,6 +584,41 @@ export default function PerformancePage() {
               </tbody>
             </table>
           </div>
+          
+          {/* Strategy Comparison Insight */}
+          {Object.keys(performanceData.strategyBreakdown).length > 1 && (
+            <div className={`mt-6 p-4 rounded-xl border ${
+              isDarkMode ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'
+            }`}>
+              <div className={`text-sm font-semibold mb-2 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>
+                💡 Strategy Insights
+              </div>
+              <div className={`text-xs space-y-1 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-600'
+              }`}>
+                {(() => {
+                  const strategies = Object.entries(performanceData.strategyBreakdown)
+                    .sort(([, a]: [string, any], [, b]: [string, any]) => b.expectancy - a.expectancy);
+                  const best = strategies[0];
+                  const worst = strategies[strategies.length - 1];
+                  
+                  return (
+                    <>
+                      <p>• <strong>{best[0]}</strong> has the highest expectancy at {formatCurrency((best[1] as any).expectancy)} per trade</p>
+                      {(worst[1] as any).expectancy < 0 && (
+                        <p className="text-red-600 dark:text-red-400">• <strong>{worst[0]}</strong> has negative expectancy - consider avoiding this strategy</p>
+                      )}
+                      <p className="pt-2 font-semibold">
+                        ✅ Focus on strategies with highest expectancy for better long-term results
+                      </p>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

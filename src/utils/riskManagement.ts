@@ -28,6 +28,10 @@ interface RiskParameters {
   stopLossPercent: number; // default stop loss %
   profitTargets: number[]; // profit target percentages
   maxVolatility: number; // max acceptable volatility
+  historicalWinRate?: number; // historical win rate for expectancy calculation
+  historicalAvgWin?: number; // historical average win in EUR
+  historicalAvgLoss?: number; // historical average loss in EUR
+  minExpectancy?: number; // minimum expectancy required to trade (EUR)
 }
 
 export class AutomatedTradingEngine {
@@ -168,6 +172,29 @@ export class AutomatedTradingEngine {
     if (volumeAnalysis.sellingPressure > 0.6) {
       warnings.push('High selling pressure detected');
       confidence = 'MEDIUM';
+    }
+
+    // 6. EXPECTANCY VALIDATION (Use historical performance)
+    if (this.riskParams.historicalWinRate && this.riskParams.historicalAvgWin && this.riskParams.historicalAvgLoss) {
+      const expectedValue = this.calculateExpectedValue(
+        this.riskParams.historicalWinRate,
+        this.riskParams.historicalAvgWin,
+        this.riskParams.historicalAvgLoss
+      );
+      
+      const minExpectancy = this.riskParams.minExpectancy || 5; // Default minimum €5 per trade
+      
+      console.log(`💰 EXPECTANCY CHECK: Expected value = €${expectedValue.toFixed(2)} (minimum: €${minExpectancy})`);
+      
+      if (expectedValue < minExpectancy) {
+        warnings.push(`Low expectancy: €${expectedValue.toFixed(2)} per trade (need €${minExpectancy}+)`);
+        confidence = 'LOW';
+        reasoning.push(`⚠️ Historical expectancy (€${expectedValue.toFixed(2)}) below minimum threshold`);
+      } else if (expectedValue >= minExpectancy * 2) {
+        reasoning.push(`✅ Excellent expectancy: €${expectedValue.toFixed(2)} per trade`);
+      } else {
+        reasoning.push(`✓ Acceptable expectancy: €${expectedValue.toFixed(2)} per trade`);
+      }
     }
 
     // 8. POSITION SIZING (Enhanced with momentum validation)
@@ -702,5 +729,54 @@ export class AutomatedTradingEngine {
     // Use conservative volatility estimate
     const changePercent = Math.abs(stockData.changePercent || 0);
     return Math.max(changePercent, 8); // Default to 8% volatility
+  }
+
+  /**
+   * CALCULATE EXPECTED VALUE: The most important trading metric
+   * 
+   * Expectancy = (Win Rate × Avg Win) - (Loss Rate × Avg Loss)
+   * 
+   * This tells you how much you expect to make per trade on average.
+   * Positive expectancy = profitable strategy long-term.
+   */
+  private calculateExpectedValue(
+    winRate: number, // as decimal (e.g., 0.65 for 65%)
+    avgWin: number,   // in EUR
+    avgLoss: number   // in EUR (positive number)
+  ): number {
+    const lossRate = 1 - winRate;
+    const expectancy = (winRate * avgWin) - (lossRate * avgLoss);
+    return expectancy;
+  }
+
+  /**
+   * KELLY CRITERION: Optimal position sizing based on expectancy
+   * 
+   * Kelly % = (Win Rate × Avg Win - Loss Rate × Avg Loss) / Avg Win
+   *         = Expectancy / Avg Win
+   * 
+   * Use fractional Kelly (e.g., 0.25 Kelly) for safety
+   */
+  public calculateKellyPositionSize(
+    winRate: number,
+    avgWin: number,
+    avgLoss: number,
+    maxPositionSize: number,
+    kellyFraction: number = 0.25 // Use 1/4 Kelly for safety
+  ): number {
+    const expectancy = this.calculateExpectedValue(winRate, avgWin, avgLoss);
+    
+    if (expectancy <= 0) {
+      console.warn('⚠️ Negative expectancy - Kelly criterion returns 0 position size');
+      return 0;
+    }
+    
+    const kellyPercent = expectancy / avgWin;
+    const fractionalKelly = kellyPercent * kellyFraction;
+    const optimalSize = maxPositionSize * fractionalKelly;
+    
+    console.log(`📊 Kelly Criterion: ${(kellyPercent * 100).toFixed(1)}% optimal, using ${(fractionalKelly * 100).toFixed(1)}% (${kellyFraction} Kelly)`);
+    
+    return Math.min(Math.max(optimalSize, 100), maxPositionSize);
   }
 }

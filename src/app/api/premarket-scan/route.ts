@@ -725,7 +725,7 @@ export async function POST(request: NextRequest) {
         minScore: 0,
         minMarketCap: 300000000, // Small cap and over
         maxMarketCap: 0,
-        maxFloat: 50000000, // <50M float for explosive breakouts!
+        maxFloat: 0, // No float limit - show all stocks
         maxInstitutionalOwnership: 30 // <30% institutional for retail-driven volatility
       } : {
         minChange: 5, // 5%+ for breakout strategy
@@ -737,7 +737,7 @@ export async function POST(request: NextRequest) {
         minScore: 0,
         minMarketCap: 0,
         maxMarketCap: 0,
-        maxFloat: 50000000
+        maxFloat: 0 // No float limit - show all stocks
       }) :
       // REGULAR HOURS MODE: EARLY BREAKOUT DETECTION (building setups)
       (strategy === 'momentum' ? {
@@ -750,7 +750,7 @@ export async function POST(request: NextRequest) {
         minScore: 0,
         minMarketCap: 300000000, // Small cap and over (matches cap_smallover)
         maxMarketCap: 0,
-        maxFloat: 50000000, // <50M float for explosive breakouts!
+        maxFloat: 0, // No float limit - show all stocks
         maxInstitutionalOwnership: 30 // <30% institutional for retail-driven volatility
       } : {
         minChange: 10, // 10%+ for breakout during regular hours
@@ -762,7 +762,7 @@ export async function POST(request: NextRequest) {
         minScore: 0,
         minMarketCap: 0,
         maxMarketCap: 0,
-        maxFloat: 10000000 // <10M float for breakouts
+        maxFloat: 0 // No float limit - show all stocks
       })
     
     // Frontend refinement filters (applied on top of baseline)
@@ -1235,16 +1235,21 @@ export async function POST(request: NextRequest) {
     
     const maxStaleMinutes = weekendModeActive ? 10080 : // 7 days on weekends/forced mode (for testing)
                            marketStatus === 'premarket' ? 120 : // 2 hours during premarket
-                           1440; // 24 hours otherwise
+                           marketStatus === 'regular' ? 120 : // 2 hours during regular hours (same as premarket)
+                           marketStatus === 'afterhours' ? 120 : // 2 hours during afterhours
+                           1440; // 24 hours when market closed
     
     const stocks = allStocks
       .filter(stock => {
-        // Stale data filter
+        // Stale data filter - Apply during ALL market hours (premarket, regular, afterhours)
         const dataAge = Date.now() - new Date(stock.lastUpdated).getTime();
         const dataAgeMinutes = Math.round(dataAge / 60000);
         
-        if (dataAgeMinutes > maxStaleMinutes && marketStatus === 'premarket' && !weekendModeActive) {
-          console.log(`🚫 FILTERED OUT ${stock.symbol}: Data is ${dataAgeMinutes} minutes old (stale during premarket)`);
+        // Filter stale data during any active trading session (not just premarket)
+        const isActiveTradingHours = marketStatus === 'premarket' || marketStatus === 'regular' || marketStatus === 'afterhours';
+        
+        if (dataAgeMinutes > maxStaleMinutes && isActiveTradingHours && !weekendModeActive) {
+          console.log(`🚫 FILTERED OUT ${stock.symbol}: Data is ${dataAgeMinutes} minutes old (stale during ${marketStatus})`);
           return false;
         }
         

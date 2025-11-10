@@ -58,6 +58,8 @@ interface TradeStats {
   profitFactor: number
   largestWin: number
   largestLoss: number
+  expectancy: number // Expected profit per trade in EUR
+  expectancyPercent: number // Expected return per trade as percentage
 }
 
 interface MonthlyPnL {
@@ -176,17 +178,33 @@ const calculateStats = (trades: Trade[]): TradeStats => {
   const totalProfit = profitableTrades.reduce((sum, t) => sum + t.profitLoss, 0)
   const totalLoss = Math.abs(losingTrades.reduce((sum, t) => sum + t.profitLoss, 0))
 
+  // Calculate expectancy: (Win Rate × Avg Win) - (Loss Rate × Avg Loss)
+  const winRate = closedTrades.length > 0 ? profitableTrades.length / closedTrades.length : 0
+  const lossRate = closedTrades.length > 0 ? losingTrades.length / closedTrades.length : 0
+  const avgWin = profitableTrades.length > 0 ? totalProfit / profitableTrades.length : 0
+  const avgLoss = losingTrades.length > 0 ? totalLoss / losingTrades.length : 0
+  
+  const expectancy = (winRate * avgWin) - (lossRate * avgLoss)
+  
+  // Calculate expectancy as percentage of average position size
+  const avgPositionSize = closedTrades.length > 0 
+    ? closedTrades.reduce((sum, t) => sum + ((t.price || 0) * (t.quantity || 0)), 0) / closedTrades.length
+    : 0
+  const expectancyPercent = avgPositionSize > 0 ? (expectancy / avgPositionSize) * 100 : 0
+
   return {
     totalTrades: closedTrades.length,
     profitableTrades: profitableTrades.length,
     losingTrades: losingTrades.length,
     netProfit: closedTrades.reduce((sum, t) => sum + t.profitLoss, 0),
-    winRate: closedTrades.length > 0 ? (profitableTrades.length / closedTrades.length) * 100 : 0,
-    averageWin: profitableTrades.length > 0 ? totalProfit / profitableTrades.length : 0,
-    averageLoss: losingTrades.length > 0 ? totalLoss / losingTrades.length : 0,
+    winRate: winRate * 100,
+    averageWin: avgWin,
+    averageLoss: avgLoss,
     profitFactor: totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? Infinity : 0,
     largestWin: profitableTrades.length > 0 ? Math.max(...profitableTrades.map(t => t.profitLoss)) : 0,
     largestLoss: losingTrades.length > 0 ? Math.min(...losingTrades.map(t => t.profitLoss)) : 0,
+    expectancy: expectancy,
+    expectancyPercent: expectancyPercent
   }
 }
 
@@ -700,6 +718,8 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
     profitFactor: 0,
     largestWin: 0,
     largestLoss: 0,
+    expectancy: 0,
+    expectancyPercent: 0,
   },
   selectedDate: null,
 
@@ -829,6 +849,8 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
       profitFactor: 0,
       largestWin: 0,
       largestLoss: 0,
+      expectancy: 0,
+      expectancyPercent: 0,
     },
   }),
 

@@ -116,7 +116,7 @@ export default function TradeSummary() {
       </div>
 
       {/* Additional Stats */}
-      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-gray-700 pt-6">
+      <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 border-t border-gray-700 pt-6">
         <div className="p-4 bg-gradient-to-br from-gray-800/50 to-gray-700/30 border border-gray-600/30 rounded-2xl transition-all duration-300 hover:scale-[1.02]">
           <p className="text-sm font-semibold text-gray-400 mb-1">Winning Trades</p>
           <p className="text-xl font-bold text-green-400">{stats.profitableTrades}</p>
@@ -125,6 +125,24 @@ export default function TradeSummary() {
           <p className="text-sm font-semibold text-gray-400 mb-1">Losing Trades</p>
           <p className="text-xl font-bold text-red-400">{stats.losingTrades}</p>
         </div>
+        <div className="p-4 bg-gradient-to-br from-blue-800/50 to-blue-700/30 border border-blue-600/30 rounded-2xl transition-all duration-300 hover:scale-[1.02]">
+          <p className="text-sm font-semibold text-gray-400 mb-1">Win/Loss Ratio</p>
+          <p className={`text-xl font-bold ${
+            stats.averageLoss > 0 && stats.averageWin / stats.averageLoss >= 2.0 ? 'text-blue-400' :
+            stats.averageLoss > 0 && stats.averageWin / stats.averageLoss >= 1.5 ? 'text-green-400' :
+            stats.averageLoss > 0 && stats.averageWin / stats.averageLoss >= 1.0 ? 'text-yellow-400' :
+            'text-orange-400'
+          }`}>
+            {stats.averageLoss > 0 ? (stats.averageWin / stats.averageLoss).toFixed(2) : stats.averageWin > 0 ? '∞' : '0.00'}
+            <span className="text-sm font-normal text-gray-400">:1</span>
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {stats.averageLoss > 0 && stats.averageWin / stats.averageLoss >= 2.0 ? '🔥 Elite' :
+             stats.averageLoss > 0 && stats.averageWin / stats.averageLoss >= 1.5 ? '✅ Strong' :
+             stats.averageLoss > 0 && stats.averageWin / stats.averageLoss >= 1.0 ? '⚠️ Breakeven' :
+             '❌ Improve'}
+          </p>
+        </div>
         <div className="p-4 bg-gradient-to-br from-gray-800/50 to-gray-700/30 border border-gray-600/30 rounded-2xl transition-all duration-300 hover:scale-[1.02]">
           <p className="text-sm font-semibold text-gray-400 mb-1">Largest Win</p>
           <p className="text-xl font-bold text-green-400">{formatCurrency(stats.largestWin)}</p>
@@ -132,6 +150,15 @@ export default function TradeSummary() {
         <div className="p-4 bg-gradient-to-br from-gray-800/50 to-gray-700/30 border border-gray-600/30 rounded-2xl transition-all duration-300 hover:scale-[1.02]">
           <p className="text-sm font-semibold text-gray-400 mb-1">Largest Loss</p>
           <p className="text-xl font-bold text-red-400">{formatCurrency(stats.largestLoss)}</p>
+        </div>
+        <div className="p-4 bg-gradient-to-br from-yellow-800/50 to-yellow-700/30 border border-yellow-600/30 rounded-2xl transition-all duration-300 hover:scale-[1.02]">
+          <p className="text-sm font-semibold text-gray-400 mb-1">Expectancy</p>
+          <p className={`text-xl font-bold ${
+            stats.expectancy > 0 ? 'text-yellow-400' : 'text-red-400'
+          }`}>
+            {formatCurrency(stats.expectancy)}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">Per trade average</p>
         </div>
       </div>
     </div>

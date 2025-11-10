@@ -1872,8 +1872,11 @@ export function calculateScore(realTimeData: EODHDRealTimeData, technicals?: EOD
     } else if (relVol >= 0.5) {
       volumeScore = 0;
       console.log(`⚠️ Below average volume (${relVol.toFixed(1)}x)`);
+    } else if (relVol >= 0.2) {
+      volumeScore = -2; // Less harsh: -2 instead of -5
+      console.log(`⚠️ Low volume (${relVol.toFixed(1)}x) - proceed with caution`);
     } else {
-      volumeScore = -5;
+      volumeScore = -3; // Less harsh: -3 instead of -5
       console.log(`⚠️ Very low volume (${relVol.toFixed(1)}x) - risky`);
     }
     
