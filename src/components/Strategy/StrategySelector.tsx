@@ -2,7 +2,7 @@
 
 import { useDarkMode } from '@/hooks/useDarkMode'
 
-export type TradingStrategy = 'momentum' | 'mean-reversion'
+export type TradingStrategy = 'momentum' | 'mean-reversion' | 'short-squeeze'
 
 interface StrategySelectorProps {
   selectedStrategy: TradingStrategy
@@ -30,6 +30,15 @@ export function StrategySelector({ selectedStrategy, onStrategyChange }: Strateg
       criteria: 'Oversold -3% to -20% • High institutional >50% • Mid/Large cap',
       color: 'purple',
       marketCondition: 'Best in choppy/sideways markets'
+    },
+    {
+      id: 'short-squeeze' as TradingStrategy,
+      name: 'Short Squeeze',
+      icon: '🔥',
+      description: 'Target trapped short sellers',
+      criteria: 'High SI >20% • Low float <30M • Days to cover >5 • Volume spike 2x+',
+      color: 'red',
+      marketCondition: 'Best when shorts are trapped (GME, AMC style)'
     }
   ]
 
@@ -44,7 +53,7 @@ export function StrategySelector({ selectedStrategy, onStrategyChange }: Strateg
         </p>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {strategies.map((strategy) => (
           <button
             key={strategy.id}
@@ -53,7 +62,9 @@ export function StrategySelector({ selectedStrategy, onStrategyChange }: Strateg
               selectedStrategy === strategy.id
                 ? strategy.color === 'green'
                   ? 'border-green-500 bg-green-50 dark:bg-green-900/20 dark:border-green-400'
-                  : 'border-purple-500 bg-purple-50 dark:bg-purple-900/20 dark:border-purple-400'
+                  : strategy.color === 'purple'
+                  ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20 dark:border-purple-400'
+                  : 'border-red-500 bg-red-50 dark:bg-red-900/20 dark:border-red-400'
                 : isDarkMode
                 ? 'border-gray-600 bg-gray-700 hover:border-gray-500 hover:bg-gray-650'
                 : 'border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100'
@@ -67,14 +78,17 @@ export function StrategySelector({ selectedStrategy, onStrategyChange }: Strateg
                     selectedStrategy === strategy.id
                       ? strategy.color === 'green'
                         ? 'text-green-700 dark:text-green-300'
-                        : 'text-purple-700 dark:text-purple-300'
+                        : strategy.color === 'purple'
+                        ? 'text-purple-700 dark:text-purple-300'
+                        : 'text-red-700 dark:text-red-300'
                       : isDarkMode ? 'text-gray-200' : 'text-gray-900'
                   }`}>
                     {strategy.name}
                   </h4>
                   {selectedStrategy === strategy.id && (
                     <div className={`w-2 h-2 rounded-full ${
-                      strategy.color === 'green' ? 'bg-green-500' : 'bg-purple-500'
+                      strategy.color === 'green' ? 'bg-green-500' : 
+                      strategy.color === 'purple' ? 'bg-purple-500' : 'bg-red-500'
                     }`}></div>
                   )}
                 </div>
@@ -82,7 +96,9 @@ export function StrategySelector({ selectedStrategy, onStrategyChange }: Strateg
                   selectedStrategy === strategy.id
                     ? strategy.color === 'green'
                       ? 'text-green-600 dark:text-green-400'
-                      : 'text-purple-600 dark:text-purple-400'
+                      : strategy.color === 'purple'
+                      ? 'text-purple-600 dark:text-purple-400'
+                      : 'text-red-600 dark:text-red-400'
                     : isDarkMode ? 'text-gray-400' : 'text-gray-600'
                 }`}>
                   {strategy.description}
@@ -91,7 +107,9 @@ export function StrategySelector({ selectedStrategy, onStrategyChange }: Strateg
                   selectedStrategy === strategy.id
                     ? strategy.color === 'green'
                       ? 'bg-green-100 text-green-800 dark:bg-green-800/30 dark:text-green-200'
-                      : 'bg-purple-100 text-purple-800 dark:bg-purple-800/30 dark:text-purple-200'
+                      : strategy.color === 'purple'
+                      ? 'bg-purple-100 text-purple-800 dark:bg-purple-800/30 dark:text-purple-200'
+                      : 'bg-red-100 text-red-800 dark:bg-red-800/30 dark:text-red-200'
                     : isDarkMode 
                     ? 'bg-gray-600 text-gray-300' 
                     : 'bg-gray-200 text-gray-700'
@@ -102,7 +120,9 @@ export function StrategySelector({ selectedStrategy, onStrategyChange }: Strateg
                   selectedStrategy === strategy.id
                     ? strategy.color === 'green'
                       ? 'text-green-600 dark:text-green-400'
-                      : 'text-purple-600 dark:text-purple-400'
+                      : strategy.color === 'purple'
+                      ? 'text-purple-600 dark:text-purple-400'
+                      : 'text-red-600 dark:text-red-400'
                     : isDarkMode ? 'text-gray-500' : 'text-gray-500'
                 }`}>
                   {strategy.marketCondition}

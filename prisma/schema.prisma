@@ -81,6 +81,7 @@ model Trade {
   currentPrice Float?
   profitLoss   Float?
   journal      Json?    // Journal entry with notes, tags, emotion, rating, etc.
+  gamePlan     Json?    // Trading game plan with entry/exit strategy
   source       String?  // 'CSV' or 'API'
   sourceId     String?  // Original ID from source (e.g., Trading212 order ID)
   

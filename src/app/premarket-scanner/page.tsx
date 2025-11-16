@@ -61,9 +61,19 @@ interface PremarketStock {
     currentVolume: number
     avgVolume: number
   }
+  shortSqueezeData?: {
+    shortFloat: number
+    shortRatio: number
+    squeezeTier: 'extreme' | 'high' | 'moderate' | 'low' | 'none'
+    squeezeScore: number
+    isSqueezing: boolean
+    targetGain: number
+    squeezeSignals: string[]
+    warnings: string[]
+  }
 }
 
-type TradingStrategy = 'momentum' | 'mean-reversion'
+type TradingStrategy = 'momentum' | 'mean-reversion' | 'short-squeeze'
 
 interface StrategyFilters {
   minChange: number
@@ -122,6 +132,21 @@ export default function PremarketScanner() {
       minMarketCap: 500000000, // Mid cap and above for stability ($500M+)
       maxMarketCap: 50000000000, // Up to mega cap
       minInstitutionalOwnership: 50 // >50% institutional = smart money support for bounces!
+    },
+    'short-squeeze': {
+      // Short Squeeze: Targeting trapped short sellers
+      // HIGH SHORT INTEREST + LOW FLOAT + VOLUME SPIKE = SQUEEZE POTENTIAL!
+      minChange: 5, // Looking for upward momentum (squeeze trigger)
+      maxChange: 100, // Allow massive moves
+      minVolume: 500000, // >500K volume (need liquidity for squeeze)
+      maxPrice: 15, // <$15 (lower price = easier to squeeze)
+      minPrice: 2, // Minimum $2 (avoid penny stocks)
+      minRelativeVolume: 2.0, // >2x volume (squeeze needs volume)
+      minScore: 0, // Short interest is the key metric
+      minMarketCap: 100000000, // Small cap ($100M+) easier to squeeze
+      maxMarketCap: 5000000000, // Max $5B (large caps harder to squeeze)
+      maxFloat: 30000000, // <30M float (CRITICAL - low float squeezes harder!)
+      maxInstitutionalOwnership: 40 // <40% institutional (more retail float to squeeze)
     }
   }
   
@@ -641,7 +666,7 @@ export default function PremarketScanner() {
         } border`}>
           <div className="mb-6">
             <h3 className="text-lg font-semibold mb-4">Trading Strategy</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <button
                 onClick={() => handleStrategyChange('momentum')}
                 className={`p-4 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 ${
@@ -654,10 +679,10 @@ export default function PremarketScanner() {
               >
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-2xl">🚀</span>
-                  <span className="text-lg font-bold">Momentum Strategy</span>
+                  <span className="text-lg font-bold">Momentum</span>
                 </div>
                 <div className="text-sm opacity-90 text-left">
-                  New highs • Low float &lt;50M • Low institutional &lt;30% • &lt;$20 price
+                  New highs • Low float &lt;50M • Low institutional &lt;30%
                 </div>
               </button>
               <button
@@ -675,7 +700,25 @@ export default function PremarketScanner() {
                   <span className="text-lg font-bold">Mean Reversion</span>
                 </div>
                 <div className="text-sm opacity-90 text-left">
-                  Oversold -3% to -20% • High institutional &gt;50% • Mid/Large cap
+                  Oversold -3% to -20% • High institutional &gt;50%
+                </div>
+              </button>
+              <button
+                onClick={() => handleStrategyChange('short-squeeze')}
+                className={`p-4 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 ${
+                  selectedStrategy === 'short-squeeze'
+                    ? 'bg-gradient-to-br from-red-500 to-orange-600 text-white shadow-xl ring-2 ring-red-300'
+                    : isDarkMode
+                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600 border border-gray-600'
+                      : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'
+                }`}
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">🔥</span>
+                  <span className="text-lg font-bold">Short Squeeze</span>
+                </div>
+                <div className="text-sm opacity-90 text-left">
+                  High SI &gt;20% • Low float &lt;30M • Volume spike 2x+
                 </div>
               </button>
             </div>
@@ -689,19 +732,25 @@ export default function PremarketScanner() {
               <span className="text-2xl">💡</span>
               <div>
                 <h4 className="font-semibold mb-1">
-                  {selectedStrategy === 'momentum' ? '🚀 Momentum Breakout Strategy' : '🔄 Mean Reversion Strategy'}
+                  {selectedStrategy === 'momentum' ? '🚀 Momentum Breakout Strategy' : 
+                   selectedStrategy === 'mean-reversion' ? '🔄 Mean Reversion Strategy' :
+                   '🔥 Short Squeeze Strategy'}
                 </h4>
                 <p className={`text-sm ${
                   isDarkMode ? 'text-gray-300' : 'text-gray-700'
                 }`}>
                   {selectedStrategy === 'momentum' 
                     ? 'Profits in trending markets by buying strength. LOW FLOAT (<50M) + LOW INSTITUTIONAL (<30%) = EXPLOSIVE retail-driven moves! Less supply + retail frenzy = massive price swings on volume. Best when market is bullish.'
-                    : 'Profits in ranging/choppy markets by buying weakness. HIGH INSTITUTIONAL (>50%) = Smart money supports dips! Institutions buy quality stocks on pullbacks, creating reliable bounces. Best in sideways markets.'}
+                    : selectedStrategy === 'mean-reversion'
+                    ? 'Profits in ranging/choppy markets by buying weakness. HIGH INSTITUTIONAL (>50%) = Smart money supports dips! Institutions buy quality stocks on pullbacks, creating reliable bounces. Best in sideways markets.'
+                    : 'Targets trapped short sellers for explosive gains. HIGH SHORT INTEREST (>20%) + LOW FLOAT (<30M) + VOLUME SPIKE = SQUEEZE! When shorts are forced to cover, their buying creates a cascade effect pushing prices 25-100%+. Famous examples: GME (+1,500%), AMC (+2,000%).'}
                 </p>
                 <p className={`text-xs mt-2 ${
                   isDarkMode ? 'text-gray-400' : 'text-gray-600'
                 }`}>
-                  💡 <strong>Pro Tip:</strong> These strategies are negatively correlated - when one fails, the other typically works!
+                  💡 <strong>Pro Tip:</strong> {selectedStrategy === 'short-squeeze' 
+                    ? 'Look for 40%+ short interest + 7+ days to cover for EXTREME squeeze potential. Set stops - squeezes can reverse fast!'
+                    : 'These strategies are negatively correlated - when one fails, the other typically works!'}
                 </p>
               </div>
             </div>

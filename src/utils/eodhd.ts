@@ -70,6 +70,12 @@ export interface EODHDFundamentals {
   Beta?: number;
   '52WeekHigh'?: number;
   '52WeekLow'?: number;
+  SharesFloat?: number;
+  SharesShort?: number;
+  ShortRatio?: number;
+  ShortPercentOfFloat?: number;
+  PercentInsiders?: number;
+  PercentInstitutions?: number;
 }
 
 export interface EODHDNewsItem {
@@ -793,8 +799,50 @@ class EODHDClient {
   }
 
   // Get fundamental data
-  async getFundamentals(symbol: string): Promise<{ General?: any, Highlights?: EODHDFundamentals, Technicals?: EODHDTechnicals }> {
+  async getFundamentals(symbol: string): Promise<{ General?: any, Highlights?: EODHDFundamentals, Technicals?: EODHDTechnicals, SharesStats?: any }> {
     return this.makeRequest(`/fundamentals/${symbol}.US`);
+  }
+
+  // Get short interest data specifically
+  async getShortInterest(symbol: string): Promise<{
+    shortFloat: number;
+    shortRatio: number;
+    sharesShort: number;
+    sharesFloat: number;
+    institutionalOwnership: number;
+  } | null> {
+    try {
+      const fundamentals = await this.getFundamentals(symbol);
+      
+      // Extract short interest from fundamentals
+      const highlights = fundamentals.Highlights;
+      const sharesStats = fundamentals.SharesStats;
+      const general = fundamentals.General;
+      
+      if (!highlights && !sharesStats) {
+        console.log(`⚠️ No short interest data for ${symbol}`);
+        return null;
+      }
+      
+      const shortFloat = highlights?.ShortPercentOfFloat || sharesStats?.ShortPercentOfFloat || 0;
+      const shortRatio = highlights?.ShortRatio || sharesStats?.ShortRatio || 0;
+      const sharesShort = highlights?.SharesShort || sharesStats?.SharesShort || 0;
+      const sharesFloat = highlights?.SharesFloat || sharesStats?.SharesFloat || highlights?.SharesOutstanding || 0;
+      const institutionalOwnership = highlights?.PercentInstitutions || general?.PercentInstitutions || 0;
+      
+      console.log(`📊 Short interest for ${symbol}: ${shortFloat.toFixed(1)}% SI, ${shortRatio.toFixed(1)} DTC`);
+      
+      return {
+        shortFloat,
+        shortRatio,
+        sharesShort,
+        sharesFloat,
+        institutionalOwnership
+      };
+    } catch (error) {
+      console.error(`Error fetching short interest for ${symbol}:`, error);
+      return null;
+    }
   }
 
   // Get historical data

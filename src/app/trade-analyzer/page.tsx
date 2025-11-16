@@ -98,6 +98,20 @@ interface StockData {
   volumeSpike?: boolean
   priceAction?: 'bullish' | 'bearish' | 'neutral'
   // Data freshness monitoring
+  // Short squeeze data
+  shortSqueezeData?: {
+    shortFloat: number
+    shortRatio: number
+    sharesShort: number
+    sharesFloat: number
+    squeezeTier: 'extreme' | 'high' | 'moderate' | 'low' | 'none'
+    squeezeScore: number
+    isSqueezing: boolean
+    targetGain: number
+    squeezeSignals: string[]
+    warnings: string[]
+    riskLevel: 'high' | 'moderate' | 'low'
+  }
   dataFreshness?: {
     isLiveDataAvailable: boolean
     overallQuality: 'excellent' | 'good' | 'fair' | 'poor' | 'unusable'

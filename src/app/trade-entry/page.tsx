@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useDarkMode } from '@/hooks/useDarkMode';
 import { useTradeStore } from '@/utils/store';
 import { formatCurrency } from '@/utils/formatters';
+import GamePlanModal, { GamePlan } from '@/components/GamePlanModal';
+import GamePlanDisplay from '@/components/GamePlanDisplay';
 
 export default function TradeEntryPage() {
   const isDarkMode = useDarkMode();
@@ -30,6 +32,8 @@ export default function TradeEntryPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
+  const [showGamePlan, setShowGamePlan] = useState(false);
+  const [gamePlan, setGamePlan] = useState<GamePlan | null>(null);
 
   // Check market status on component mount
   useEffect(() => {
@@ -143,6 +147,7 @@ export default function TradeEntryPage() {
         time: formData.time,
         isOpen: true,
         profitLoss: 0,
+        gamePlan: gamePlan || undefined,
         createdAt: new Date().toISOString()
       };
 
@@ -163,6 +168,7 @@ export default function TradeEntryPage() {
         time: new Date().toTimeString().slice(0, 5),
         orderType: 'take-profit'
       });
+      setGamePlan(null);
       
       setTimeout(() => setSubmitMessage(''), 3000);
     } catch (error) {
@@ -652,6 +658,45 @@ export default function TradeEntryPage() {
                   />
                 </div>
 
+                {/* Game Plan Section */}
+                <div className={`p-4 rounded-xl border-2 ${
+                  gamePlan 
+                    ? isDarkMode ? 'border-green-500/30 bg-green-500/10' : 'border-green-200 bg-green-50'
+                    : isDarkMode ? 'border-blue-500/30 bg-blue-500/10' : 'border-blue-200 bg-blue-50'
+                }`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">📋</span>
+                      <div>
+                        <h4 className={`font-semibold ${
+                          isDarkMode ? 'text-white' : 'text-gray-900'
+                        }`}>
+                          Game Plan
+                        </h4>
+                        <p className={`text-xs ${
+                          isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                        }`}>
+                          {gamePlan ? 'Plan ready' : 'Define your trading strategy'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowGamePlan(true)}
+                      className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
+                        gamePlan
+                          ? isDarkMode ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          : 'bg-gradient-to-br from-blue-500 to-blue-600 text-white hover:scale-105 shadow-lg'
+                      }`}
+                    >
+                      {gamePlan ? 'Edit Plan' : 'Create Plan'}
+                    </button>
+                  </div>
+                  {gamePlan && (
+                    <GamePlanDisplay gamePlan={gamePlan} compact />
+                  )}
+                </div>
+
                 {/* Submit Button */}
                 <button
                   type="submit"
@@ -857,6 +902,16 @@ export default function TradeEntryPage() {
           </div>
         </div>
       </div>
+
+      {/* Game Plan Modal */}
+      <GamePlanModal
+        isOpen={showGamePlan}
+        onClose={() => setShowGamePlan(false)}
+        onSave={(plan) => setGamePlan(plan)}
+        initialData={gamePlan || undefined}
+        stockSymbol={formData.symbol}
+        stockPrice={livePrice || parseFloat(formData.entryPrice) || undefined}
+      />
     </div>
   );
 }
