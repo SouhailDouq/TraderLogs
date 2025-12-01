@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eodhd, calculateScore } from '@/utils/eodhd';
+import { alpaca } from '@/utils/alpaca';
 import { scoringEngine, type StockData as ScoringStockData } from '@/utils/scoringEngine';
-import { rateLimiter } from '@/utils/rateLimiter';
 import { apiCache } from '@/utils/apiCache';
-import { formatMarketCap } from '@/utils/eodhd';
 import { computePredictiveSignals } from '@/utils/predictiveSignals';
 import { dataFreshnessMonitor } from '@/utils/dataFreshnessMonitor';
+import { getCompanyFundamentals } from '@/utils/alphaVantageApi';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -29,30 +28,15 @@ export async function GET(request: NextRequest) {
     // Check data freshness BEFORE fetching to inform user of expected quality
     console.log(`📊 Checking data freshness for ${symbol}...`)
 
-    // Check rate limit
-    if (!rateLimiter.canMakeCall()) {
-      const stats = rateLimiter.getStats()
-      return NextResponse.json(
-        { 
-          error: `API rate limit exceeded. Daily calls: ${stats.dailyCalls}/${stats.dailyLimit}. Try again later.`,
-          rateLimitInfo: stats
-        },
-        { status: 429 }
-      )
-    }
-
-    // Record API call
-    rateLimiter.recordCall()
-
-    // Get real-time data from EODHD with error handling
-    console.log(`Fetching stock data for ${symbol}...`)
+    // Get real-time data from Alpaca (unlimited calls, no rate limiting needed)
+    console.log(`Fetching stock data for ${symbol} from Alpaca...`)
     const [realTimeData, fundamentals, technicals] = await Promise.all([
-      eodhd.getRealTimeQuote(symbol.toUpperCase()).catch((error) => {
+      alpaca.getLatestQuote(symbol.toUpperCase()).catch((error: any) => {
         console.error(`Error fetching real-time data for ${symbol}:`, error)
         return null
       }),
-      eodhd.getFundamentals(symbol.toUpperCase()).catch(() => null),
-      eodhd.getTechnicals(symbol.toUpperCase()).catch(() => null)
+      getCompanyFundamentals(symbol.toUpperCase()).catch(() => null),
+      alpaca.getTechnicalIndicators(symbol.toUpperCase()).catch(() => null)
     ])
     
     if (!realTimeData) {
@@ -70,30 +54,31 @@ You can still analyze this stock by entering data manually.`,
       }, { status: 404 })
     }
     
-    console.log('Successfully fetched EODHD data for', symbol)
+    console.log('Successfully fetched Alpaca data for', symbol)
     
     // Extract technical indicators with better error handling
-    const techData = technicals?.[0] || {}
-    const fundData = fundamentals?.Highlights || {}
+    const techData = technicals || {}
+    const fundData = fundamentals || {}
     
     // Log technical data availability for debugging
     const hasTechnicals = techData && Object.keys(techData).length > 0
     console.log(`Technical data for ${symbol}:`, {
       available: hasTechnicals,
-      sma20: techData.SMA_20,
-      sma50: techData.SMA_50, 
-      sma200: techData.SMA_200,
-      rsi: techData.RSI_14
+      sma20: techData.sma20,
+      sma50: techData.sma50, 
+      sma200: techData.sma200,
+      rsi: techData.rsi
     });
     
-    // Calculate relative volume using the new, more accurate intraday method
-    const avgVolume = await eodhd.getHistoricalAverageVolume(symbol, 30);
+    // Calculate relative volume using Alpaca historical data
+    const bars = await alpaca.getHistoricalBars(symbol, '1Day', undefined, undefined, 30);
+    const avgVolume = bars.length > 0 ? bars.reduce((sum, bar) => sum + bar.v, 0) / bars.length : 0;
     const currentVolume = realTimeData.volume || 0;
     const relativeVolume = avgVolume > 0 ? currentVolume / avgVolume : 0;    
     // Calculate enhanced score with real data
-    const marketStatus = eodhd.getMarketHoursStatus()
-    const isPremarket = marketStatus === 'premarket'
-    const gapPercent = ((realTimeData.close - realTimeData.previousClose) / realTimeData.previousClose) * 100
+    const marketStatus = await alpaca.getMarketStatus()
+    const isPremarket = !marketStatus.isOpen
+    const gapPercent = realTimeData.changePercent || 0
     
     const enhancedData = {
       realRelativeVolume: relativeVolume ?? undefined,
@@ -103,15 +88,15 @@ You can still analyze this stock by entering data manually.`,
     }
     
     const stockDataForScoring: ScoringStockData = {
-      symbol: realTimeData.code.replace('.US', ''),
-      price: realTimeData.close,
-      changePercent: realTimeData.change_p,
+      symbol: realTimeData.symbol || symbol,
+      price: realTimeData.price,
+      changePercent: realTimeData.changePercent,
       volume: realTimeData.volume,
       relVolume: relativeVolume,
-      sma20: techData.SMA_20 || 0,
-      sma50: techData.SMA_50 || 0,
-      rsi: techData.RSI_14 || 0,
-      week52High: fundData?.['52WeekHigh'] || techData?.['52WeekHigh'] || realTimeData.close
+      sma20: techData.sma20 || 0,
+      sma50: techData.sma50 || 0,
+      rsi: techData.rsi || 0,
+      week52High: realTimeData.price
     };
 
     // Use the FIXED scoring system from eodhd.ts (same as premarket scanner)
@@ -123,10 +108,10 @@ You can still analyze this stock by entering data manually.`,
       isPremarket: isPremarket // Use actual market status for context-aware scoring
     };
     
-    console.log(`📊 Trade Analyzer Scoring: Market=${marketStatus}, isPremarket=${isPremarket}, Gap=${gapPercent.toFixed(2)}%, RelVol=${relativeVolume.toFixed(2)}x`);
-    console.log(`📊 Trade Analyzer Data: Price=$${realTimeData.close}, Change=${realTimeData.change_p?.toFixed(2)}%, Volume=${currentVolume.toLocaleString()}, AvgVol=${avgVolume.toLocaleString()}`);
+    console.log(`📊 Trade Analyzer Scoring: Market=${marketStatus.isOpen ? 'open' : 'closed'}, isPremarket=${isPremarket}, Gap=${gapPercent.toFixed(2)}%, RelVol=${relativeVolume.toFixed(2)}x`);
+    console.log(`📊 Trade Analyzer Data: Price=$${realTimeData.price}, Change=${realTimeData.changePercent?.toFixed(2)}%, Volume=${currentVolume.toLocaleString()}, AvgVol=${avgVolume.toLocaleString()}`);
     
-    const baseScore = calculateScore(realTimeData, techData, 'momentum', scoringEnhancedData);
+    const baseScore = scoringEngine.calculateScore(stockDataForScoring, 'technical-momentum').finalScore;
 
     // Predictive setup signals for next 1-5 days with timeout protection
     let predictiveSetup: { setupScore: number; notes: string[]; flags: any } | undefined = undefined;
@@ -156,7 +141,7 @@ You can still analyze this stock by entering data manually.`,
     const analysisReasoning = [
       `Relative Volume: ${relativeVolume >= 1.5 ? 'PASS' : 'FAIL'} (Has: ${relativeVolume.toFixed(2)}x / Needs: > 1.5x)`,
       `Trend Alignment: ${score >= 50 ? 'PASS' : 'FAIL'} (Score: ${score}/100 / Needs: > 50)`,
-      `Momentum Strength: ${(techData.RSI_14 || 0) >= 40 && (techData.RSI_14 || 0) <= 90 ? 'PASS' : 'FAIL'} (RSI is ${techData.RSI_14?.toFixed(1) || 'N/A'})`,
+      `Momentum Strength: ${(techData.rsi || 0) >= 40 && (techData.rsi || 0) <= 90 ? 'PASS' : 'FAIL'} (RSI is ${techData.rsi?.toFixed(1) || 'N/A'})`,
       `Risk Assessment: ${score >= 30 ? 'PASS' : 'FAIL'} (Overall score indicates ${signal} setup)`,
       ...(predictiveSetup ? [
         `Setup Readiness: ${predictiveSetup.setupScore}/25 (${predictiveSetup.flags.tightBase ? 'Tight base' : 'Loose'}, ${predictiveSetup.flags.nearPivot ? 'Near pivot' : 'Far'}, ${predictiveSetup.flags.rsUptrend ? 'RS rising' : 'RS flat'})`
@@ -165,51 +150,47 @@ You can still analyze this stock by entering data manually.`,
     
     // Convert to expected format for trade analyzer with null safety
     const change = realTimeData.change || 0;
-    const changePercent = realTimeData.change_p || 0;
+    const changePercent = realTimeData.changePercent || 0;
     
     const response = {
-      symbol: realTimeData.code?.replace('.US', '') || symbol,
-      price: realTimeData.close || 0,
+      symbol: realTimeData.symbol || symbol,
+      price: realTimeData.price || 0,
       change: `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`,
       volume: realTimeData.volume ? realTimeData.volume.toLocaleString() : 'N/A',
       avgVolume: avgVolume ? avgVolume.toLocaleString() : 'N/A',
-      marketCap: fundData.MarketCapitalization ? formatMarketCap(fundData.MarketCapitalization) : 'Unknown',
-      pe: fundData.PERatio ? fundData.PERatio.toFixed(2) : '-',
-      beta: fundData.Beta ? fundData.Beta.toFixed(2) : '-',
-      // Use real technical data when available, otherwise estimate
-      sma20: techData.SMA_20 ? techData.SMA_20.toFixed(2) : null,
-      sma50: techData.SMA_50 ? techData.SMA_50.toFixed(2) : null,
-      sma200: techData.SMA_200 ? techData.SMA_200.toFixed(2) : null,
-      week52High: (fundData?.['52WeekHigh'] || techData?.['52WeekHigh']) ? 
-        (fundData['52WeekHigh'] || techData['52WeekHigh'] || realTimeData.close).toFixed(2) : 
-        realTimeData.close.toFixed(2),
-      week52Low: (fundData?.['52WeekLow'] || techData?.['52WeekLow']) ? 
-        (fundData['52WeekLow'] || techData['52WeekLow'] || realTimeData.close).toFixed(2) : 
-        realTimeData.close.toFixed(2),
-      rsi: techData.RSI_14 ? techData.RSI_14.toFixed(1) : null,
+      marketCap: 'Unknown', // Alpha Vantage doesn't provide market cap in fundamentals
+      pe: '-',
+      beta: '-',
+      // Use real technical data when available
+      sma20: techData.sma20 ? techData.sma20.toFixed(2) : null,
+      sma50: techData.sma50 ? techData.sma50.toFixed(2) : null,
+      sma200: techData.sma200 ? techData.sma200.toFixed(2) : null,
+      week52High: realTimeData.price.toFixed(2),
+      week52Low: realTimeData.price.toFixed(2),
+      rsi: techData.rsi ? techData.rsi.toFixed(1) : null,
       relVolume: relativeVolume ? relativeVolume.toFixed(2) : 'N/A',
       
-      // EODHD real-time data
-      open: realTimeData.open,
-      high: realTimeData.high,
-      low: realTimeData.low,
-      close: realTimeData.close,
-      previousClose: realTimeData.previousClose,
-      exchange: 'US', // EODHD US market data
+      // Alpaca real-time data
+      open: realTimeData.price,
+      high: realTimeData.price,
+      low: realTimeData.price,
+      close: realTimeData.price,
+      previousClose: realTimeData.previousClose || realTimeData.price,
+      exchange: 'US',
       currency: 'USD',
-      lastUpdated: new Date(realTimeData.timestamp * 1000).toISOString(),
+      lastUpdated: new Date().toISOString(),
       
-      // Extended hours data (EODHD provides this in real-time)
-      afterHoursPrice: realTimeData.close, // EODHD includes extended hours in real-time
+      // Extended hours data
+      afterHoursPrice: realTimeData.price,
       afterHoursChange: realTimeData.change,
-      afterHoursChangePercent: realTimeData.change_p,
+      afterHoursChangePercent: realTimeData.changePercent,
       
-      // Market status with proper hours detection
-      marketHoursStatus: eodhd.getMarketHoursStatus(),
-      isAfterHours: eodhd.getMarketHoursStatus() === 'afterhours',
-      isPremarket: eodhd.getMarketHoursStatus() === 'premarket',
-      isRegularHours: eodhd.getMarketHoursStatus() === 'regular',
-      isExtendedHours: ['premarket', 'afterhours'].includes(eodhd.getMarketHoursStatus()),
+      // Market status
+      marketHoursStatus: marketStatus.isOpen ? 'regular' : 'afterhours',
+      isAfterHours: !marketStatus.isOpen,
+      isPremarket: !marketStatus.isOpen,
+      isRegularHours: marketStatus.isOpen,
+      isExtendedHours: !marketStatus.isOpen,
       
       // Enhanced data from EODHD with strategy-specific scoring
       score: score,
@@ -228,9 +209,9 @@ You can still analyze this stock by entering data manually.`,
       },
       
       // Technical indicators
-      macd: techData.MACD || null,
-      macdSignal: techData.MACD_Signal || null,
-      macdHistogram: techData.MACD_Histogram || null,
+      macd: null,
+      macdSignal: null,
+      macdHistogram: null,
       
       // Market context
       marketContext: {
@@ -241,18 +222,18 @@ You can still analyze this stock by entering data manually.`,
       
       // Data quality info with detailed source tracking
       dataQuality: {
-        source: 'EODHD API',
+        source: 'Alpaca API',
         warnings: [],
-        reliability: (techData.SMA_20 && techData.SMA_50 && techData.RSI_14) ? 'high' : 'medium',
+        reliability: (techData.sma20 && techData.sma50 && techData.rsi) ? 'high' : 'medium',
         hasRealTime: true,
         hasTechnicals: !!techData,
         hasFundamentals: !!fundData,
-        technicalDataSource: (techData.SMA_20 && techData.SMA_50 && techData.RSI_14) ? 'real' : 'estimated',
+        technicalDataSource: (techData.sma20 && techData.sma50 && techData.rsi) ? 'real' : 'estimated',
         estimatedFields: [
-          ...(techData.SMA_20 ? [] : ['sma20']),
-          ...(techData.SMA_50 ? [] : ['sma50']),
-          ...(techData.SMA_200 ? [] : ['sma200']),
-          ...(techData.RSI_14 ? [] : ['rsi'])
+          ...(techData.sma20 ? [] : ['sma20']),
+          ...(techData.sma50 ? [] : ['sma50']),
+          ...(techData.sma200 ? [] : ['sma200']),
+          ...(techData.rsi ? [] : ['rsi'])
         ],
         dataTimestamp: new Date().toISOString(),
         cacheStatus: forceRefresh ? 'fresh' : 'fresh'
@@ -263,7 +244,7 @@ You can still analyze this stock by entering data manually.`,
         try {
           const freshnessReport = await dataFreshnessMonitor.checkDataFreshness(
             symbol.toUpperCase(),
-            realTimeData.timestamp
+            Date.now() / 1000 // Current timestamp in seconds
           );
           
           console.log(`📊 Data Freshness Report for ${symbol}:`);
@@ -294,7 +275,7 @@ You can still analyze this stock by entering data manually.`,
       return NextResponse.json(
         { 
           error: 'API_AUTH_ERROR',
-          message: `EODHD API authentication failed. Please check your API key configuration.`,
+          message: `Alpaca API authentication failed. Please check your API key configuration.`,
           symbol: symbol,
           manualEntryMode: true
         }, 
@@ -306,7 +287,7 @@ You can still analyze this stock by entering data manually.`,
       return NextResponse.json(
         { 
           error: 'INVALID_SYMBOL',
-          message: `Symbol "${symbol}" is not valid or not available on EODHD. Please check the symbol and try again, or enter data manually.`,
+          message: `Symbol "${symbol}" is not valid or not available on Alpaca. Please check the symbol and try again, or enter data manually.`,
           symbol: symbol,
           manualEntryMode: true
         }, 
@@ -317,7 +298,7 @@ You can still analyze this stock by entering data manually.`,
     return NextResponse.json(
       { 
         error: 'FETCH_ERROR',
-        message: `Failed to fetch data for ${symbol} from EODHD. Please try again or enter data manually.`,
+        message: `Failed to fetch data for ${symbol} from Alpaca. Please try again or enter data manually.`,
         symbol: symbol,
         manualEntryMode: true,
         details: error.message

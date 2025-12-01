@@ -5,8 +5,12 @@
  * STRATEGY: Multi-layer validation system with automated risk management
  */
 
-import { eodhd, type EODHDTechnicals, type EODHDNewsItem } from './eodhd'
+import { alpaca } from './alpaca'
 import { momentumValidator, type MomentumValidationResult } from './momentumValidator'
+
+// Type definitions for compatibility
+type EODHDTechnicals = any;
+type EODHDNewsItem = any;
 
 interface TradeValidationResult {
   shouldTrade: boolean;
@@ -255,21 +259,21 @@ export class AutomatedTradingEngine {
   }
 
   /**
-   * REAL CHART PATTERN ANALYSIS: Using EODHD Technical Data
+   * REAL CHART PATTERN ANALYSIS: Using Alpaca Technical Data
    */
   private async analyzeChartPatterns(symbol: string, currentPrice: number) {
     try {
-      // Get real technical indicators from EODHD
-      const technicals = await eodhd.getTechnicals(symbol);
-      const latestTech = technicals[0] || {};
+      // Get real technical indicators from Alpaca
+      const technicals = await alpaca.getTechnicalIndicators(symbol);
+      const latestTech = technicals || {};
       
       let bullishSignals = 0;
       let bearishSignals = 0;
       
       // 1. SMA Analysis (Strong bullish if above all SMAs)
-      const sma20 = latestTech.SMA_20 || 0;
-      const sma50 = latestTech.SMA_50 || 0;
-      const sma200 = latestTech.SMA_200 || 0;
+      const sma20 = latestTech.sma20 || 0;
+      const sma50 = latestTech.sma50 || 0;
+      const sma200 = latestTech.sma200 || 0;
       
       if (sma20 > 0 && currentPrice > sma20) bullishSignals++;
       if (sma50 > 0 && currentPrice > sma50) bullishSignals++;
@@ -279,7 +283,7 @@ export class AutomatedTradingEngine {
       if (sma20 > sma50 && sma50 > sma200) bullishSignals++;
       
       // 2. RSI Analysis
-      const rsi = latestTech.RSI_14 || 50;
+      const rsi = latestTech.rsi || 50;
       if (rsi > 70) {
         bearishSignals++; // Overbought
       } else if (rsi > 50 && rsi < 70) {
@@ -287,7 +291,7 @@ export class AutomatedTradingEngine {
       }
       
       // 3. 52-Week High Analysis
-      let high52Week = latestTech['52WeekHigh'] || latestTech.high_52weeks || 0;
+      let high52Week = 0; // Alpaca doesn't provide 52-week high directly
       let proximityToHigh = 0;
       
       if (high52Week > 0) {
@@ -301,11 +305,19 @@ export class AutomatedTradingEngine {
         try {
           const oneYearAgo = new Date();
           oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-          const historicalData = await eodhd.getHistoricalData(
+          const bars = await alpaca.getHistoricalBars(
             symbol, 
+            '1Day',
             oneYearAgo.toISOString().split('T')[0], 
-            new Date().toISOString().split('T')[0]
+            new Date().toISOString().split('T')[0],
+            365
           );
+          const historicalData = bars.map(bar => ({
+            date: new Date(bar.t).toISOString().split('T')[0],
+            close: bar.c,
+            high: bar.h,
+            low: bar.l
+          }));
           
           if (historicalData && historicalData.length > 0) {
             high52Week = Math.max(...historicalData.map((d: any) => d.high));
@@ -328,11 +340,13 @@ export class AutomatedTradingEngine {
       }
       
       // 4. MACD Analysis
-      const macd = latestTech.MACD || 0;
-      const macdSignal = latestTech.MACD_Signal || 0;
-      if (macd > macdSignal && macd > 0) {
+      const macdObj = latestTech.macd;
+      const macdVal = macdObj?.macd || 0;
+      const signalVal = macdObj?.signal || 0;
+      
+      if (macdVal > signalVal && macdVal > 0) {
         bullishSignals++; // Bullish MACD crossover
-      } else if (macd < macdSignal) {
+      } else if (macdVal < signalVal) {
         bearishSignals++; // Bearish MACD
       }
       
@@ -359,8 +373,8 @@ export class AutomatedTradingEngine {
           sma20,
           sma50,
           sma200,
-          macd,
-          macdSignal,
+          macd: macdVal,
+          macdSignal: signalVal,
           high52Week,
           proximityToHigh: proximityToHigh
         }
@@ -380,12 +394,12 @@ export class AutomatedTradingEngine {
   }
 
   /**
-   * REAL NEWS SENTIMENT ANALYSIS: Using EODHD News Data
+   * REAL NEWS SENTIMENT ANALYSIS: Using Alpaca News Data
    */
   private async validateNewsCatalyst(symbol: string) {
     try {
       // Get recent news for the symbol
-      const news = await eodhd.getStockNews(symbol, 10);
+      const news = await alpaca.getNews(symbol, 10);
       
       if (!news || news.length === 0) {
         return {
@@ -399,57 +413,75 @@ export class AutomatedTradingEngine {
       }
       
       // Analyze sentiment from recent news
-      let totalSentiment = 0;
+      let totalSentimentScore = 50; // Start at neutral (0-100 scale)
       let recentNewsCount = 0;
       let highImpactCount = 0;
       const now = new Date();
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       
+      // Keywords for sentiment analysis
+      const bullishKeywords = ['beat', 'surged', 'jumped', 'higher', 'profit', 'growth', 'upgrade', 'buy', 'positive', 'record', 'approval', 'fda', 'partnership', 'contract', 'awarded'];
+      const bearishKeywords = ['missed', 'fell', 'dropped', 'lower', 'loss', 'decline', 'downgrade', 'sell', 'negative', 'lawsuit', 'investigation', 'suspended', 'rejected'];
+      
       for (const article of news) {
-        const articleDate = new Date(article.date);
+        const articleDate = new Date(article.created_at);
         const isRecent = articleDate > oneDayAgo;
         
         if (isRecent) {
           recentNewsCount++;
-          totalSentiment += article.sentiment.polarity;
+          
+          // Keyword-based sentiment scoring
+          const text = (article.headline || article.summary || '').toLowerCase();
+          let articleScore = 0;
+          
+          bullishKeywords.forEach(word => {
+            if (text.includes(word)) articleScore += 10;
+          });
+          
+          bearishKeywords.forEach(word => {
+            if (text.includes(word)) articleScore -= 10;
+          });
+          
+          // Cap individual article impact
+          articleScore = Math.max(-30, Math.min(30, articleScore));
+          
+          // Add to total (weighted by recency could be added later)
+          totalSentimentScore += articleScore;
           
           // Check for high-impact news types
-          const title = article.title.toLowerCase();
-          const content = article.content.toLowerCase();
-          
-          if (title.includes('earnings') || title.includes('revenue') || 
-              title.includes('fda') || title.includes('approval') ||
-              title.includes('merger') || title.includes('acquisition') ||
-              content.includes('beat estimates') || content.includes('upgraded')) {
+          if (text.includes('earnings') || text.includes('revenue') || 
+              text.includes('fda') || text.includes('approval') ||
+              text.includes('merger') || text.includes('acquisition')) {
             highImpactCount++;
           }
         }
       }
       
-      const avgSentiment = recentNewsCount > 0 ? totalSentiment / recentNewsCount : 0;
+      // Normalize final score to 0-100 range
+      const finalSentiment = Math.max(0, Math.min(100, totalSentimentScore));
       
       // Determine catalyst type based on news content
       let catalystType = 'GENERAL_NEWS';
       const recentTitles = news
-        .filter(n => new Date(n.date) > oneDayAgo)
-        .map(n => n.title.toLowerCase())
+        .filter(n => new Date(n.created_at) > oneDayAgo)
+        .map(n => (n.headline || '').toLowerCase())
         .join(' ');
       
       if (recentTitles.includes('earnings') || recentTitles.includes('revenue')) {
-        catalystType = avgSentiment > 0 ? 'EARNINGS_BEAT' : 'EARNINGS_MISS';
+        catalystType = finalSentiment > 50 ? 'EARNINGS_BEAT' : 'EARNINGS_MISS';
       } else if (recentTitles.includes('fda') || recentTitles.includes('approval')) {
-        catalystType = avgSentiment > 0 ? 'FDA_APPROVAL' : 'FDA_REJECTION';
+        catalystType = finalSentiment > 50 ? 'FDA_APPROVAL' : 'FDA_REJECTION';
       } else if (recentTitles.includes('merger') || recentTitles.includes('acquisition')) {
         catalystType = 'M&A_NEWS';
       } else if (recentTitles.includes('upgrade') || recentTitles.includes('downgrade')) {
-        catalystType = avgSentiment > 0 ? 'ANALYST_UPGRADE' : 'ANALYST_DOWNGRADE';
+        catalystType = finalSentiment > 50 ? 'ANALYST_UPGRADE' : 'ANALYST_DOWNGRADE';
       }
       
       // Determine freshness
       let freshness = 'OLD';
       if (recentNewsCount > 0) {
         const latestNews = news[0];
-        const latestDate = new Date(latestNews.date);
+        const latestDate = new Date(latestNews.created_at);
         const hoursAgo = (now.getTime() - latestDate.getTime()) / (1000 * 60 * 60);
         
         if (hoursAgo < 1) freshness = 'BREAKING';
@@ -460,14 +492,14 @@ export class AutomatedTradingEngine {
       
       // Determine impact level
       let impact = 'LOW';
-      if (highImpactCount > 0 && Math.abs(avgSentiment) > 0.3) {
+      if (highImpactCount > 0 && Math.abs(finalSentiment - 50) > 20) {
         impact = 'HIGH';
-      } else if (recentNewsCount > 2 || Math.abs(avgSentiment) > 0.2) {
+      } else if (recentNewsCount > 2 || Math.abs(finalSentiment - 50) > 10) {
         impact = 'MEDIUM';
       }
       
       return {
-        sentiment: avgSentiment,
+        sentiment: finalSentiment,
         catalystType,
         freshness,
         impact,
@@ -590,7 +622,13 @@ export class AutomatedTradingEngine {
       const to = new Date().toISOString().split('T')[0];
       const from = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       
-      const historicalData = await eodhd.getHistoricalData(symbol, from, to);
+      const bars = await alpaca.getHistoricalBars(symbol, '1Day', from, to, 20);
+      const historicalData = bars.map(bar => ({
+        date: new Date(bar.t).toISOString().split('T')[0],
+        close: bar.c,
+        high: bar.h,
+        low: bar.l
+      }));
       
       if (!historicalData || historicalData.length < 10) {
         // Fallback to current day's volatility

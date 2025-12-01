@@ -100,17 +100,17 @@ export async function fetchStockData(symbol: string): Promise<AlphaVantageStockD
 
     // Calculate real technical indicators from historical data
     const smaData = await calculateRealSMAs(symbol, currentPrice)
-    
+
     const warnings: string[] = []
     const isRealData = !!smaData
-    
+
     if (!smaData) {
       warnings.push('Technical indicators are estimated - historical data unavailable')
       warnings.push('SMAs and RSI are calculated approximations')
     }
 
     const reliability = isRealData && smaData ? 'medium' : 'low'
-    
+
     return {
       symbol: symbol.toUpperCase(),
       price: currentPrice,
@@ -143,9 +143,9 @@ export async function fetchStockData(symbol: string): Promise<AlphaVantageStockD
 // Better implementation using Finnhub API for real data
 export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantageStockData | null> {
   const FINNHUB_API_KEY = process.env.NEXT_PUBLIC_FINNHUB_API_KEY || 'demo'
-  
+
   console.log('Finnhub API call for', symbol, 'with key:', FINNHUB_API_KEY ? 'Present' : 'Missing')
-  
+
   try {
     // Fetch multiple endpoints in parallel for comprehensive data
     const [quoteResponse, profileResponse, metricsResponse] = await Promise.all([
@@ -190,29 +190,29 @@ export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantag
 
     // Get real technical indicators - calculate SMAs from historical data
     const smaData = await calculateRealSMAs(symbol, currentPrice)
-    
+
     // Get intraday data for real-time analysis
     const intradayData = await getIntradayData(symbol, currentPrice, changePercent, relativeVolume)
-    
+
     const warnings: string[] = []
     const isRealData = !!smaData
-    
+
     if (!smaData) {
       warnings.push('Technical indicators are estimated - historical data calculation failed')
       warnings.push('SMAs and RSI may not be accurate for trading decisions')
     }
-    
+
     // Calculate MACD if we have historical data
     const macdData = smaData ? await calculateMACD(symbol) : null
-    
+
     // Determine data reliability
-    const reliability = isRealData && smaData && macdData ? 'high' : 
-                       isRealData && smaData ? 'medium' : 'low'
-    
+    const reliability = isRealData && smaData && macdData ? 'high' :
+      isRealData && smaData ? 'medium' : 'low'
+
     if (reliability === 'low') {
       warnings.push('Low reliability data - use caution for trading decisions')
     }
-    
+
     return {
       symbol: symbol.toUpperCase(),
       price: currentPrice,
@@ -223,7 +223,7 @@ export async function fetchStockDataFinnhub(symbol: string): Promise<AlphaVantag
       beta: (metricsData.metric?.beta || '-').toString(),
       // Real SMAs from calculation or fallback
       sma20: smaData?.sma20 || (currentPrice * 0.98).toFixed(2),
-      sma50: smaData?.sma50 || (currentPrice * 0.95).toFixed(2), 
+      sma50: smaData?.sma50 || (currentPrice * 0.95).toFixed(2),
       sma200: smaData?.sma200 || (currentPrice * 0.90).toFixed(2),
       week52High: (profileData.week52High || quoteData.h || currentPrice).toString(),
       week52Low: (profileData.week52Low || quoteData.l || currentPrice).toString(),
@@ -293,12 +293,12 @@ async function getIntradayData(symbol: string, currentPrice: number, changePerce
 }
 
 // Calculate MACD from historical data
-async function calculateMACD(symbol: string): Promise<{macd: string, signal: string, histogram: string} | null> {
+async function calculateMACD(symbol: string): Promise<{ macd: string, signal: string, histogram: string } | null> {
   try {
     // Get 60 days of historical data for MACD calculation
     const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=60d&interval=1d`)
     const data = await response.json()
-    
+
     if (data.chart.error) {
       return null
     }
@@ -306,7 +306,7 @@ async function calculateMACD(symbol: string): Promise<{macd: string, signal: str
     const result = data?.chart?.result?.[0]
     const quote = result?.indicators?.quote?.[0]
     const prices = Array.isArray(quote?.close) ? quote!.close.filter((p: number) => p !== null) : []
-    
+
     if (prices.length < 26) {
       return null
     }
@@ -316,7 +316,7 @@ async function calculateMACD(symbol: string): Promise<{macd: string, signal: str
       const ema = []
       const multiplier = 2 / (period + 1)
       ema[0] = data[0]
-      
+
       for (let i = 1; i < data.length; i++) {
         ema[i] = (data[i] * multiplier) + (ema[i - 1] * (1 - multiplier))
       }
@@ -325,18 +325,18 @@ async function calculateMACD(symbol: string): Promise<{macd: string, signal: str
 
     const ema12 = calculateEMA(prices, 12)
     const ema26 = calculateEMA(prices, 26)
-    
+
     // Calculate MACD line
     const macdLine = ema12.map((val, i) => val - ema26[i])
-    
+
     // Calculate Signal line (9-period EMA of MACD)
     const signalLine = calculateEMA(macdLine, 9)
-    
+
     // Calculate Histogram
     const histogram = macdLine.map((val, i) => val - signalLine[i])
-    
+
     const latest = macdLine.length - 1
-    
+
     return {
       macd: macdLine[latest].toFixed(4),
       signal: signalLine[latest].toFixed(4),
@@ -380,12 +380,12 @@ export async function fetchMarketContext(): Promise<MarketContext | null> {
 
     // Determine SPY trend (compare current price to 10-day average)
     const spy10DayAvg = spyPrices.slice(-10).reduce((sum: number, p: number) => sum + p, 0) / 10
-    const spyTrend = currentSPY > spy10DayAvg * 1.02 ? 'bullish' : 
-                     currentSPY < spy10DayAvg * 0.98 ? 'bearish' : 'neutral'
+    const spyTrend = currentSPY > spy10DayAvg * 1.02 ? 'bullish' :
+      currentSPY < spy10DayAvg * 0.98 ? 'bearish' : 'neutral'
 
     // Determine market condition based on VIX
-    const marketCondition = currentVIX > 25 ? 'volatile' : 
-                           currentVIX < 15 ? 'trending' : 'sideways'
+    const marketCondition = currentVIX > 25 ? 'volatile' :
+      currentVIX < 15 ? 'trending' : 'sideways'
 
     // Calculate sector performance (5-day change)
     const calculateSectorChange = (data: any) => {
@@ -415,18 +415,18 @@ export async function fetchMarketContext(): Promise<MarketContext | null> {
 }
 
 // Calculate real SMAs and RSI from historical data
-async function calculateRealSMAs(symbol: string, currentPrice: number): Promise<{sma20: string, sma50: string, sma200: string, rsi: string} | null> {
+async function calculateRealSMAs(symbol: string, currentPrice: number): Promise<{ sma20: string, sma50: string, sma200: string, rsi: string } | null> {
   try {
     // Get 200 days of historical data from Yahoo Finance
     const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=200d&interval=1d`)
     const data = await response.json()
-    
+
     if (data.chart.error) {
       return null
     }
 
     const prices = data.chart.result[0].indicators.quote[0].close.filter((p: number) => p !== null)
-    
+
     if (prices.length < 20) {
       return null
     }
@@ -435,24 +435,24 @@ async function calculateRealSMAs(symbol: string, currentPrice: number): Promise<
     const sma20 = prices.slice(-20).reduce((sum: number, p: number) => sum + p, 0) / 20
     const sma50 = prices.length >= 50 ? prices.slice(-50).reduce((sum: number, p: number) => sum + p, 0) / 50 : sma20
     const sma200 = prices.length >= 200 ? prices.reduce((sum: number, p: number) => sum + p, 0) / prices.length : sma50
-    
+
     // Simple RSI calculation (14-period)
     const rsiPeriod = Math.min(14, prices.length - 1)
     let gains = 0, losses = 0
-    
+
     for (let i = prices.length - rsiPeriod; i < prices.length; i++) {
       const change = prices[i] - prices[i - 1]
       if (change > 0) gains += change
       else losses += Math.abs(change)
     }
-    
+
     const avgGain = gains / rsiPeriod
     const avgLoss = losses / rsiPeriod
     const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)))
-    
+
     return {
       sma20: sma20.toFixed(2),
-      sma50: sma50.toFixed(2), 
+      sma50: sma50.toFixed(2),
       sma200: sma200.toFixed(2),
       rsi: rsi.toFixed(1)
     }
@@ -485,7 +485,7 @@ export async function getCompanyFundamentals(symbol: string): Promise<{
       console.log(`⚠️ ${symbol}: Alpha Vantage error - ${data['Error Message']}`)
       return null
     }
-    
+
     if (data['Note']) {
       console.log(`🚫 ${symbol}: Alpha Vantage rate limited - ${data['Note']}`)
       return null
@@ -518,7 +518,7 @@ export async function fetchStockDataYahoo(symbol: string): Promise<AlphaVantageS
     // Using a public Yahoo Finance API proxy
     const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`)
     const data = await response.json()
-    
+
     if (data.chart.error) {
       throw new Error('Invalid symbol')
     }
@@ -530,37 +530,37 @@ export async function fetchStockDataYahoo(symbol: string): Promise<AlphaVantageS
     const meta = result.meta || {}
     const indicators = result.indicators || {}
     const quote = Array.isArray(indicators.quote) ? indicators.quote[0] : undefined
-    
+
     const currentPrice = meta.regularMarketPrice || 0
     const previousClose = meta.previousClose || currentPrice
     const change = currentPrice - previousClose
     const changePercent = ((change / previousClose) * 100).toFixed(2)
-    
+
     // Get latest volume
     const volumes = quote && Array.isArray(quote.volume) ? quote.volume.filter((v: number) => v !== null) : []
     const latestVolume = volumes.length > 0 ? volumes[volumes.length - 1] : 0
 
     // Calculate real SMAs from available data
     const smaData = await calculateRealSMAs(symbol, currentPrice)
-    
+
     const warnings: string[] = []
     let isRealData = !!smaData
-    
+
     if (!smaData) {
       warnings.push('Technical indicators are estimated - historical data unavailable')
     }
-    
+
     // Check for other placeholder data
     if (!meta.fiftyTwoWeekHigh) {
       warnings.push('52-week high/low data unavailable')
     }
-    
+
     warnings.push('Market cap and fundamentals unavailable from Yahoo Finance')
     warnings.push('Relative volume is estimated')
     isRealData = false // Yahoo-only approach has limitations
 
     const reliability = isRealData && smaData ? 'medium' : 'low'
-    
+
     return {
       symbol: symbol.toUpperCase(),
       price: currentPrice,
@@ -586,6 +586,50 @@ export async function fetchStockDataYahoo(symbol: string): Promise<AlphaVantageS
 
   } catch (error) {
     console.error('Error fetching Yahoo Finance data:', error)
+    return null
+  }
+}
+
+// Fetch top gainers and losers for market scanning
+export async function getTopGainersLosers(): Promise<{
+  top_gainers: any[]
+  top_losers: any[]
+  most_actively_traded: any[]
+} | null> {
+  try {
+    // Check if API key is configured
+    if (!ALPHA_VANTAGE_API_KEY || ALPHA_VANTAGE_API_KEY === 'demo') {
+      console.log(`⚠️ Alpha Vantage API key not configured (using demo key)`)
+      // Demo key works for this endpoint!
+    }
+
+    const response = await fetch(
+      `https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=${ALPHA_VANTAGE_API_KEY}`
+    )
+    const data = await response.json()
+
+    if (data['Error Message']) {
+      console.log(`⚠️ Alpha Vantage error - ${data['Error Message']}`)
+      return null
+    }
+
+    if (data['Note']) {
+      console.log(`🚫 Alpha Vantage rate limited - ${data['Note']}`)
+      return null
+    }
+
+    if (!data.top_gainers && !data.top_losers && !data.most_actively_traded) {
+      console.log('⚠️ No gainers/losers data returned from Alpha Vantage')
+      return null
+    }
+
+    return {
+      top_gainers: data.top_gainers || [],
+      top_losers: data.top_losers || [],
+      most_actively_traded: data.most_actively_traded || []
+    }
+  } catch (error) {
+    console.error('Error fetching Alpha Vantage gainers/losers:', error)
     return null
   }
 }

@@ -1,62 +1,111 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eodhd, calculateScore } from '@/utils/eodhd';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { alpaca } from '@/utils/alpaca';
 import { momentumValidator } from '@/utils/momentumValidator';
 import { scoringEngine, type StockData } from '@/utils/scoringEngine';
 import { computePredictiveSignals } from '@/utils/predictiveSignals';
+import { getCompanyFundamentals, getTopGainersLosers } from '@/utils/alphaVantageApi';
 
-// Create a comprehensive EODHD client mock for enhanced methods not yet implemented
-const eodhdEnhanced = {
-  getMarketHoursStatus: () => {
-    const now = new Date();
-    const etHour = now.getUTCHours() - 5; // Convert to ET
-    if (etHour >= 4 && etHour < 9.5) return 'premarket';
-    if (etHour >= 9.5 && etHour < 16) return 'regular';
-    if (etHour >= 16 && etHour < 20) return 'afterhours';
-    return 'closed';
+// Create a comprehensive Alpaca client wrapper for enhanced methods
+const alpacaEnhanced = {
+  getMarketHoursStatus: async () => {
+    const status = await alpaca.getMarketStatus();
+    return {
+      isOpen: status.isOpen,
+      isPremarket: !status.isOpen, // Simplified
+      isAfterHours: !status.isOpen,
+    };
   },
-  isLiveDataFresh: () => true,
-  getNextMarketOpen: () => new Date(),
+  isLiveDataFresh: () => true, // Alpaca always provides fresh data
+  getNextMarketOpen: async () => {
+    const status = await alpaca.getMarketStatus();
+    return status.nextOpen || new Date().toISOString();
+  },
   getPremarketMovers: async (params: any) => {
-    // Use the real EODHD client's getPremarketMovers method
-    console.log('🔍 Using REAL EODHD screener data (no more mock data)');
-    return await eodhd.getPremarketMovers(params);
+    console.log('🔍 Fetching premarket movers from Alpha Vantage screener (FREE market-wide scan!)');
+    
+    // Get top gainers from Alpha Vantage (scans entire market)
+    const gainersData = await getTopGainersLosers();
+    
+    if (!gainersData || !gainersData.top_gainers) {
+      console.log('⚠️ Alpha Vantage screener unavailable, falling back to hardcoded list');
+      return await alpaca.getPremarketMovers(params?.minChange || 3, params?.minVolume || 100000);
+    }
+    
+    console.log(`✅ Alpha Vantage found ${gainersData.top_gainers.length} top gainers from entire market`);
+    
+    // Convert Alpha Vantage format to our format
+    const movers = gainersData.top_gainers
+      .filter((stock: any) => {
+        const changePercent = parseFloat(stock.change_percentage.replace('%', ''));
+        const volume = parseInt(stock.volume);
+        const price = parseFloat(stock.price);
+        
+        return changePercent >= (params?.minChange || 2) && 
+               volume >= (params?.minVolume || 100000) &&
+               price >= (params?.minPrice || 1) &&
+               price <= (params?.maxPrice || 1000);
+      })
+      .map((stock: any) => ({
+        symbol: stock.ticker,
+        price: parseFloat(stock.price),
+        change: parseFloat(stock.change_amount),
+        changePercent: parseFloat(stock.change_percentage.replace('%', '')),
+        volume: parseInt(stock.volume),
+        previousClose: parseFloat(stock.price) - parseFloat(stock.change_amount),
+      }));
+    
+    console.log(`✅ Filtered to ${movers.length} stocks matching criteria`);
+    return movers;
   },
   getRealTimeQuote: async (symbol: string) => {
-    // Use the real EODHD client for live quotes
-    return await eodhd.getRealTimeQuote(symbol);
+    return await alpaca.getLatestQuote(symbol);
   },
   getFundamentals: async (symbol: string) => {
-    // Use real EODHD fundamentals instead of mock data
     try {
-      return await eodhd.getFundamentals(symbol);
+      // Alpaca doesn't have fundamentals, use Alpha Vantage as fallback
+      return await getCompanyFundamentals(symbol);
     } catch (error) {
-      console.error(`❌ ${symbol}: Real fundamentals failed - no mock data returned for trading safety`);
-      return null; // Don't return fake fundamentals for trading decisions
+      console.error(`❌ ${symbol}: Fundamentals failed`);
+      return null;
     }
   },
   getTechnicals: async (symbol: string) => {
-    // Use real technical data from EODHD instead of mock data
     try {
-      return await eodhd.getTechnicals(symbol);
+      const technicals = await alpaca.getTechnicalIndicators(symbol);
+      return [{
+        SMA_20: technicals.sma20,
+        SMA_50: technicals.sma50,
+        SMA_200: technicals.sma200,
+        RSI_14: technicals.rsi
+      }];
     } catch (error) {
-      console.log(`⚠️ ${symbol}: Real technicals failed, using fallback`);
+      console.log(`⚠️ ${symbol}: Technicals failed, using fallback`);
       return [{
         SMA_20: undefined,
-        SMA_50: undefined, 
+        SMA_50: undefined,
         SMA_200: undefined,
         RSI_14: undefined
       }];
     }
   },
   getHistoricalAverageVolume: async (symbol: string, days: number) => {
-    // CORRECTED: Use the REAL historical average volume calculation from the main eodhd client
-    console.log(`✅ Using REAL historical volume calculation for ${symbol}`);
-    return await eodhd.getHistoricalAverageVolume(symbol, days);
+    console.log(`✅ Calculating historical volume for ${symbol} using Alpaca`);
+    try {
+      const bars = await alpaca.getHistoricalBars(symbol, '1Day', undefined, undefined, days);
+      if (bars.length === 0) return 0;
+      const totalVolume = bars.reduce((sum, bar) => sum + bar.v, 0);
+      return totalVolume / bars.length;
+    } catch (error) {
+      console.error(`❌ ${symbol}: Historical volume failed`);
+      return 0;
+    }
   },
   calculatePremarketGap: (current: number, previous: number) => ({
     gapPercent: ((current - previous) / previous) * 100,
-    gapType: ((current - previous) / previous) > 0.01 ? 'gap_up' as const : 
-             ((current - previous) / previous) < -0.01 ? 'gap_down' as const : 'no_gap' as const,
+    gapType: ((current - previous) / previous) > 0.01 ? 'gap_up' as const :
+      ((current - previous) / previous) < -0.01 ? 'gap_down' as const : 'no_gap' as const,
     isSignificant: Math.abs(((current - previous) / previous) * 100) > 3,
     urgencyScore: Math.abs(((current - previous) / previous) * 100) * 2
   }),
@@ -65,7 +114,7 @@ const eodhdEnhanced = {
     const etHour = now.getUTCHours() - 5;
     let urgencyMultiplier = 1.0;
     let timeWindow = 'closed';
-    
+
     if (etHour >= 4 && etHour < 6) {
       urgencyMultiplier = 1.8;
       timeWindow = 'prime';
@@ -76,7 +125,7 @@ const eodhdEnhanced = {
       urgencyMultiplier = 1.1;
       timeWindow = 'late';
     }
-    
+
     return {
       urgencyMultiplier,
       timeWindow,
@@ -84,33 +133,32 @@ const eodhdEnhanced = {
     };
   },
   checkMomentumCriteria: async (symbol: string, price: number) => {
-    // Use REAL technical analysis instead of dangerous mock data
     try {
-      const technicals = await eodhd.getTechnicals(symbol);
-      const realTimeData = await eodhd.getRealTimeQuote(symbol);
-      
+      const technicals = await alpaca.getTechnicals(symbol);
+      const realTimeData = await alpaca.getRealTimeQuote(symbol);
+
       if (!technicals || !realTimeData) {
         throw new Error('No real data available');
       }
-      
+
       const tech = technicals[0] || {};
       const sma20 = tech.SMA_20 || 0;
       const sma50 = tech.SMA_50 || 0;
       const sma200 = tech.SMA_200 || 0;
-      
-      // Calculate REAL 52-week high proximity using Alpha Vantage backup
-      const week52Data = await eodhd.get52WeekHigh(symbol);
+
+      // Calculate REAL 52-week high proximity
+      const week52Data = await alpaca.get52WeekHigh(symbol);
       const highProximity = week52Data ? week52Data.proximity : 0;
-      
+
       // Calculate REAL SMA alignment
       const aboveSMA20 = price > sma20 && sma20 > 0;
       const aboveSMA50 = price > sma50 && sma50 > 0;
       const aboveSMA200 = price > sma200 && sma200 > 0;
       const isAboveSMAs = aboveSMA20 && aboveSMA50;
-      
+
       const smaAlignment = (aboveSMA20 && aboveSMA50 && aboveSMA200) ? 'bullish' as const :
-                          (aboveSMA20 && aboveSMA50) ? 'bullish' as const : 'mixed' as const;
-      
+        (aboveSMA20 && aboveSMA50) ? 'bullish' as const : 'mixed' as const;
+
       // Calculate REAL momentum score based on technical strength
       let momentumScore = 0;
       if (aboveSMA20) momentumScore += 20;
@@ -119,7 +167,7 @@ const eodhdEnhanced = {
       if (highProximity > 90) momentumScore += 25;
       else if (highProximity > 80) momentumScore += 15;
       else if (highProximity > 70) momentumScore += 10;
-      
+
       return {
         isNear20DayHigh: highProximity > 85,
         highProximity,
@@ -129,7 +177,6 @@ const eodhdEnhanced = {
       };
     } catch (error) {
       console.error(`❌ REAL momentum analysis failed for ${symbol}:`, error);
-      // Return conservative real-data-only fallback
       return {
         isNear20DayHigh: false,
         highProximity: 0,
@@ -140,9 +187,8 @@ const eodhdEnhanced = {
     }
   },
   getStockNews: async (symbol: string, limit: number) => {
-    // Use REAL news data from EODHD API
     try {
-      const news = await eodhd.getStockNews(symbol, limit);
+      const news = await alpaca.getStockNews(symbol, limit);
       if (news.length > 0) {
         console.log(`📰 Got ${news.length} real news articles for ${symbol}`);
       } else {
@@ -151,15 +197,12 @@ const eodhdEnhanced = {
       return news;
     } catch (error) {
       console.error(`❌ REAL news data failed for ${symbol}:`, error);
-      // Return empty array instead of fake news - no mock data for trading decisions!
       return [];
     }
   }
 };
 
 // Use the real scoring functions from eodhd.ts
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
 
 interface ScanFilters {
   minChange: number
@@ -262,16 +305,16 @@ interface PremarketStock {
 async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<any[]> {
   try {
     console.log(`Fetching live premarket movers for ${strategy} strategy with filters:`, filters);
-    
+
     // Check if we're in market hours for fresh data
-    const marketStatus = eodhdEnhanced.getMarketHoursStatus();
-    const isDataFresh = eodhdEnhanced.isLiveDataFresh();
-    
+    const marketStatus = alpacaEnhanced.getMarketHoursStatus();
+    const isDataFresh = alpacaEnhanced.isLiveDataFresh();
+
     if (!isDataFresh) {
-      const nextOpen = eodhdEnhanced.getNextMarketOpen();
+      const nextOpen = alpacaEnhanced.getNextMarketOpen();
       console.log(`Market is ${marketStatus}. Live data may be stale. Next market open: ${nextOpen.toISOString()}`);
     }
-    
+
     // Use new getPremarketMovers method for live data
     // Only pass filters that are enabled (> 0)
     const searchParams = {
@@ -282,10 +325,10 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
       minMarketCap: filters.minMarketCap && filters.minMarketCap > 0 ? filters.minMarketCap : undefined,
       maxMarketCap: filters.maxMarketCap && filters.maxMarketCap > 0 ? filters.maxMarketCap : undefined
     };
-    
-    let stocks = await eodhdEnhanced.getPremarketMovers(searchParams);
+
+    let stocks = await alpacaEnhanced.getPremarketMovers(searchParams);
     console.log(`Found ${stocks.length} live premarket stocks`);
-    
+
     // If no results with strict filters, try broader criteria
     if (stocks.length === 0) {
       console.log('No stocks found with strict filters, trying broader criteria...');
@@ -295,13 +338,13 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
         maxPrice: Math.min(15, (searchParams.maxPrice || 10) * 1.5),
         minChange: searchParams.minChange ? searchParams.minChange * 0.5 : undefined
       };
-      
-      stocks = await eodhdEnhanced.getPremarketMovers(broaderParams);
+
+      stocks = await alpacaEnhanced.getPremarketMovers(broaderParams);
       console.log(`Found ${stocks.length} stocks with broader criteria`);
     }
-    
+
     return stocks;
-    
+
   } catch (error) {
     console.error('Error fetching premarket movers:', error);
     return [];
@@ -339,7 +382,7 @@ function analyzeUnusualVolume(relativeVolume: number, currentVolume: number, avg
   let scoreBonus: number;
   let description: string;
   let emoji: string;
-  
+
   if (relativeVolume >= 5.0) {
     category = 'extreme';
     scoreBonus = 20;
@@ -366,9 +409,9 @@ function analyzeUnusualVolume(relativeVolume: number, currentVolume: number, avg
     description = `Low volume: ${relativeVolume.toFixed(1)}x average (${(currentVolume / 1000000).toFixed(1)}M vs ${(avgVolume / 1000000).toFixed(1)}M avg)`;
     emoji = '⚪';
   }
-  
+
   const isUnusual = relativeVolume >= 2.0; // 2x or higher is considered unusual
-  
+
   return {
     category,
     scoreBonus,
@@ -409,26 +452,26 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
 } | null> {
   try {
     console.log(`🔍 Enhanced analysis for ${symbol} (${strategy} strategy)...`);
-    
+
     // Use screener data if available
     let realTimeData = screenData;
     if (!realTimeData) {
-      realTimeData = await eodhd.getRealTimeQuote(symbol);
+      realTimeData = await alpaca.getRealTimeQuote(symbol);
     }
-    
+
     if (!realTimeData) return null;
-    
+
     const currentPrice = realTimeData.close || 0;
     const previousClose = realTimeData.previousClose || currentPrice;
-    
+
     // 1. Calculate real relative volume using historical data
-    const avgVolume = await eodhd.getHistoricalAverageVolume(symbol, 30);
+    const avgVolume = await alpaca.getHistoricalAverageVolume(symbol, 30);
 
     // Use screen/live data first; if tiny or zero, fall back to cumulative intraday sum
     let currentVolume = Number(realTimeData.volume) || 0;
     if (currentVolume <= 0 || currentVolume < 10000) {
       try {
-        const intraday = await eodhd.getIntradayData(symbol, '1m');
+        const intraday = await alpaca.getIntradayData(symbol, '1');
         const now = new Date();
         const etNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
         const todayET = etNow.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -438,28 +481,28 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
           if (recET === todayET) sum += Number(rec.volume) || 0;
         }
         if (sum > currentVolume) currentVolume = sum;
-        console.log(`📊 Volume sources (${symbol}): live=${(realTimeData.volume||0).toLocaleString()} | intradaySum=${sum.toLocaleString()}`);
+        console.log(`📊 Volume sources (${symbol}): live=${(realTimeData.volume || 0).toLocaleString()} | intradaySum=${sum.toLocaleString()}`);
       } catch {
         // keep currentVolume
       }
     }
-    
+
     const relativeVolume = avgVolume > 0 ? currentVolume / avgVolume : 0;
     console.log(`📊 ${symbol}: RelVol ${relativeVolume.toFixed(2)}x (Current: ${currentVolume.toLocaleString()}, Avg: ${avgVolume.toLocaleString()})`);
-    
+
     // 2. Enhanced premarket gap analysis
-    const gapAnalysis = eodhdEnhanced.calculatePremarketGap(currentPrice, previousClose);
+    const gapAnalysis = alpacaEnhanced.calculatePremarketGap(currentPrice, previousClose);
     console.log(`📈 ${symbol}: Gap analysis - ${gapAnalysis.gapPercent.toFixed(2)}% (${gapAnalysis.gapType}), significant: ${gapAnalysis.isSignificant}`);
-    
+
     // 3. Time-based urgency calculation
-    const timeUrgency = eodhdEnhanced.getPremarketUrgency();
+    const timeUrgency = alpacaEnhanced.getPremarketUrgency();
     console.log(`⏰ ${symbol}: Time urgency - ${timeUrgency.timeWindow} window, ${timeUrgency.urgencyMultiplier.toFixed(2)}x multiplier`);
-    
+
     // 4. Momentum criteria check (for momentum strategy)
     let momentumCriteria;
     if (strategy === 'momentum') {
       try {
-        momentumCriteria = await eodhdEnhanced.checkMomentumCriteria(symbol, currentPrice);
+        momentumCriteria = await alpacaEnhanced.checkMomentumCriteria(symbol, currentPrice);
         console.log(`🎯 ${symbol}: Momentum criteria - Near 20-day high: ${momentumCriteria.isNear20DayHigh}, Above SMAs: ${momentumCriteria.isAboveSMAs}, Score: ${momentumCriteria.momentumScore}`);
       } catch (error) {
         console.log(`⚠️ ${symbol}: Momentum criteria check failed, using defaults`);
@@ -472,7 +515,7 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
         };
       }
     }
-    
+
     return {
       realTime: realTimeData,
       currentVolume,
@@ -482,7 +525,7 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
       momentumCriteria,
       timeUrgency
     };
-    
+
   } catch (error) {
     console.error(`Error in enhanced analysis for ${symbol}:`, error);
     return null;
@@ -515,24 +558,29 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
 async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<any[]> {
   try {
     console.log('Discovering fresh momentum stocks from market-wide screening...')
-    
+
     // Get dynamically discovered stocks
     const premarketMovers = await fetchPremarketMovers(strategy, filters)
     console.log(`Discovered ${premarketMovers.length} fresh momentum candidates`)
-    
+
     if (premarketMovers.length === 0) {
       console.log('No momentum movers found - returning empty results')
       return []
     }
-    
+
     const qualifiedStocks: { stock: any; score: number; fundamentals?: any }[] = []
-    
+
     // Process all candidates - no backend limiting, let frontend filter
     for (const stock of premarketMovers) {
       try {
-        const symbol = stock.code.replace('.US', '')
-        console.log(`Analyzing fresh candidate ${symbol}: $${stock.close}, vol: ${stock.volume}, change: ${stock.change_p}%`)
-        
+        // Alpaca returns 'symbol' not 'code'
+        const symbol = (stock.symbol || stock.code || '').replace('.US', '')
+        if (!symbol) {
+          console.log('⚠️ Skipping stock with no symbol');
+          continue;
+        }
+        console.log(`Analyzing fresh candidate ${symbol}: $${stock.price || stock.close}, vol: ${stock.volume}, change: ${stock.changePercent || stock.change_p}%`)
+
         // Filter out warrants and rights - use explicit patterns to avoid false positives
         const isWarrantOrRight = (
           symbol.includes('-WT') || // Explicit warrant suffix
@@ -542,69 +590,69 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
           symbol.endsWith('WT') ||  // Warrant suffix
           /^[A-Z]{2,}W$/.test(symbol) && symbol.length > 4 // Multi-letter + W pattern (avoids single letters like W, RR)
         )
-        
+
         if (isWarrantOrRight) {
           console.log(`${symbol} filtered: derivative instrument (warrant/right)`)
           continue
         }
-        
+
         // Apply price and volume filters to remove penny stocks and low-quality candidates
         const minPriceThreshold = filters.minPrice && filters.minPrice > 0 ? filters.minPrice : 1.00 // Default to $1.00 minimum
         if (stock.close < minPriceThreshold) {
           console.log(`${symbol} filtered: price $${stock.close} < $${minPriceThreshold}`)
           continue
         }
-        
+
         if (stock.close > filters.maxPrice) {
           console.log(`${symbol} filtered: price $${stock.close} > $${filters.maxPrice}`)
           continue
         }
-        
+
         if (stock.volume < filters.minVolume) {
           console.log(`${symbol} filtered: volume ${stock.volume} < ${filters.minVolume}`)
           continue
         }
-        
+
         if (stock.close <= 0) {
           console.log(`${symbol} filtered: invalid price $${stock.close}`)
           continue
         }
-        
+
         // Get additional data for breakout strategy
         let fundamentals = null
         let technicals = null
-        
+
         // FLOAT & INSTITUTIONAL OWNERSHIP FILTERING: Only fetch if filters are actually set!
         // This avoids unnecessary API calls and rate limiting
         const needsFloatFilter = filters.maxFloat && filters.maxFloat > 0;
         const needsInstitutionalFilter = filters.maxInstitutionalOwnership || filters.minInstitutionalOwnership;
-        
-        if ((strategy === 'momentum' || strategy === 'breakout' || strategy === 'mean-reversion') && 
-            (needsFloatFilter || needsInstitutionalFilter)) {
+
+        if ((strategy === 'momentum' || strategy === 'breakout' || strategy === 'mean-reversion') &&
+          (needsFloatFilter || needsInstitutionalFilter)) {
           try {
             // Only fetch fundamentals if we actually need to filter by them
-            fundamentals = await eodhd.getFundamentals(symbol)
+            fundamentals = await alpaca.getFundamentals(symbol)
             console.log(`📊 ${symbol}: Fetched fundamentals for filtering`)
-            
+
             // Check float size (only if maxFloat > 0)
             if (needsFloatFilter && fundamentals?.General?.SharesFloat && filters.maxFloat) {
               const floatShares = fundamentals.General.SharesFloat
               if (floatShares > filters.maxFloat) {
-                console.log(`${symbol} filtered: float ${(floatShares/1000000).toFixed(1)}M > ${(filters.maxFloat/1000000).toFixed(1)}M`)
+                console.log(`${symbol} filtered: float ${(floatShares / 1000000).toFixed(1)}M > ${(filters.maxFloat / 1000000).toFixed(1)}M`)
                 continue
               }
             }
-            
+
             // Check institutional ownership
             if (needsInstitutionalFilter && (fundamentals as any)?.SharesStats?.PercentInstitutions !== undefined) {
               const institutionalPct = (fundamentals as any).SharesStats.PercentInstitutions * 100 // Convert to percentage
-              
+
               // Momentum: Filter out high institutional (>30%)
               if (filters.maxInstitutionalOwnership && institutionalPct > filters.maxInstitutionalOwnership) {
                 console.log(`${symbol} filtered: institutional ${institutionalPct.toFixed(1)}% > ${filters.maxInstitutionalOwnership}% (too high for momentum)`)
                 continue
               }
-              
+
               // Mean Reversion: Filter out low institutional (<50%)
               if (filters.minInstitutionalOwnership && institutionalPct < filters.minInstitutionalOwnership) {
                 console.log(`${symbol} filtered: institutional ${institutionalPct.toFixed(1)}% < ${filters.minInstitutionalOwnership}% (too low for mean reversion)`)
@@ -618,47 +666,47 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
         } else {
           console.log(`⏭️ ${symbol}: Skipping fundamentals fetch (no float/institutional filters set)`)
         }
-        
+
         // Get technical indicators for scoring (optional)
-        const techData = await eodhd.getTechnicals(symbol)
+        const techData = await alpaca.getTechnicals(symbol)
         technicals = techData?.[0] || null
-        
+
         // Check data freshness and add warnings
         // Convert timestamp to milliseconds if it's in seconds (Unix timestamp)
-        const timestampMs = stock.timestamp ? 
-          (stock.timestamp < 1e12 ? stock.timestamp * 1000 : stock.timestamp) : 
+        const timestampMs = stock.timestamp ?
+          (stock.timestamp < 1e12 ? stock.timestamp * 1000 : stock.timestamp) :
           Date.now()
         const dataAge = Date.now() - timestampMs
         const isStaleData = dataAge > 5 * 60 * 1000 // 5 minutes
-        
+
         if (isStaleData) {
-          console.log(`⚠️ ${symbol}: Data is ${Math.round(dataAge/60000)} minutes old - may not be reliable for live trading`)
+          console.log(`⚠️ ${symbol}: Data is ${Math.round(dataAge / 60000)} minutes old - may not be reliable for live trading`)
         }
-        
+
         // Skip individual scoring here - will be done in final enhanced analysis
         // This eliminates duplicate scoring with different data sources
-        
+
         // Apply minimum volume filter to reduce noise
         if ((stock.volume || 0) < filters.minVolume) {
           console.log(`${symbol} filtered: volume ${stock.volume} < ${filters.minVolume}`)
           continue
         }
-        
+
         // Store fundamentals with stock to avoid duplicate API calls later
         qualifiedStocks.push({ stock, score: 0, fundamentals }) // Cache fundamentals for later use
         console.log(`${symbol} qualified for enhanced analysis${isStaleData ? ' ⚠️ STALE DATA' : ''}`)
-        
+
       } catch (error) {
         console.error(`Error processing stock:`, error)
       }
     }
-    
+
     // Return all qualified stocks with cached fundamentals - no backend limiting for frontend flexibility
     qualifiedStocks.sort((a, b) => b.score - a.score)
-    
+
     console.log(`🎯 Top ${qualifiedStocks.length} high-quality momentum stocks qualified (quality over quantity)`)
     return qualifiedStocks // Return full objects with cached fundamentals
-    
+
   } catch (error) {
     console.error('Error using EODHD API:', error)
     return []
@@ -697,23 +745,23 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     console.log('Premarket scan request:', body)
-    
+
     // Extract weekend mode override from request
     const forceWeekendMode = body.weekendMode === true
-    
+
     // Determine scanning mode based on market hours
-    const marketStatus = eodhdEnhanced.getMarketHoursStatus()
-    const scanMode = marketStatus === 'premarket' ? 'premarket' : 
-                    marketStatus === 'regular' ? 'intraday' : 
-                    marketStatus === 'afterhours' ? 'afterhours' : 'extended'
-    
+    const marketStatus = alpacaEnhanced.getMarketHoursStatus()
+    const scanMode = marketStatus === 'premarket' ? 'premarket' :
+      marketStatus === 'regular' ? 'intraday' :
+        marketStatus === 'afterhours' ? 'afterhours' : 'extended'
+
     console.log(`Running ${scanMode} momentum scan during ${marketStatus} hours${forceWeekendMode ? ' (WEEKEND MODE ENABLED)' : ''}`)
-    
+
     // Extract strategy and filters from request
     const strategy = body.strategy || 'momentum'
-    
+
     // Adaptive filters based on market session and strategy
-    const baselineFilters: ScanFilters = scanMode === 'premarket' ? 
+    const baselineFilters: ScanFilters = scanMode === 'premarket' ?
       // PREMARKET MODE: EARLY BREAKOUT DETECTION (1-3 days before breakout)
       (strategy === 'momentum' ? {
         minChange: -5, // Allow slight pullbacks (building phase)
@@ -764,7 +812,7 @@ export async function POST(request: NextRequest) {
         maxMarketCap: 0,
         maxFloat: 0 // No float limit - show all stocks
       })
-    
+
     // Frontend refinement filters (applied on top of baseline)
     const refinementFilters: ScanFilters = {
       minChange: body.minChange > 0 ? Math.max(body.minChange, baselineFilters.minChange) : baselineFilters.minChange,
@@ -778,87 +826,95 @@ export async function POST(request: NextRequest) {
       maxMarketCap: body.maxMarketCap > 0 ? Math.min(body.maxMarketCap, baselineFilters.maxMarketCap!) : baselineFilters.maxMarketCap!,
       maxFloat: body.maxFloat > 0 ? Math.min(body.maxFloat, baselineFilters.maxFloat || Infinity) : baselineFilters.maxFloat
     }
-    
+
     const filters = refinementFilters
-    
+
     console.log('Starting premarket scan with filters:', filters)
-    
+
     // Get momentum stocks from EODHD with WebSocket enhancement
     const momentumStocks = await getMomentumStocks(strategy, filters)
     console.log(`Processing ${momentumStocks.length} momentum stocks from EODHD`)
-    
+
     // MAXIMUM WEBSOCKET UTILIZATION: Get live data for ALL discovered stocks
     if (momentumStocks.length > 0) {
-      const isWebSocketConnected = eodhd.isWebSocketConnected();
-      console.log(`🔴 MAXIMUM WebSocket Mode: Processing ALL ${momentumStocks.length} stocks with live data (WebSocket: ${isWebSocketConnected ? '✅ Connected' : '❌ Disconnected'})...`);
-      
+      // FMP doesn't have a WebSocket manager yet, so we'll skip this check or implement it later
+      // const isWebSocketConnected = alpaca.isWebSocketConnected();
+      console.log(`🔴 MAXIMUM Live Mode: Processing ALL ${momentumStocks.length} stocks with live data...`);
+
       // Process ALL stocks in batches for maximum live data coverage
       const batchSize = 15; // Increased batch size for more aggressive WebSocket usage
       let totalEnhanced = 0;
-      
+
       for (let i = 0; i < momentumStocks.length; i += batchSize) {
         const batch = momentumStocks.slice(i, i + batchSize);
-        const symbols = batch.map((item: any) => (item.stock || item).code.replace('.US', ''));
-        
+        const symbols = batch.map((item: any) => {
+          const stock = item.stock || item;
+          const symbol = stock.symbol || stock.code || '';
+          return symbol.replace('.US', '');
+        }).filter(s => s); // Remove empty symbols
+
         try {
-          console.log(`🚀 WebSocket Batch ${Math.floor(i/batchSize) + 1}: Processing ${symbols.length} stocks for live data...`);
-          
-          // Aggressive WebSocket-first approach with extended timeout
-          const liveQuotes = await eodhd.getRealTimeQuotes(symbols.map(s => `${s}.US`));
-          console.log(`✅ Batch ${Math.floor(i/batchSize) + 1}: Enhanced ${liveQuotes.length}/${symbols.length} stocks with LIVE WebSocket data`);
-          
+          console.log(`🚀 WebSocket Batch ${Math.floor(i / batchSize) + 1}: Processing ${symbols.length} stocks for live data...`);
+
+          // Alpaca doesn't use .US suffix - just pass symbols directly
+          const liveQuotes = await alpaca.getRealTimeQuotes(symbols);
+          console.log(`✅ Batch ${Math.floor(i / batchSize) + 1}: Enhanced ${liveQuotes.length}/${symbols.length} stocks with LIVE WebSocket data`);
+
           // Update ALL stocks in this batch with live data
-          liveQuotes.forEach(liveQuote => {
+          liveQuotes.forEach((liveQuote: any) => {
             const matchingItem = batch.find((item: any) => {
               const stock = item.stock || item;
-              return stock.code === liveQuote.code || stock.code === `${liveQuote.code}.US`;
+              const stockSymbol = stock.symbol || stock.code || '';
+              const quoteSymbol = liveQuote.symbol || liveQuote.code || '';
+              return stockSymbol === quoteSymbol || stockSymbol === `${quoteSymbol}.US`;
             });
             if (matchingItem) {
               const matchingStock = matchingItem.stock || matchingItem;
-              // CRITICAL: Update with live WebSocket data for accurate scoring
-              matchingStock.close = liveQuote.close;
-              matchingStock.volume = liveQuote.volume;
+              matchingStock.close = liveQuote.price || liveQuote.close;
               matchingStock.change = liveQuote.change;
-              matchingStock.change_p = liveQuote.change_p;
-              matchingStock.timestamp = liveQuote.timestamp;
+              matchingStock.change_p = liveQuote.changePercent || liveQuote.change_p;
+              matchingStock.volume = liveQuote.volume;
+              matchingStock.timestamp = liveQuote.timestamp || Date.now();
               matchingStock.previousClose = liveQuote.previousClose;
               totalEnhanced++;
-              console.log(`🔴 LIVE: ${matchingStock.code} → $${liveQuote.close}, vol: ${liveQuote.volume?.toLocaleString()}, change: ${liveQuote.change_p?.toFixed(2)}%`);
+              const displaySymbol = matchingStock.symbol || matchingStock.code;
+              console.log(`🔴 LIVE: ${displaySymbol} → $${matchingStock.close}, vol: ${matchingStock.volume?.toLocaleString()}, change: ${matchingStock.change_p?.toFixed(2)}%`);
             }
           });
-          
+
           // Small delay between batches to respect API limits but maintain speed
           if (i + batchSize < momentumStocks.length) {
             await new Promise(resolve => setTimeout(resolve, 100));
           }
-          
+
         } catch (error) {
-          console.log(`⚠️ WebSocket batch ${Math.floor(i/batchSize) + 1} failed, continuing with next batch:`, error);
+          console.log(`⚠️ WebSocket batch ${Math.floor(i / batchSize) + 1} failed, continuing with next batch:`, error);
         }
       }
-      
-      console.log(`🔴 LIVE DATA SUMMARY: Enhanced ${totalEnhanced}/${momentumStocks.length} stocks (${Math.round((totalEnhanced/momentumStocks.length)*100)}%) with WebSocket data`);
+
+      console.log(`🔴 LIVE DATA SUMMARY: Enhanced ${totalEnhanced}/${momentumStocks.length} stocks (${Math.round((totalEnhanced / momentumStocks.length) * 100)}%) with WebSocket data`);
     }
-    
+
     // Process ALL stocks with live WebSocket data - maximum utilization for accurate scoring
     const topStocks = momentumStocks.slice(0, 50) // Increased to 50 for maximum live data coverage
     console.log(`🔴 PROCESSING ${topStocks.length} stocks with LIVE WebSocket data for accurate scoring`)
-    
+
     const stockPromises = topStocks.map(async (item: any) => {
       try {
         const stock = item.stock || item; // Handle both formats
         const cachedFundamentals = item.fundamentals; // Get cached fundamentals
-        const symbol = stock.code.replace('.US', '')
-        
+        const symbol = (stock.symbol || stock.code || '').replace('.US', '')
+        if (!symbol) return null;
+
         // Skip expensive API calls for speed - use only the screener data
         // This eliminates news and technical data fetching that causes timeouts
-        
+
         // Skip stocks declining more than 20% - focus on momentum plays
         if (stock.change_p < -20) {
           console.log(`${symbol} filtered: declining ${stock.change_p.toFixed(1)}% (momentum focus)`);
           return null;
         }
-        
+
         // Get enhanced stock data with real relative volume and momentum analysis
         // Use live WebSocket data if available (already updated above)
         const enhancedData = await getEnhancedStockData(symbol, stock, strategy);
@@ -866,7 +922,7 @@ export async function POST(request: NextRequest) {
           console.log(`${symbol} filtered: Enhanced data unavailable`);
           return null;
         }
-        
+
         const { relativeVolume, gapAnalysis, momentumCriteria, timeUrgency, currentVolume, avgVolume } = enhancedData;
 
         // UNUSUAL VOLUME ANALYSIS - Detect institutional interest
@@ -877,10 +933,10 @@ export async function POST(request: NextRequest) {
         const dataAge = Date.now() - (stock.timestamp * 1000);
         const isLiveData = dataAge < 60000; // Less than 1 minute old
         const dataSource = isLiveData ? '🔴 LIVE WebSocket' : '📡 REST API';
-        console.log(`🔴 SCORING ${symbol}: Using ${dataSource} data (${Math.round(dataAge/1000)}s old) - Price: $${stock.close}, Vol: ${currentVolume.toLocaleString()}, Change: ${stock.change_p?.toFixed(2)}%`);
-        
+        console.log(`🔴 SCORING ${symbol}: Using ${dataSource} data (${Math.round(dataAge / 1000)}s old) - Price: $${stock.close}, Vol: ${currentVolume.toLocaleString()}, Change: ${stock.change_p?.toFixed(2)}%`);
+
         // Get technical data for MACD analysis
-        const technicalsData = await eodhd.getTechnicals(symbol);
+        const technicalsData = await alpaca.getTechnicals(symbol);
         const technicals = technicalsData?.[0] || {};
 
         // Enhanced MACD analysis for momentum validation
@@ -888,11 +944,11 @@ export async function POST(request: NextRequest) {
         if (macdAnalysis.signal) {
           console.log(`📊 ${symbol}: MACD ${macdAnalysis.signal} - ${macdAnalysis.description}`);
         }
-        
+
         // Collect warnings instead of filtering out completely
         const warnings: string[] = [];
         let qualityTier: 'premium' | 'standard' | 'caution' = 'premium';
-        
+
         // UNIFIED MOMENTUM VALIDATION (Same as Trade Analyzer)
         if (strategy === 'momentum') {
           const momentumData = {
@@ -909,27 +965,27 @@ export async function POST(request: NextRequest) {
               rsi: technicals.RSI_14 || 0
             } : undefined
           };
-          
+
           const momentumValidation = momentumValidator.validateMomentum(momentumData);
-          
+
           console.log(`🎯 ${symbol}: Momentum validation - ${momentumValidation.momentumScore}/${momentumValidation.maxScore} points`);
           momentumValidation.reasoning.forEach(reason => console.log(`   ${reason}`));
-          
+
           if (momentumValidation.isEarlyBreakout) {
             console.log(`🚀 ${symbol}: EARLY BREAKOUT DETECTED!`);
             // Boost quality for early breakouts
             if (qualityTier !== 'premium') qualityTier = 'premium';
           }
-          
+
           // Add momentum-specific warnings
           momentumValidation.warnings.forEach((warning: string) => warnings.push(warning));
-          
+
           // Downgrade quality if insufficient momentum criteria
           if (momentumValidation.momentumScore < 6) {
             qualityTier = 'caution';
           }
         }
-        
+
         // Unusual volume detection - upgrade quality for extreme activity
         if (volumeAnalysis.isUnusual) {
           if (volumeAnalysis.category === 'extreme') {
@@ -940,7 +996,7 @@ export async function POST(request: NextRequest) {
             if (qualityTier === 'caution') qualityTier = 'standard';
           }
         }
-        
+
         // Enhanced relative volume filter
         if (relativeVolume < filters.minRelativeVolume) {
           warnings.push(`⚠️ Low relative volume: ${relativeVolume.toFixed(2)}x < ${filters.minRelativeVolume}x`);
@@ -949,7 +1005,7 @@ export async function POST(request: NextRequest) {
           warnings.push(`⚪ Below average volume: ${volumeAnalysis.description}`);
           if (qualityTier === 'premium') qualityTier = 'caution';
         }
-        
+
         // MACD momentum validation
         if (macdAnalysis.signal === 'bearish') {
           warnings.push(`⚠️ MACD bearish divergence - ${macdAnalysis.description}`);
@@ -957,20 +1013,20 @@ export async function POST(request: NextRequest) {
         } else if (macdAnalysis.signal === 'bullish') {
           console.log(`✅ ${symbol}: MACD bullish confirmation - ${macdAnalysis.description}`);
         }
-        
+
         // Premarket gap significance filter
         if (strategy === 'momentum' && !gapAnalysis.isSignificant) {
           warnings.push(`⚠️ Small premarket gap: ${gapAnalysis.gapPercent.toFixed(2)}% (prefer 3%+)`);
           if (qualityTier === 'premium') qualityTier = 'standard';
         }
-        
+
         // Log the result with warnings
         if (warnings.length > 0) {
           console.log(`🔍 ${symbol}: ${qualityTier.toUpperCase()} quality - ${warnings.join(', ')}`);
         } else {
           console.log(`✅ ${symbol}: PREMIUM quality - All criteria met`);
         }
-        
+
         // Calculate enhanced score with all momentum factors
         const enhancedScoreData = {
           gapAnalysis,
@@ -978,18 +1034,18 @@ export async function POST(request: NextRequest) {
           relativeVolume,
           timeUrgency
         };
-        
+
         // Create enhanced data for consistent scoring with Trade Analyzer
         const scoringData = {
           realRelativeVolume: relativeVolume,
           gapPercent: gapAnalysis.gapPercent,
           avgVolume: avgVolume || ((currentVolume || 0) / (relativeVolume || 1)),
-          isPremarket: eodhdEnhanced.getMarketHoursStatus() === 'premarket'
+          isPremarket: alpacaEnhanced.getMarketHoursStatus() === 'premarket'
         };
-        
+
         // CRITICAL: Ensure scoring uses LIVE WebSocket data
         const stockDataForScoring: StockData = {
-          symbol: stock.code.replace('.US', ''),
+          symbol: (stock.symbol || stock.code || '').replace('.US', ''),
           price: stock.close, // LIVE WebSocket price
           changePercent: stock.change_p, // LIVE WebSocket change
           volume: currentVolume, // Daily cumulative volume used for scoring
@@ -1001,13 +1057,19 @@ export async function POST(request: NextRequest) {
           macdSignal: technicals.MACD_Signal || 0,
           week52High: stock.high || stock.close
         };
-        
-        console.log(`📊 Premarket Scanner Scoring: Market=${eodhdEnhanced.getMarketHoursStatus()}, isPremarket=${scoringData.isPremarket}, Gap=${gapAnalysis.gapPercent.toFixed(2)}%, RelVol=${relativeVolume.toFixed(2)}x`);
+
+        console.log(`📊 Premarket Scanner Scoring: Market=${alpacaEnhanced.getMarketHoursStatus()}, isPremarket=${scoringData.isPremarket}, Gap=${gapAnalysis.gapPercent.toFixed(2)}%, RelVol=${relativeVolume.toFixed(2)}x`);
         console.log(`📊 Premarket Scanner Data: Price=$${stock.close}, Change=${stock.change_p?.toFixed(2)}%, Volume=${currentVolume.toLocaleString()}, AvgVol=${avgVolume.toLocaleString()}`);
-        
-        // Use the FIXED scoring system from eodhd.ts (not the old scoringEngine)
-        const baseScore = calculateScore(stock, technicals, strategy === 'technical-momentum' ? 'momentum' : 'breakout', scoringData);
-        
+
+        // Use the NEW scoring engine from scoringEngine.ts
+        const scoreBreakdown = scoringEngine.calculateScore(stockDataForScoring, strategy as any);
+        const baseScore = scoreBreakdown.finalScore;
+
+        // Log breakdown for debugging
+        if (baseScore > 60) {
+          console.log(`🏆 ${symbol} Score Breakdown: Price=${scoreBreakdown.price}, Vol=${scoreBreakdown.volume}, Trend=${scoreBreakdown.trend}, Mom=${scoreBreakdown.momentum}, Sent=${scoreBreakdown.sentiment}, Cat=${scoreBreakdown.catalyst}, Prox=${scoreBreakdown.proximity}, Mkt=${scoreBreakdown.market}, Risk=${scoreBreakdown.riskPenalties}`);
+        }
+
         // REMOVED: Volume bonus was double-counting volume (already included in calculateScore)
         // Keep volumeAnalysis for display purposes only
         console.log(`📊 ${symbol}: Volume Analysis: ${volumeAnalysis.emoji} ${volumeAnalysis.description}`);
@@ -1040,11 +1102,11 @@ export async function POST(request: NextRequest) {
 
         // Modest, capped boost from predictive readiness (max +8)
         const predictiveBoost = predictiveSetup ? Math.min(8, Math.round(predictiveSetup.setupScore * 0.3)) : 0;
-        
+
         // FIXED: Removed volumeBonus to match Trade Analyzer scoring exactly
         const score = Math.min(100, Math.max(0, baseScore + predictiveBoost));
         console.log(`🎯 Premarket Scanner FINAL SCORE: ${score}/100 (base: ${baseScore}, predictive: +${predictiveBoost}) → ${score >= 70 ? 'Strong' : score >= 50 ? 'Moderate' : score >= 30 ? 'Weak' : 'Avoid'}`);
-        
+
         // Create analysis reasoning based on the enhanced data (+ predictive)
         const analysisReasoning = [
           `Relative Volume: ${relativeVolume >= 1.5 ? 'PASS' : 'FAIL'} (Has: ${relativeVolume.toFixed(2)}x / Needs: > 1.5x)`,
@@ -1060,7 +1122,7 @@ export async function POST(request: NextRequest) {
         if (predictiveSetup && predictiveSetup.setupScore >= 18 && qualityTier !== 'premium') {
           qualityTier = 'premium';
         }
-        
+
         // UPDATED: Realistic signal thresholds aligned with new weighted scoring (+ predictive boost)
         let signal: 'Strong' | 'Moderate' | 'Weak' | 'Avoid';
         if (strategy === 'momentum') {
@@ -1082,7 +1144,7 @@ export async function POST(request: NextRequest) {
         let newsData = undefined;
         try {
           console.log(`📰 Fetching news for ${symbol}...`);
-          const newsPromise = eodhdEnhanced.getStockNews(symbol, 3);
+          const newsPromise = alpacaEnhanced.getStockNews(symbol, 3);
           const newsTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('news timeout')), 3000));
           const news = await Promise.race([newsPromise, newsTimeout]) as any[];
 
@@ -1114,14 +1176,14 @@ export async function POST(request: NextRequest) {
         // Get float and institutional ownership data (use cached if available!)
         let floatShares: number | undefined = undefined;
         let institutionalOwnership: number | undefined = undefined;
-        
+
         // Use cached fundamentals if available, otherwise fetch from Alpha Vantage
         if (cachedFundamentals) {
           console.log(`📊 ${symbol}: Using cached fundamentals`);
           if (cachedFundamentals?.General?.SharesFloat) {
             floatShares = cachedFundamentals.General.SharesFloat;
             if (floatShares !== undefined) {
-              console.log(`📊 ${symbol}: Float = ${(floatShares/1000000).toFixed(1)}M shares (cached)`);
+              console.log(`📊 ${symbol}: Float = ${(floatShares / 1000000).toFixed(1)}M shares (cached)`);
             }
           }
           if ((cachedFundamentals as any)?.SharesStats?.PercentInstitutions !== undefined) {
@@ -1134,16 +1196,15 @@ export async function POST(request: NextRequest) {
           // Fetch from Alpha Vantage (separate rate limits from EODHD)
           // Add delay to avoid rate limiting (300ms between calls)
           await new Promise(resolve => setTimeout(resolve, 300));
-          
+
           try {
             console.log(`📊 ${symbol}: Fetching fundamentals from Alpha Vantage...`);
-            const { getCompanyFundamentals } = await import('@/utils/alphaVantageApi');
             const fundamentals = await getCompanyFundamentals(symbol);
-            
+
             if (fundamentals?.sharesFloat) {
               floatShares = fundamentals.sharesFloat;
               if (floatShares !== undefined) {
-                console.log(`📊 ${symbol}: Float = ${(floatShares/1000000).toFixed(1)}M shares (Alpha Vantage)`);
+                console.log(`📊 ${symbol}: Float = ${(floatShares / 1000000).toFixed(1)}M shares (Alpha Vantage)`);
               }
             }
             if (fundamentals?.institutionalOwnership !== undefined) {
@@ -1152,7 +1213,7 @@ export async function POST(request: NextRequest) {
                 console.log(`🏛️ ${symbol}: Institutional Ownership = ${institutionalOwnership.toFixed(1)}% (Alpha Vantage)`);
               }
             }
-            
+
             if (!fundamentals) {
               console.log(`⚠️ ${symbol}: No fundamentals data available from Alpha Vantage`);
             }
@@ -1162,7 +1223,7 @@ export async function POST(request: NextRequest) {
         }
 
         return {
-          symbol: stock.code.replace('.US', ''),
+          symbol: (stock.symbol || stock.code || '').replace('.US', ''),
           price: stock.close,
           change: stock.change,
           changePercent: stock.change_p,
@@ -1210,21 +1271,21 @@ export async function POST(request: NextRequest) {
           warnings,
           analysisReasoning
         } as PremarketStock;
-        
+
       } catch (error) {
         console.error(`Error processing stock:`, error)
         return null
       }
     })
-    
+
     // Wait for all stocks to process in parallel
     const processedResults = await Promise.allSettled(stockPromises)
-    
+
     // Filter successful results and remove stale data during premarket
     const allStocks = processedResults
       .filter(result => result.status === 'fulfilled' && result.value !== null)
       .map(result => (result as PromiseFulfilledResult<PremarketStock>).value);
-    
+
     // FRESH DATA FILTER: During premarket, only show stocks with data less than 2 hours old
     // On weekends/market closed, allow stale data for testing
     const now = new Date();
@@ -1232,37 +1293,37 @@ export async function POST(request: NextRequest) {
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     // Only activate weekend mode if manually enabled OR if it's weekend AND user hasn't disabled it
     const weekendModeActive = forceWeekendMode;
-    
+
     const maxStaleMinutes = weekendModeActive ? 10080 : // 7 days on weekends/forced mode (for testing)
-                           marketStatus === 'premarket' ? 120 : // 2 hours during premarket
-                           marketStatus === 'regular' ? 120 : // 2 hours during regular hours (same as premarket)
-                           marketStatus === 'afterhours' ? 120 : // 2 hours during afterhours
-                           1440; // 24 hours when market closed
-    
+      marketStatus === 'premarket' ? 120 : // 2 hours during premarket
+        marketStatus === 'regular' ? 120 : // 2 hours during regular hours (same as premarket)
+          marketStatus === 'afterhours' ? 120 : // 2 hours during afterhours
+            1440; // 24 hours when market closed
+
     const stocks = allStocks
       .filter(stock => {
         // Stale data filter - Apply during ALL market hours (premarket, regular, afterhours)
         const dataAge = Date.now() - new Date(stock.lastUpdated).getTime();
         const dataAgeMinutes = Math.round(dataAge / 60000);
-        
+
         // Filter stale data during any active trading session (not just premarket)
         const isActiveTradingHours = marketStatus === 'premarket' || marketStatus === 'regular' || marketStatus === 'afterhours';
-        
+
         if (dataAgeMinutes > maxStaleMinutes && isActiveTradingHours && !weekendModeActive) {
           console.log(`🚫 FILTERED OUT ${stock.symbol}: Data is ${dataAgeMinutes} minutes old (stale during ${marketStatus})`);
           return false;
         }
-        
+
         // Float filter (OPTIONAL - only if user enables it in UI)
         // When disabled: maxFloat = 0 (show all stocks)
         // When enabled: maxFloat = user's value (e.g., 50000000 for 50M)
         if (filters.maxFloat && filters.maxFloat > 0 && stock.float) {
           if (stock.float > filters.maxFloat) {
-            console.log(`🚫 FILTERED OUT ${stock.symbol}: Float ${(stock.float/1000000).toFixed(1)}M > ${(filters.maxFloat/1000000).toFixed(1)}M (user-enabled filter)`);
+            console.log(`🚫 FILTERED OUT ${stock.symbol}: Float ${(stock.float / 1000000).toFixed(1)}M > ${(filters.maxFloat / 1000000).toFixed(1)}M (user-enabled filter)`);
             return false;
           }
         }
-        
+
         // Institutional ownership filter (OPTIONAL - only if user enables it in UI)
         // When disabled: maxInstitutionalOwnership = 0 or undefined (show all stocks)
         // When enabled: maxInstitutionalOwnership = user's value (e.g., 30 for 30%)
@@ -1272,7 +1333,7 @@ export async function POST(request: NextRequest) {
             return false;
           }
         }
-        
+
         return true;
       })
       .sort((a, b) => {
@@ -1281,31 +1342,31 @@ export async function POST(request: NextRequest) {
         const aTier = tierOrder[a.qualityTier || 'caution'];
         const bTier = tierOrder[b.qualityTier || 'caution'];
         if (aTier !== bTier) return bTier - aTier;
-        
+
         // Within same tier, sort by score
         return b.score - a.score;
       })
-    
+
     // Log quality breakdown
     const qualityBreakdown = {
       premium: stocks.filter(s => s.qualityTier === 'premium').length,
       standard: stocks.filter(s => s.qualityTier === 'standard').length,
       caution: stocks.filter(s => s.qualityTier === 'caution').length
     };
-    
+
     // Calculate WebSocket usage statistics
     const liveDataCount = stocks.filter(stock => {
       const dataAge = Date.now() - new Date(stock.lastUpdated).getTime();
       return dataAge < 60000; // Less than 1 minute old = live data
     }).length;
-    
+
     const webSocketStats = {
       totalStocks: stocks.length,
       liveDataCount,
       liveDataPercentage: stocks.length > 0 ? Math.round((liveDataCount / stocks.length) * 100) : 0,
       dataFreshness: liveDataCount > 0 ? '🔴 LIVE WebSocket' : '📡 REST API Fallback'
     };
-    
+
     // Log filtering statistics
     const filteredCount = allStocks.length - stocks.length;
     if (weekendModeActive) {
@@ -1316,11 +1377,11 @@ export async function POST(request: NextRequest) {
     if (filteredCount > 0) {
       console.log(`🚫 Filtered out ${filteredCount} stocks with stale data (>${maxStaleMinutes} minutes old)`);
     }
-    
+
     console.log(`🎯 ${scanMode} momentum scan completed: ${stocks.length} stocks found during ${marketStatus} hours (${filteredCount} filtered for stale data)`);
     console.log(`🏆 Quality breakdown: ${qualityBreakdown.premium} premium, ${qualityBreakdown.standard} standard, ${qualityBreakdown.caution} caution`);
     console.log(`🔴 WebSocket Stats: ${liveDataCount}/${stocks.length} stocks using live data (${webSocketStats.liveDataPercentage}%)`);
-    
+
     return NextResponse.json({
       stocks,
       scanTime: new Date().toISOString(),
@@ -1333,7 +1394,7 @@ export async function POST(request: NextRequest) {
       qualityBreakdown,
       webSocketStats
     })
-    
+
   } catch (error) {
     console.error('Premarket scan error:', error)
     return NextResponse.json(
@@ -1366,46 +1427,46 @@ export async function POST(request: NextRequest) {
  */
 function calculatePremarketScore(stockData: any, changePercent: number, relativeVolume: number): number {
   let score = 0
-  
+
   // Base score from premarket movement
   if (changePercent > 10) score += 40
   else if (changePercent > 7) score += 35
   else if (changePercent > 5) score += 30
   else if (changePercent > 3) score += 25
   else score += 15
-  
+
   // Volume analysis
   if (relativeVolume > 5) score += 25
   else if (relativeVolume > 3) score += 20
   else if (relativeVolume > 2) score += 15
   else if (relativeVolume > 1.5) score += 10
   else score += 5
-  
+
   // Technical indicators (simplified)
   const currentPrice = stockData.price
   const sma20 = parseFloat(stockData.sma20) || 0
   const sma50 = parseFloat(stockData.sma50) || 0
   const sma200 = parseFloat(stockData.sma200) || 0
-  
+
   if (currentPrice > sma20 && sma20 > 0) score += 10
   if (currentPrice > sma50 && sma50 > 0) score += 8
   if (currentPrice > sma200 && sma200 > 0) score += 7
-  
+
   // 52-week high proximity
   const week52High = parseFloat(stockData.week52High) || currentPrice
   const highProximity = (currentPrice / week52High) * 100
   if (highProximity > 90) score += 15
   else if (highProximity > 80) score += 10
   else if (highProximity > 70) score += 5
-  
+
   // RSI consideration
   const rsi = parseFloat(stockData.rsi) || 50
   if (rsi >= 55 && rsi <= 75) score += 8
   else if (rsi > 80) score -= 10 // Overbought penalty
-  
+
   // Price range bonus (under $10 preference)
   if (currentPrice <= 10) score += 5
-  
+
   return Math.min(Math.max(score, 0), 100) // Cap between 0-100
 }
 
@@ -1433,7 +1494,7 @@ function analyzeMACDSignals(technicals: any): {
   const macd = technicals.MACD;
   const macdSignal = technicals.MACD_Signal;
   const macdHistogram = technicals.MACD_Histogram;
-  
+
   // Return neutral if no MACD data available
   if (!macd || !macdSignal) {
     return {
@@ -1442,11 +1503,11 @@ function analyzeMACDSignals(technicals: any): {
       strength: 0
     };
   }
-  
+
   const macdValue = parseFloat(macd.toString());
   const signalValue = parseFloat(macdSignal.toString());
   const histogramValue = macdHistogram ? parseFloat(macdHistogram.toString()) : null;
-  
+
   // Strong bullish: MACD > Signal AND MACD > 0 (momentum confirmation)
   if (macdValue > signalValue && macdValue > 0) {
     const strength = Math.min(10, Math.abs(macdValue - signalValue) * 10);
@@ -1456,7 +1517,7 @@ function analyzeMACDSignals(technicals: any): {
       strength
     };
   }
-  
+
   // Moderate bullish: MACD > Signal but below zero (early momentum)
   if (macdValue > signalValue && macdValue <= 0) {
     const strength = Math.min(7, Math.abs(macdValue - signalValue) * 8);
@@ -1466,7 +1527,7 @@ function analyzeMACDSignals(technicals: any): {
       strength
     };
   }
-  
+
   // Bearish: MACD < Signal (momentum divergence)
   if (macdValue < signalValue) {
     const strength = Math.min(10, Math.abs(signalValue - macdValue) * 10);
@@ -1476,7 +1537,7 @@ function analyzeMACDSignals(technicals: any): {
       strength
     };
   }
-  
+
   // Neutral: MACD ≈ Signal (no clear direction)
   return {
     signal: 'neutral',

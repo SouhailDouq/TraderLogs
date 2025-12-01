@@ -1,7 +1,7 @@
 // Predictive setup signals for near-term breakouts (1-5 days)
 // Uses only daily historical data + simple technicals to avoid heavy intraday load
 
-import { eodhd } from '@/utils/eodhd'
+import { alpaca } from '@/utils/alpaca'
 
 // Simple in-memory cache for SPY historical data to reduce API calls (15-minute TTL)
 let spyCache: { data: any[]; fetchedAt: number; from: string; to: string } | null = null;
@@ -20,8 +20,17 @@ async function getSpyHistorical(from: string, to: string): Promise<any[]> {
     console.log('🔁 Using cached SPY historical data (TTL 15m)');
     return spyCache.data;
   }
-  console.log('📦 Fetching fresh SPY historical data...');
-  const data = await eodhd.getHistoricalData('SPY', from, to);
+  console.log('📦 Fetching fresh SPY historical data from Alpaca...');
+  const bars = await alpaca.getHistoricalBars('SPY', '1Day', from, to, 200);
+  // Convert Alpaca format to expected format
+  const data = bars.map(bar => ({
+    date: new Date(bar.t).toISOString().split('T')[0],
+    close: bar.c,
+    high: bar.h,
+    low: bar.l,
+    open: bar.o,
+    volume: bar.v
+  }));
   spyCache = { data: Array.isArray(data) ? data : [], fetchedAt: now, from, to };
   return spyCache.data;
 }
@@ -78,10 +87,20 @@ export async function computePredictiveSignals(symbol: string): Promise<Predicti
     const from = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     // Fetch symbol and SPY daily data (SPY fetched via cached helper)
-    const [hist, spy] = await Promise.all([
-      eodhd.getHistoricalData(symbol, from, to),
+    const [histBars, spy] = await Promise.all([
+      alpaca.getHistoricalBars(symbol, '1Day', from, to, 200),
       getSpyHistorical(from, to)
     ]);
+    
+    // Convert Alpaca format to expected format
+    const hist = histBars.map(bar => ({
+      date: new Date(bar.t).toISOString().split('T')[0],
+      close: bar.c,
+      high: bar.h,
+      low: bar.l,
+      open: bar.o,
+      volume: bar.v
+    }));
 
     if (!hist || hist.length < 40) {
       return {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eodhd } from '@/utils/eodhd';
+import { fmp } from '@/utils/fmp';
 
 /**
  * GET /api/market-discovery
@@ -12,8 +12,8 @@ export async function GET(request: NextRequest) {
 
     console.log(`🔍 Market Discovery API: Fetching ${limit} active symbols...`);
 
-    // Get active symbols from EODHD screener + popular stocks
-    const symbols = await eodhd.getActiveSymbols(limit);
+    // Get active symbols from FMP screener + popular stocks
+    const symbols = await fmp.getActiveSymbols(limit);
 
     if (symbols.length === 0) {
       return NextResponse.json({
@@ -27,13 +27,13 @@ export async function GET(request: NextRequest) {
       success: true,
       count: symbols.length,
       symbols,
-      source: 'eodhd_screener_plus_popular'
+      source: 'fmp_active_symbols'
     });
 
   } catch (error) {
     console.error('Market discovery error:', error);
     return NextResponse.json(
-      { 
+      {
         success: false,
         error: 'Failed to discover market symbols',
         symbols: []
