@@ -13,7 +13,7 @@
  */
 
 import { getWebSocketManager } from './websocket';
-import { eodhd } from './eodhd';
+// import { eodhd } from './eodhd'; // Temporarily disabled - file doesn't exist
 
 export interface DataFreshnessReport {
   // Overall Status
@@ -86,7 +86,9 @@ class DataFreshnessMonitor {
    */
   async checkDataFreshness(symbol: string, dataTimestamp?: number): Promise<DataFreshnessReport> {
     const now = new Date();
-    const marketStatus = eodhd.getMarketHoursStatus();
+    // Simplified market status check since eodhd is not available
+    const hour = now.getHours();
+    const marketStatus = (hour >= 4 && hour < 9) ? 'premarket' : (hour >= 9 && hour < 16) ? 'regular' : 'afterhours';
     const isLiveDataExpected = ['premarket', 'regular', 'afterhours'].includes(marketStatus);
     
     // Check WebSocket health

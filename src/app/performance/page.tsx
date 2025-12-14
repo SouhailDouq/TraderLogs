@@ -292,7 +292,7 @@ export default function PerformancePage() {
                   performanceData.totalTrades > 0 && performanceData.momentumMetrics.target3Hits > 0 ? 'text-green-600' : 
                   isDarkMode ? 'text-gray-400' : 'text-gray-500'
                 }`}>
-                  {performanceData.totalTrades > 0 ? 
+                  {performanceData.totalTrades > 0 && performanceData.momentumMetrics?.target3Hits ? 
                     ((performanceData.momentumMetrics.target3Hits / performanceData.totalTrades) * 100).toFixed(1) : '0'}%
                 </span>
               </div>
@@ -318,7 +318,7 @@ export default function PerformancePage() {
           />
           <StatCard
             title="Win Rate"
-            value={`${performanceData.winRate.toFixed(1)}%`}
+            value={`${(performanceData.winRate || 0).toFixed(1)}%`}
             subtitle={`${performanceData.winningTrades}W / ${performanceData.losingTrades}L`}
             color={performanceData.winRate >= 50 ? 'green' : 'red'}
           />
@@ -330,7 +330,7 @@ export default function PerformancePage() {
           />
           <StatCard
             title="Avg Momentum Gain"
-            value={`${performanceData.momentumMetrics.avgMomentumGain.toFixed(1)}%`}
+            value={`${(performanceData.momentumMetrics?.avgMomentumGain || 0).toFixed(1)}%`}
             subtitle="Average winning trade return"
             color={performanceData.momentumMetrics.avgMomentumGain >= 8 ? 'green' : performanceData.momentumMetrics.avgMomentumGain >= 3 ? 'default' : 'red'}
           />
@@ -373,7 +373,7 @@ export default function PerformancePage() {
                   performanceData.momentumMetrics.premarketWinRate >= 60 ? 'text-green-600' : 
                   performanceData.momentumMetrics.premarketWinRate >= 40 ? 'text-orange-600' : 'text-red-600'
                 }`}>
-                  {performanceData.momentumMetrics.premarketWinRate.toFixed(1)}%
+                  {(performanceData.momentumMetrics?.premarketWinRate || 0).toFixed(1)}%
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -413,7 +413,7 @@ export default function PerformancePage() {
                   performanceData.profitFactor >= 2 ? 'text-green-600' : 
                   performanceData.profitFactor >= 1 ? 'text-blue-600' : 'text-red-600'
                 }`}>
-                  {performanceData.profitFactor === Infinity ? '∞' : performanceData.profitFactor.toFixed(2)}
+                  {performanceData.profitFactor === Infinity ? '∞' : (performanceData.profitFactor || 0).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -560,7 +560,7 @@ export default function PerformancePage() {
                       data.winRate >= 50 ? isDarkMode ? 'text-gray-300' : 'text-gray-600' :
                       'text-red-600 dark:text-red-400'
                     }`}>
-                      {data.winRate.toFixed(1)}%
+                      {(data.winRate || 0).toFixed(1)}%
                     </td>
                     <td className={`py-3 px-2 text-sm text-right font-bold ${
                       data.expectancy > 5 ? 'text-green-600 dark:text-green-400' :

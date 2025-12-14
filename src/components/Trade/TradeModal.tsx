@@ -197,7 +197,7 @@ export default function TradeModal({ isOpen, date, trades, onClose }: TradeModal
               <div className="w-full space-y-4">
                 <div className="flex justify-between items-center border-b border-gray-600 pb-3">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <div className="text-2xl font-bold text-white">{trade.symbol}</div>
                       {trade.isOpen && (
                         <span className="bg-blue-900/50 text-blue-300 text-xs px-2 py-1 rounded-full font-medium">
@@ -207,6 +207,17 @@ export default function TradeModal({ isOpen, date, trades, onClose }: TradeModal
                       {!trade.isOpen && trade.profitLoss !== 0 && (
                         <span className="bg-gray-700 text-gray-300 text-xs px-2 py-1 rounded-full font-medium">
                           CLOSED
+                        </span>
+                      )}
+                      {trade.broker && (
+                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                          trade.broker === 'Trading212' 
+                            ? 'bg-purple-900/50 text-purple-300' 
+                            : trade.broker === 'InteractiveBrokers'
+                              ? 'bg-indigo-900/50 text-indigo-300'
+                              : 'bg-gray-700 text-gray-300'
+                        }`}>
+                          {trade.broker === 'Trading212' ? 'Trading 212' : trade.broker === 'InteractiveBrokers' ? 'Interactive Brokers' : trade.broker}
                         </span>
                       )}
                     </div>

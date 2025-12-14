@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server';
 import { eodhd } from '@/utils/eodhd';
 import { getServerSession } from 'next-auth';

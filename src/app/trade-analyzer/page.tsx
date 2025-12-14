@@ -1636,16 +1636,24 @@ export default function TradeAnalyzer() {
                 {/* Signal Strength */}
                 <div className={`p-4 rounded-lg border-2 ${getSignalBorderColor(setup.signal)} ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
                   <div className="space-y-2">
-                    {stockData.analysisReasoning?.map((reason, index) => (
-                      <div key={index} className="flex items-center text-sm">
-                        <span className={`mr-2 ${reason.includes('PASS') ? 'text-green-500' : 'text-red-500'}`}>
-                          {reason.includes('PASS') ? '✓' : '✗'}
-                        </span>
-                        <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                          {reason}
-                        </span>
-                      </div>
-                    ))}
+                    {stockData.analysisReasoning?.map((reason, index) => {
+                      // Check if it's a positive signal (starts with ✅ or other positive emojis) or a warning (starts with ⚠️)
+                      const isPositive = reason.startsWith('✅') || reason.startsWith('🔥') || reason.startsWith('🚀') || 
+                                        reason.startsWith('📈') || reason.startsWith('📊') || reason.startsWith('🎯') || 
+                                        reason.startsWith('💰') || reason.includes('PASS');
+                      const isWarning = reason.startsWith('⚠️') || reason.includes('FAIL');
+                      
+                      return (
+                        <div key={index} className="flex items-center text-sm">
+                          <span className={`mr-2 ${isPositive ? 'text-green-500' : isWarning ? 'text-orange-500' : 'text-red-500'}`}>
+                            {isPositive ? '✓' : isWarning ? '⚠' : '✗'}
+                          </span>
+                          <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            {reason}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 

@@ -24,22 +24,13 @@ export interface MarketAnalysis {
 
 /**
  * Analyzes current market conditions and recommends optimal trading strategy
- * Now uses server-side API to keep API key secure
+ * Returns default analysis (market condition feature disabled after Finviz migration)
  */
 export async function analyzeMarketCondition(): Promise<MarketAnalysis> {
-  try {
-    // Call server-side API endpoint instead of direct API calls
-    const response = await fetch('/api/market-condition')
-    if (!response.ok) {
-      throw new Error('Failed to fetch market condition')
-    }
-    
-    const data = await response.json()
-    return data as MarketAnalysis
-  } catch (error) {
-    console.error('Error analyzing market condition:', error)
-    return getDefaultAnalysis()
-  }
+  // Market condition feature disabled - returning default analysis
+  // This feature was using Alpaca API which has been removed
+  // TODO: Implement market condition analysis using Finviz data if needed
+  return getDefaultAnalysis()
 }
 
 // All market analysis logic moved to server-side API endpoint

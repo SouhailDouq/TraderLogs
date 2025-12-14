@@ -84,6 +84,7 @@ model Trade {
   gamePlan     Json?    // Trading game plan with entry/exit strategy
   source       String?  // 'CSV' or 'API'
   sourceId     String?  // Original ID from source (e.g., Trading212 order ID)
+  broker       String?  // 'Trading212' or 'InteractiveBrokers' or 'Manual'
   
   // Position tracking for open trades
   positionOpenedAt DateTime? // When position was opened
@@ -99,6 +100,7 @@ model Trade {
   @@unique([sourceId, source, userId])
   @@index([date])
   @@index([userId])
+  @@index([broker])
 }
 
 model Watchlist {

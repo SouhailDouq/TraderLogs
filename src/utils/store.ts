@@ -25,6 +25,7 @@ export interface Trade {
   fees?: number
   source?: string
   sourceId?: string
+  broker?: string // 'Trading212' or 'InteractiveBrokers' or 'Manual'
   journal?: TradeJournal
   isOpen?: boolean // True if position is still open (not fully sold)
   position?: 'long' | 'short' | 'closed' // Position status
@@ -860,6 +861,32 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
       console.log('Content length:', content.length)
       console.log('Content preview:', content.substring(0, 300))
       
+      // Detect broker from CSV content
+      const detectBroker = (csvContent: string): string => {
+        const lowerContent = csvContent.toLowerCase()
+        const firstLines = csvContent.split('\n').slice(0, 5).join('\n').toLowerCase()
+        
+        // Trading 212 detection
+        if (firstLines.includes('action') && firstLines.includes('time') && 
+            (firstLines.includes('isin') || firstLines.includes('no. of shares'))) {
+          console.log('Detected broker: Trading212')
+          return 'Trading212'
+        }
+        
+        // Interactive Brokers detection
+        if (firstLines.includes('trades') || lowerContent.includes('ibkr') || 
+            lowerContent.includes('interactive brokers') ||
+            (firstLines.includes('symbol') && firstLines.includes('date/time') && firstLines.includes('quantity'))) {
+          console.log('Detected broker: InteractiveBrokers')
+          return 'InteractiveBrokers'
+        }
+        
+        console.log('Could not detect broker, defaulting to Manual')
+        return 'Manual'
+      }
+      
+      const detectedBroker = detectBroker(content)
+      
       let parsedTrades: CSVTrade[] = []
       try {
         parsedTrades = parseCSVContent(content)
@@ -890,6 +917,7 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
             price: trade.price,
             quantity: trade.shares,
             profitLoss: trade.result || 0, // Use Result field directly from CSV
+            broker: detectedBroker, // Add detected broker
             // Extended analysis fields from CSV
             volume: trade.volume,
             avgVolume: trade.avgVolume,

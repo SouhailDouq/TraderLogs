@@ -8,14 +8,29 @@ const prisma = new PrismaClient()
 export async function POST(req: NextRequest) {
   try {
     console.log('🔍 Batch upload API called')
+    
+    // Get authenticated user
     const user = await getAuthenticatedUser()
     if (!user) {
+      console.error('❌ No authenticated user found')
       return createUnauthorizedResponse()
     }
     
     console.log('📋 Authenticated user:', { email: user.email, id: user.id })
 
-    const { trades, source } = await req.json()
+    // Parse request body with error handling
+    let trades, source
+    try {
+      const body = await req.json()
+      trades = body.trades
+      source = body.source
+    } catch (parseError) {
+      console.error('❌ Error parsing request body:', parseError)
+      return NextResponse.json(
+        { error: 'Invalid request body' },
+        { status: 400 }
+      )
+    }
     
     if (!Array.isArray(trades)) {
       return NextResponse.json(

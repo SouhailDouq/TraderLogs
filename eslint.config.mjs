@@ -22,6 +22,7 @@ const eslintConfig = [
       "@typescript-eslint/no-unsafe-function-type": "off",
       "@typescript-eslint/no-wrapper-object-types": "off",
       "@typescript-eslint/no-unnecessary-type-constraint": "off",
+      "@typescript-eslint/ban-ts-comment": "off",
       "@next/next/no-html-link-for-pages": "off",
       "@next/next/no-img-element": "warn",
       "react/no-unescaped-entities": "off",

@@ -1,7 +1,7 @@
 // Predictive setup signals for near-term breakouts (1-5 days)
 // Uses only daily historical data + simple technicals to avoid heavy intraday load
 
-import { alpaca } from '@/utils/alpaca'
+import { twelvedata } from '@/utils/twelvedata';
 
 // Simple in-memory cache for SPY historical data to reduce API calls (15-minute TTL)
 let spyCache: { data: any[]; fetchedAt: number; from: string; to: string } | null = null;
@@ -20,16 +20,16 @@ async function getSpyHistorical(from: string, to: string): Promise<any[]> {
     console.log('🔁 Using cached SPY historical data (TTL 15m)');
     return spyCache.data;
   }
-  console.log('📦 Fetching fresh SPY historical data from Alpaca...');
-  const bars = await alpaca.getHistoricalBars('SPY', '1Day', from, to, 200);
-  // Convert Alpaca format to expected format
-  const data = bars.map(bar => ({
-    date: new Date(bar.t).toISOString().split('T')[0],
-    close: bar.c,
-    high: bar.h,
-    low: bar.l,
-    open: bar.o,
-    volume: bar.v
+  console.log('📦 Fetching fresh SPY historical data from Twelve Data...');
+  const bars = await twelvedata.getHistoricalData('SPY', from, to);
+  // Convert Twelve Data format to expected format
+  const data = bars.map((bar: any) => ({
+    date: bar.datetime.split(' ')[0],
+    close: parseFloat(bar.close),
+    high: parseFloat(bar.high),
+    low: parseFloat(bar.low),
+    open: parseFloat(bar.open),
+    volume: parseInt(bar.volume)
   }));
   spyCache = { data: Array.isArray(data) ? data : [], fetchedAt: now, from, to };
   return spyCache.data;
@@ -88,18 +88,18 @@ export async function computePredictiveSignals(symbol: string): Promise<Predicti
 
     // Fetch symbol and SPY daily data (SPY fetched via cached helper)
     const [histBars, spy] = await Promise.all([
-      alpaca.getHistoricalBars(symbol, '1Day', from, to, 200),
+      twelvedata.getHistoricalData(symbol, from, to),
       getSpyHistorical(from, to)
     ]);
     
-    // Convert Alpaca format to expected format
-    const hist = histBars.map(bar => ({
-      date: new Date(bar.t).toISOString().split('T')[0],
-      close: bar.c,
-      high: bar.h,
-      low: bar.l,
-      open: bar.o,
-      volume: bar.v
+    // Convert Twelve Data format to expected format
+    const hist = histBars.map((bar: any) => ({
+      date: bar.datetime.split(' ')[0],
+      close: parseFloat(bar.close),
+      high: parseFloat(bar.high),
+      low: parseFloat(bar.low),
+      open: parseFloat(bar.open),
+      volume: parseInt(bar.volume)
     }));
 
     if (!hist || hist.length < 40) {

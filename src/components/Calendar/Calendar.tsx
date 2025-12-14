@@ -21,6 +21,7 @@ interface CalendarDay {
   openTradesCount: number
   hasDeadlineWarning: boolean // True if open position has deadline approaching
   daysHeld: number // Days position has been held
+  brokers: string[] // List of unique brokers for this day
 }
 
 const selectProcessedTrades = (state: TradeStore) => {
@@ -73,6 +74,9 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
         return Math.floor((today.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24))
       })) : 0
 
+      // Get unique brokers for this day
+      const brokers = [...new Set(dayTrades.map(t => t.broker).filter(Boolean))] as string[]
+
       days.push({
         date: dateStr,
         isCurrentMonth: isSameMonth(day, currentMonth),
@@ -85,7 +89,8 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
         closedTradesCount: closedTrades.length,
         openTradesCount: openTrades.length,
         hasDeadlineWarning,
-        daysHeld
+        daysHeld,
+        brokers
       })
 
       day = addDays(day, 1)
@@ -368,6 +373,33 @@ export default function Calendar({ currentMonth, onMonthChange }: CalendarProps)
                   </div>
                 )}
               </div>
+              
+              {/* Broker indicators - show which brokers have trades this day */}
+              {day.brokers.length > 0 && (
+                <div className="flex gap-0.5 mb-1 flex-wrap">
+                  {day.brokers.includes('Trading212') && (
+                    <span className={`text-[8px] sm:text-[10px] px-1 py-0.5 rounded font-semibold ${
+                      isDarkMode ? 'bg-purple-900/40 text-purple-300' : 'bg-purple-100 text-purple-700'
+                    }`} title="Trading 212">
+                      T212
+                    </span>
+                  )}
+                  {day.brokers.includes('InteractiveBrokers') && (
+                    <span className={`text-[8px] sm:text-[10px] px-1 py-0.5 rounded font-semibold ${
+                      isDarkMode ? 'bg-indigo-900/40 text-indigo-300' : 'bg-indigo-100 text-indigo-700'
+                    }`} title="Interactive Brokers">
+                      IBKR
+                    </span>
+                  )}
+                  {day.brokers.includes('Manual') && (
+                    <span className={`text-[8px] sm:text-[10px] px-1 py-0.5 rounded font-semibold ${
+                      isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
+                    }`} title="Manual Entry">
+                      Manual
+                    </span>
+                  )}
+                </div>
+              )}
               
               {/* P/L Display - Mobile Optimized */}
               {day.closedTradesCount > 0 && (

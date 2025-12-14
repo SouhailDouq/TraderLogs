@@ -296,14 +296,13 @@ export default function PremarketScanner() {
     setError(null)
 
     try {
-      const response = await fetch('/api/premarket-scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...getActiveFilters(),
-          strategy: selectedStrategy,
-          weekendMode: enableWeekendMode
-        })
+      // Use new Finviz Export API
+      const scanType = selectedStrategy === 'momentum' ? 'momentum' : 'premarket'
+      const limit = 20 // Default limit
+      
+      const response = await fetch(`/api/premarket-scan-finviz?limit=${limit}&type=${scanType}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
       })
 
       if (response.ok) {
@@ -1105,9 +1104,6 @@ export default function PremarketScanner() {
                       <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Score & MACD</th>
                       <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Signal</th>
                       <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Market Cap</th>
-                      {selectedStrategy === 'momentum' && (
-                        <th className="px-6 py-4 text-left font-bold text-sm uppercase tracking-wider">Float</th>
-                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -1472,19 +1468,6 @@ export default function PremarketScanner() {
                         <div className="text-sm">
                           <span className="text-gray-500">Market Cap: </span>
                           <span className="font-bold">{stock.marketCap || 'Unknown'}</span>
-                          {selectedStrategy === 'momentum' && (
-                            <>
-                              <span className="text-gray-500 ml-3">• Float: </span>
-                              <span className={`font-bold ${stock.float
-                                ? (stock.float < 20000000 ? 'text-green-600 dark:text-green-400' :
-                                  stock.float < 50000000 ? 'text-blue-600 dark:text-blue-400' :
-                                    'text-gray-600 dark:text-gray-400')
-                                : 'text-gray-500'
-                                }`}>
-                                {stock.float ? `${(stock.float / 1000000).toFixed(1)}M` : 'N/A'}
-                              </span>
-                            </>
-                          )}
                           {stock.institutionalOwnership !== undefined && (
                             <>
                               <span className="text-gray-500 ml-3">• Inst: </span>
