@@ -2,12 +2,15 @@
   "name": "traderlogs",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "npx prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "npx prisma generate",
+    "postinstall": "npx prisma generate && npm rebuild lightningcss --update-binary || true",
     "verify-auth": "node scripts/verify-auth.js",
     "check-users": "node scripts/check-users.js",
     "migrate-trades": "node scripts/migrate-trades-from-localstorage.js",
