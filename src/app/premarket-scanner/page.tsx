@@ -102,6 +102,11 @@ export default function PremarketScanner() {
   const [isInitialized, setIsInitialized] = useState(false)
   const [selectedStock, setSelectedStock] = useState<PremarketStock | null>(null)
   const [tradeDecision, setTradeDecision] = useState<any>(null)
+  const [recommendedStrategy, setRecommendedStrategy] = useState<{
+    strategy: string;
+    reason: string;
+    confidence: 'high' | 'medium' | 'low';
+  } | null>(null)
 
   // Strategy-specific filter presets
   const strategyFilters: Record<TradingStrategy, StrategyFilters> = {
@@ -233,7 +238,7 @@ export default function PremarketScanner() {
           localStorage.removeItem('premarket-scanner-last-scan')
         }
 
-        if (savedStrategy && (savedStrategy === 'momentum' || savedStrategy === 'mean-reversion')) {
+        if (savedStrategy && ['momentum', 'mean-reversion', 'short-squeeze', 'aggressive-breakout'].includes(savedStrategy)) {
           setSelectedStrategy(savedStrategy as TradingStrategy)
         }
       } catch (error) {
@@ -296,13 +301,18 @@ export default function PremarketScanner() {
     setError(null)
 
     try {
-      // Use new Finviz Export API
-      const scanType = selectedStrategy === 'momentum' ? 'momentum' : 'premarket'
-      const limit = 20 // Default limit
+      // Get fresh filters for current strategy to avoid stale state
+      const currentFilters = strategyFilters[selectedStrategy]
       
-      const response = await fetch(`/api/premarket-scan-finviz?limit=${limit}&type=${scanType}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
+      // Use POST to send strategy filters to API
+      const response = await fetch('/api/premarket-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy: selectedStrategy,
+          ...currentFilters,
+          weekendMode: enableWeekendMode
+        })
       })
 
       if (response.ok) {
@@ -322,6 +332,11 @@ export default function PremarketScanner() {
         setLastScan(scanTime)
         setRetryCount(0)
         setError(null)
+        
+        // Set recommended strategy from API
+        if (data.recommendedStrategy) {
+          setRecommendedStrategy(data.recommendedStrategy)
+        }
 
         // Persist the new scan results immediately
         try {
@@ -672,8 +687,23 @@ export default function PremarketScanner() {
         <div className={`p-6 rounded-xl mb-8 shadow-lg ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
           } border`}>
           <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-4">Trading Strategy</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Trading Strategy</h3>
+              {recommendedStrategy && (
+                <div className={`px-4 py-2 rounded-lg ${
+                  recommendedStrategy.confidence === 'high' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                  recommendedStrategy.confidence === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                  'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">💡 Recommended:</span>
+                    <span className="font-bold capitalize">{recommendedStrategy.strategy.replace('-', ' ')}</span>
+                  </div>
+                  <div className="text-xs mt-1 opacity-90">{recommendedStrategy.reason}</div>
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <button
                 onClick={() => handleStrategyChange('momentum')}
                 className={`p-4 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 ${selectedStrategy === 'momentum'
@@ -725,6 +755,23 @@ export default function PremarketScanner() {
                   High SI &gt;20% • Low float &lt;30M • Volume spike 2x+
                 </div>
               </button>
+              <button
+                onClick={() => handleStrategyChange('aggressive-breakout')}
+                className={`p-4 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 ${selectedStrategy === 'aggressive-breakout'
+                  ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-xl ring-2 ring-orange-300'
+                  : isDarkMode
+                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600 border border-gray-600'
+                    : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'
+                  }`}
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">💥</span>
+                  <span className="text-lg font-bold">Aggressive</span>
+                </div>
+                <div className="text-sm opacity-90 text-left">
+                  +10% move • Tiny float &lt;20M • Extreme vol 3x+
+                </div>
+              </button>
             </div>
           </div>
 
@@ -737,7 +784,8 @@ export default function PremarketScanner() {
                 <h4 className="font-semibold mb-1">
                   {selectedStrategy === 'momentum' ? '🚀 Momentum Breakout Strategy' :
                     selectedStrategy === 'mean-reversion' ? '🔄 Mean Reversion Strategy' :
-                      '🔥 Short Squeeze Strategy'}
+                      selectedStrategy === 'short-squeeze' ? '🔥 Short Squeeze Strategy' :
+                        '💥 Aggressive Breakout Strategy'}
                 </h4>
                 <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'
                   }`}>
@@ -747,13 +795,15 @@ export default function PremarketScanner() {
                       ? 'Profits in ranging/choppy markets by buying weakness. HIGH INSTITUTIONAL (>50%) = Smart money supports dips! Institutions buy quality stocks on pullbacks, creating reliable bounces. Best in sideways markets.'
                       : selectedStrategy === 'short-squeeze'
                         ? 'Targets trapped short sellers for explosive gains. HIGH SHORT INTEREST (>20%) + LOW FLOAT (<30M) + VOLUME SPIKE = SQUEEZE! When shorts are forced to cover, their buying creates a cascade effect pushing prices 25-100%+. Famous examples: GME (+1,500%), AMC (+2,000%).'
-                        : 'The "Blow Up" Strategy. Targets stocks with extreme momentum, float rotation (Volume > Float), and massive retail interest. High risk, high reward. Catches runners before they go parabolic.'}
+                        : 'The "Blow Up" Strategy. Targets stocks with extreme momentum, float rotation (Volume > Float), and massive retail interest. Tiny float <20M + 3x volume + already moving 10%+ = Parabolic potential. High risk, high reward. Catches runners before they explode.'}
                 </p>
                 <p className={`text-xs mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'
                   }`}>
                   💡 <strong>Pro Tip:</strong> {selectedStrategy === 'short-squeeze'
                     ? 'Look for 40%+ short interest + 7+ days to cover for EXTREME squeeze potential. Set stops - squeezes can reverse fast!'
-                    : 'These strategies are negatively correlated - when one fails, the other typically works!'}
+                    : selectedStrategy === 'aggressive-breakout'
+                      ? 'Watch for float rotation (daily volume > total float). When volume exceeds float, every share has traded - creates explosive moves. Exit fast!'
+                      : 'These strategies are negatively correlated - when one fails, the other typically works!'}
                 </p>
               </div>
             </div>

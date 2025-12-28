@@ -90,6 +90,7 @@ interface FinvizStock {
 
 export interface ScreenerStock {
   ticker: string;
+  symbol?: string; // Alias for ticker
   company: string;
   sector: string;
   industry: string;
@@ -97,7 +98,9 @@ export interface ScreenerStock {
   marketCap: string;
   pe: string;
   price: number;
+  close?: number; // Alias for price
   change: number;
+  change_p?: number; // Alias for changePercent
   changePercent: number;
   volume: number;
   relativeVolume?: number;
@@ -116,6 +119,8 @@ export interface ScreenerStock {
   shortFloat?: string;
   insider?: string;
   institutional?: string;
+  timestamp?: number; // Unix timestamp in seconds
+  previousClose?: number; // Calculated from price and change
 }
 
 export class FinvizAPIClient {
@@ -141,7 +146,7 @@ export class FinvizAPIClient {
    * - ta_changeopen_u5: Change from open > 5%
    * - ta_rsi_os50: RSI > 50
    */
-  async getScreenerStocks(filters: string[] = []): Promise<FinvizStock[]> {
+  async getScreenerStocks(filters: string[] = []): Promise<ScreenerStock[]> {
     try {
       const filterString = filters.join(',');
       
@@ -174,7 +179,8 @@ export class FinvizAPIClient {
         return { ...overviewStock, ...technicalStock };
       });
       
-      return mergedStocks;
+      // Convert all stocks to standard format with proper field names
+      return mergedStocks.map(stock => this.convertToStandardFormat(stock));
     } catch (error) {
       console.error('❌ Error fetching Finviz screener:', error);
       throw error;
@@ -305,6 +311,7 @@ export class FinvizAPIClient {
     
     return {
       ticker: stock.Ticker,
+      symbol: stock.Ticker, // Add symbol alias
       company: stock.Company,
       sector: stock.Sector,
       industry: stock.Industry,
@@ -312,7 +319,9 @@ export class FinvizAPIClient {
       marketCap: stock['Market Cap'],
       pe: stock['P/E'],
       price,
+      close: price, // Add close alias for compatibility
       change,
+      change_p: changePercent, // Add change_p alias for compatibility
       changePercent,
       volume,
       relativeVolume,
@@ -330,7 +339,9 @@ export class FinvizAPIClient {
       volatility: stock.Volatility,
       shortFloat: stock['Short Float'] || stock['Float Short'],
       insider: stock['Insider Own'],
-      institutional: stock['Inst Own']
+      institutional: stock['Inst Own'],
+      timestamp: Date.now() / 1000, // Add current timestamp in seconds
+      previousClose: price / (1 + (changePercent / 100)) // Calculate previous close from current price and change
     };
   }
 
@@ -352,7 +363,7 @@ export class FinvizAPIClient {
   }
 
   /**
-   * Get premarket movers (stocks with high premarket activity)
+   * Get premarket movers
    */
   async getPremarketMovers(limit: number = 50): Promise<ScreenerStock[]> {
     const filters = [
@@ -365,7 +376,7 @@ export class FinvizAPIClient {
     ];
     
     const stocks = await this.getScreenerStocks(filters);
-    return stocks.slice(0, limit).map(s => this.convertToStandardFormat(s));
+    return stocks.slice(0, limit);
   }
 
   /**
@@ -383,7 +394,7 @@ export class FinvizAPIClient {
     ];
     
     const stocks = await this.getScreenerStocks(filters);
-    return stocks.slice(0, limit).map(s => this.convertToStandardFormat(s));
+    return stocks.slice(0, limit);
   }
 
   /**
@@ -448,7 +459,7 @@ export class FinvizAPIClient {
    */
   async getCustomScreener(filters: string[], limit: number = 50): Promise<ScreenerStock[]> {
     const stocks = await this.getScreenerStocks(filters);
-    return stocks.slice(0, limit).map(s => this.convertToStandardFormat(s));
+    return stocks.slice(0, limit);
   }
 }
 

@@ -90,10 +90,17 @@ export async function GET(request: NextRequest) {
     };
     console.log(`\n📊 Score Distribution:`, scoreDistribution);
     console.log(`📊 Top 5 scores:`, scoredStocks.map(s => ({ symbol: s.symbol, score: s.score })).sort((a, b) => b.score - a.score).slice(0, 5));
+    console.log(`📊 Top 5 volumes:`, scoredStocks.map(s => ({ symbol: s.symbol, volume: s.volume })).sort((a, b) => b.volume - a.volume).slice(0, 5));
 
     const filteredStocks = scoredStocks
       .filter(s => s.score >= 50)
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => {
+        // Primary sort: VOLUME (highest first) - critical for momentum trading
+        // Secondary sort: Score (highest first)
+        const volumeDiff = b.volume - a.volume;
+        if (Math.abs(volumeDiff) > 100000) return volumeDiff; // Significant volume difference
+        return b.score - a.score; // Similar volume, use score
+      })
       .slice(0, limit);
 
     console.log(`✅ Finviz scan complete: ${filteredStocks.length} stocks analyzed`);

@@ -6,9 +6,8 @@ import { alpaca } from '@/utils/alpaca';
 import { momentumValidator } from '@/utils/momentumValidator';
 import { scoringEngine, type StockData } from '@/utils/scoringEngine';
 import { computePredictiveSignals } from '@/utils/predictiveSignals';
-import { getCompanyFundamentals, getTopGainersLosers } from '@/utils/alphaVantageApi';
-import { getFinvizClient, type ScreenerStock } from '@/utils/finviz-api';
-import { marketstackService } from '@/services/marketstackService';
+import { getCompanyFundamentals } from '@/utils/alphaVantageApi';
+import { getFinvizClient } from '@/utils/finviz-api';
 
 // Create a comprehensive Alpaca client wrapper for enhanced methods
 const alpacaEnhanced = {
@@ -26,127 +25,130 @@ const alpacaEnhanced = {
     return status.nextOpen || new Date().toISOString();
   },
   getPremarketMovers: async (params: any) => {
-    console.log('🔍 PRIORITY 1: Fetching premarket movers from Finviz Elite (PAID - Best Quality!)');
+    console.log('🔍 Fetching premarket movers from Finviz Elite');
     
     try {
-      // PRIORITY 1: Finviz Elite screener (PAID - you're paying for it!)
       const finviz = getFinvizClient();
-      const finvizFilters = [
-        'cap_smallover',      // Small cap and above
-        'sh_avgvol_o1000',    // Volume > 1M
-        'sh_price_u10',       // Price < $10
-        'ta_changeopen_u3',   // Change from open > 3%
-        'ta_sma200_pa',       // Above SMA200
-        'ta_sma50_pa'         // Above SMA50
-      ];
+      const strategy = params?.strategy || 'momentum';
+      
+      // STRATEGY-SPECIFIC FINVIZ FILTERS
+      let finvizFilters: string[] = [];
+      
+      if (strategy === 'momentum') {
+        // Momentum: Stocks breaking out with strong trends
+        finvizFilters = [
+          'cap_smallover',      // Small cap and above ($300M+)
+          'sh_avgvol_o1000',    // Volume > 1M
+          'sh_price_u20',       // Price < $20 (expanded range)
+          'ta_changeopen_u',    // Any positive change
+          'ta_sma200_pa',       // Above SMA200 (uptrend)
+          'ta_sma50_pa',        // Above SMA50
+          'ta_sma20_pa'         // Above SMA20
+        ];
+      } else if (strategy === 'mean-reversion') {
+        // Mean Reversion: Oversold quality stocks ready to bounce
+        finvizFilters = [
+          'cap_midover',        // Mid cap and above ($2B+) for stability
+          'sh_avgvol_o1000',    // Volume > 1M for liquidity
+          'sh_price_o5',        // Price > $5 (quality stocks)
+          'ta_changeopen_d',    // Declining (negative change)
+          'ta_sma200_pa',       // Still above SMA200 (long-term uptrend)
+          'ta_rsi_os30'         // RSI oversold < 30
+        ];
+      } else if (strategy === 'short-squeeze') {
+        // Short Squeeze: High short interest + volume spike
+        finvizFilters = [
+          'cap_smallunder',     // Small cap < $2B (easier to squeeze)
+          'sh_avgvol_o500',     // Volume > 500K
+          'sh_price_u15',       // Price < $15
+          'sh_short_o10',       // Short interest > 10%
+          'ta_changeopen_u5',   // Change > 5% (squeeze trigger)
+          'sh_relvol_o2'        // Relative volume > 2x
+        ];
+      } else if (strategy === 'aggressive-breakout') {
+        // Aggressive: Explosive moves with extreme volume
+        finvizFilters = [
+          'cap_micro',          // Micro cap ($50M-$300M)
+          'sh_avgvol_o2000',    // Volume > 2M (massive volume)
+          'sh_price_u10',       // Price < $10
+          'ta_changeopen_u10',  // Change > 10% (already moving)
+          'sh_relvol_o3'        // Relative volume > 3x (extreme)
+        ];
+      } else {
+        // Default to momentum
+        finvizFilters = [
+          'cap_smallover',
+          'sh_avgvol_o1000',
+          'sh_price_u10',
+          'ta_changeopen_u3',
+          'ta_sma200_pa',
+          'ta_sma50_pa'
+        ];
+      }
       
       const finvizStocks = await finviz.getScreenerStocks(finvizFilters);
       
       if (finvizStocks && finvizStocks.length > 0) {
-        console.log(`✅ Finviz Elite found ${finvizStocks.length} premarket movers (USING PAID API!)`);
+        console.log(`✅ Finviz found ${finvizStocks.length} premarket movers`);
         
-        // Convert Finviz format to our format
+        // Return Finviz stocks directly with all technical data intact
+        // The convertToStandardFormat already added all necessary aliases
+        
+        // Debug: Log first stock to see actual data structure
+        if (finvizStocks.length > 0) {
+          const sample = finvizStocks[0];
+          console.log(`📊 Sample Finviz stock data:`, {
+            ticker: sample.ticker,
+            price: sample.price,
+            changePercent: sample.changePercent,
+            volume: sample.volume,
+            relativeVolume: sample.relativeVolume
+          });
+          console.log(`📊 Filter criteria: minChange=${params?.minChange}, minVolume=${params?.minVolume}, minPrice=${params?.minPrice}, maxPrice=${params?.maxPrice}`);
+        }
+        
+        let filteredCount = 0;
         const movers = finvizStocks
           .filter((stock: any) => {
-            const changePercent = parseFloat(stock.Change?.replace(/[^0-9.-]/g, '') || '0');
-            const volume = parseInt(stock.Volume?.replace(/[^0-9]/g, '') || '0');
-            const price = parseFloat(stock.Price?.replace(/[^0-9.-]/g, '') || '0');
+            const changePercent = stock.changePercent || 0;
+            const volume = stock.volume || 0;
+            const price = stock.price || 0;
             
-            return changePercent >= (params?.minChange || 2) && 
-                   volume >= (params?.minVolume || 100000) &&
-                   price >= (params?.minPrice || 1) &&
-                   price <= (params?.maxPrice || 1000);
+            const passesChange = changePercent >= (params?.minChange || 2);
+            const passesVolume = volume >= (params?.minVolume || 100000);
+            const passesMinPrice = price >= (params?.minPrice || 1);
+            const passesMaxPrice = price <= (params?.maxPrice || 1000);
+            
+            // Debug first few failures
+            if (!passesChange || !passesVolume || !passesMinPrice || !passesMaxPrice) {
+              if (filteredCount < 3) { // Only log first 3 failures
+                console.log(`❌ ${stock.ticker} filtered: change=${changePercent.toFixed(2)}% (need ${params?.minChange}+), vol=${volume.toLocaleString()} (need ${params?.minVolume}+), price=$${price} (need $${params?.minPrice}-$${params?.maxPrice})`);
+                filteredCount++;
+              }
+            }
+            
+            return passesChange && passesVolume && passesMinPrice && passesMaxPrice;
           })
           .map((stock: any) => {
-            const price = parseFloat(stock.Price?.replace(/[^0-9.-]/g, '') || '0');
-            const changePercent = parseFloat(stock.Change?.replace(/[^0-9.-]/g, '') || '0');
-            const change = (price * changePercent) / 100;
-            
+            // Return the full Finviz stock object with all technical data
+            // It already has: price, close, change, change_p, changePercent, volume, 
+            // sma20, sma50, sma200, rsi, high52w, timestamp, previousClose, etc.
             return {
-              symbol: stock.Ticker,
-              price: price,
-              change: change,
-              changePercent: changePercent,
-              volume: parseInt(stock.Volume?.replace(/[^0-9]/g, '') || '0'),
-              previousClose: price - change,
+              ...stock,
+              symbol: stock.ticker || stock.symbol, // Ensure symbol field exists
             };
           });
         
-        console.log(`✅ Finviz Elite filtered to ${movers.length} stocks matching criteria`);
+        console.log(`✅ Finviz filtered to ${movers.length} stocks matching criteria`);
         return movers;
       }
-    } catch (finvizError: any) {
-      console.warn('⚠️ Finviz Elite failed:', finvizError.message);
-    }
-    
-    // PRIORITY 2: Marketstack (PAID - you're paying for it!)
-    console.log('🔍 PRIORITY 2: Falling back to Marketstack (PAID backup)');
-    try {
-      const marketstackStocks = await marketstackService.getMultipleStocksData([
-        'AAPL', 'TSLA', 'NVDA', 'AMD', 'PLTR', 'SOFI', 'RIVN', 'LCID', 'NIO', 'PLUG',
-        'OPEN', 'SNAP', 'BBAI', 'CAN', 'RXRX', 'ACHR', 'NLSP', 'WOOF', 'F', 'HOOD'
-      ]);
       
-      if (marketstackStocks && marketstackStocks.length > 0) {
-        console.log(`✅ Marketstack found ${marketstackStocks.length} stocks (USING PAID API!)`);
-        
-        const movers = marketstackStocks
-          .filter((stock: any) => {
-            return stock.changePercent >= (params?.minChange || 2) && 
-                   stock.volume >= (params?.minVolume || 100000) &&
-                   stock.price >= (params?.minPrice || 1) &&
-                   stock.price <= (params?.maxPrice || 1000);
-          })
-          .map((stock: any) => ({
-            symbol: stock.symbol,
-            price: stock.price,
-            change: stock.change,
-            changePercent: stock.changePercent,
-            volume: stock.volume,
-            previousClose: stock.previousClose,
-          }));
-        
-        console.log(`✅ Marketstack filtered to ${movers.length} stocks matching criteria`);
-        return movers;
-      }
-    } catch (marketstackError: any) {
-      console.warn('⚠️ Marketstack failed:', marketstackError.message);
+      console.log('⚠️ No stocks found from Finviz');
+      return [];
+    } catch (error: any) {
+      console.error('❌ Finviz API error:', error.message);
+      return [];
     }
-    
-    // PRIORITY 3: Alpha Vantage (FREE fallback)
-    console.log('🔍 PRIORITY 3: Falling back to Alpha Vantage (FREE backup)');
-    const gainersData = await getTopGainersLosers();
-    
-    if (!gainersData || !gainersData.top_gainers) {
-      console.log('⚠️ Alpha Vantage screener unavailable, falling back to Alpaca hardcoded list');
-      return await alpaca.getPremarketMovers(params?.minChange || 3, params?.minVolume || 100000);
-    }
-    
-    console.log(`✅ Alpha Vantage found ${gainersData.top_gainers.length} top gainers from entire market`);
-    
-    // Convert Alpha Vantage format to our format
-    const movers = gainersData.top_gainers
-      .filter((stock: any) => {
-        const changePercent = parseFloat(stock.change_percentage.replace('%', ''));
-        const volume = parseInt(stock.volume);
-        const price = parseFloat(stock.price);
-        
-        return changePercent >= (params?.minChange || 2) && 
-               volume >= (params?.minVolume || 100000) &&
-               price >= (params?.minPrice || 1) &&
-               price <= (params?.maxPrice || 1000);
-      })
-      .map((stock: any) => ({
-        symbol: stock.ticker,
-        price: parseFloat(stock.price),
-        change: parseFloat(stock.change_amount),
-        changePercent: parseFloat(stock.change_percentage.replace('%', '')),
-        volume: parseInt(stock.volume),
-        previousClose: parseFloat(stock.price) - parseFloat(stock.change_amount),
-      }));
-    
-    console.log(`✅ Alpha Vantage filtered to ${movers.length} stocks matching criteria`);
-    return movers;
   },
   getRealTimeQuote: async (symbol: string) => {
     return await alpaca.getLatestQuote(symbol);
@@ -229,24 +231,18 @@ const alpacaEnhanced = {
       minutesUntilOpen: Math.max(0, (9.5 * 60) - (etHour * 60 + now.getUTCMinutes()))
     };
   },
-  checkMomentumCriteria: async (symbol: string, price: number) => {
+  checkMomentumCriteria: async (symbol: string, price: number, stockData: any) => {
     try {
-      const technicals = await alpaca.getTechnicalIndicators(symbol);
-      const realTimeData = await alpaca.getLatestQuote(symbol);
+      // Use Finviz data that's already been fetched
+      const sma20 = stockData.sma20 || 0;
+      const sma50 = stockData.sma50 || 0;
+      const sma200 = stockData.sma200 || 0;
+      const high52w = stockData.high52w || price;
+      
+      // Calculate 52-week high proximity from Finviz data
+      const highProximity = high52w > 0 ? (price / high52w) * 100 : 0;
 
-      if (!technicals || !realTimeData) {
-        throw new Error('No real data available');
-      }
-
-      const sma20 = technicals.sma20 || 0;
-      const sma50 = technicals.sma50 || 0;
-      const sma200 = technicals.sma200 || 0;
-
-      // Calculate REAL 52-week high proximity
-      const week52Data = await alpaca.get52WeekHigh(symbol);
-      const highProximity = week52Data ? week52Data.proximity : 0;
-
-      // Calculate REAL SMA alignment
+      // Calculate SMA alignment
       const aboveSMA20 = price > sma20 && sma20 > 0;
       const aboveSMA50 = price > sma50 && sma50 > 0;
       const aboveSMA200 = price > sma200 && sma200 > 0;
@@ -255,7 +251,7 @@ const alpacaEnhanced = {
       const smaAlignment = (aboveSMA20 && aboveSMA50 && aboveSMA200) ? 'bullish' as const :
         (aboveSMA20 && aboveSMA50) ? 'bullish' as const : 'mixed' as const;
 
-      // Calculate REAL momentum score based on technical strength
+      // Calculate momentum score based on technical strength
       let momentumScore = 0;
       if (aboveSMA20) momentumScore += 20;
       if (aboveSMA50) momentumScore += 15;
@@ -272,7 +268,7 @@ const alpacaEnhanced = {
         momentumScore: Math.min(momentumScore, 80) // Cap at 80
       };
     } catch (error) {
-      console.error(`❌ REAL momentum analysis failed for ${symbol}:`, error);
+      console.error(`❌ Momentum analysis failed for ${symbol}:`, error);
       return {
         isNear20DayHigh: false,
         highProximity: 0,
@@ -283,18 +279,8 @@ const alpacaEnhanced = {
     }
   },
   getStockNews: async (symbol: string, limit: number) => {
-    try {
-      const news = await alpaca.getStockNews(symbol, limit);
-      if (news.length > 0) {
-        console.log(`📰 Got ${news.length} real news articles for ${symbol}`);
-      } else {
-        console.log(`📰 No news articles available for ${symbol}`);
-      }
-      return news;
-    } catch (error) {
-      console.error(`❌ REAL news data failed for ${symbol}:`, error);
-      return [];
-    }
+    // Skip news fetching - not needed for Finviz-only scanner
+    return [];
   }
 };
 
@@ -398,7 +384,7 @@ interface PremarketStock {
  * 3. If no results, progressively relax filters (broader criteria)
  * 4. Return live stock data for further analysis
  */
-async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<any[]> {
+async function fetchPremarketMovers(strategy: string, filters: ScanFilters): Promise<any[]> {
   try {
     console.log(`Fetching live premarket movers for ${strategy} strategy with filters:`, filters);
 
@@ -414,6 +400,7 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
     // Use new getPremarketMovers method for live data
     // Only pass filters that are enabled (> 0)
     const searchParams = {
+      strategy: strategy, // Pass strategy to customize Finviz filters
       minVolume: filters.minVolume > 0 ? filters.minVolume : undefined,
       maxPrice: filters.maxPrice > 0 ? filters.maxPrice : undefined,
       minChange: filters.minChange > 0 ? filters.minChange : undefined,
@@ -430,6 +417,7 @@ async function fetchPremarketMovers(strategy: 'momentum' | 'breakout', filters: 
       console.log('No stocks found with strict filters, trying broader criteria...');
       const broaderParams = {
         ...searchParams,
+        strategy: strategy, // Keep strategy for broader search
         minVolume: Math.max(500000, (searchParams.minVolume || 1000000) * 0.5),
         maxPrice: Math.min(15, (searchParams.maxPrice || 10) * 1.5),
         minChange: searchParams.minChange ? searchParams.minChange * 0.5 : undefined
@@ -518,6 +506,84 @@ function analyzeUnusualVolume(relativeVolume: number, currentVolume: number, avg
 }
 
 /**
+ * MARKET CONDITION ANALYSIS: Recommend Strategy
+ * 
+ * PURPOSE: Analyze market conditions and recommend the best trading strategy
+ * LOGIC: Based on time of day, market volatility, and stock characteristics
+ */
+function determineRecommendedStrategy(marketStatus: string, stocks: any[]): {
+  strategy: string;
+  reason: string;
+  confidence: 'high' | 'medium' | 'low';
+} {
+  const now = new Date();
+  const etHour = now.getUTCHours() - 5; // Convert to ET
+  
+  // Premarket hours (4:00-9:30 AM ET) - Best for momentum/aggressive
+  if (etHour >= 4 && etHour < 9.5) {
+    // Check if we have high-volume explosive movers
+    const hasExplosiveMovers = stocks.some(s => 
+      (s.changePercent || 0) > 10 && (s.relativeVolume || 0) > 3
+    );
+    
+    if (hasExplosiveMovers) {
+      return {
+        strategy: 'aggressive-breakout',
+        reason: 'Premarket hours with explosive movers (>10% change, 3x+ volume). Best time for aggressive plays.',
+        confidence: 'high'
+      };
+    }
+    
+    return {
+      strategy: 'momentum',
+      reason: 'Premarket hours - ideal for momentum breakouts before market open.',
+      confidence: 'high'
+    };
+  }
+  
+  // Regular market hours (9:30 AM - 4:00 PM ET)
+  if (etHour >= 9.5 && etHour < 16) {
+    // Check for declining stocks (mean reversion opportunity)
+    const decliningCount = stocks.filter(s => (s.changePercent || 0) < 0).length;
+    const risingCount = stocks.filter(s => (s.changePercent || 0) > 5).length;
+    
+    if (decliningCount > risingCount && decliningCount > 3) {
+      return {
+        strategy: 'mean-reversion',
+        reason: 'Market showing pullbacks in quality stocks. Good for mean reversion plays.',
+        confidence: 'medium'
+      };
+    }
+    
+    // Check for squeeze candidates
+    const squeezeCount = stocks.filter(s => 
+      (s.changePercent || 0) > 5 && (s.relativeVolume || 0) > 2
+    ).length;
+    
+    if (squeezeCount > 2) {
+      return {
+        strategy: 'short-squeeze',
+        reason: 'Multiple stocks with volume spikes and strong moves. Potential squeeze setups.',
+        confidence: 'medium'
+      };
+    }
+    
+    return {
+      strategy: 'momentum',
+      reason: 'Regular market hours - momentum strategy works well with active trading.',
+      confidence: 'medium'
+    };
+  }
+  
+  // After hours or closed
+  return {
+    strategy: 'momentum',
+    reason: 'Market closed. Review momentum setups for next trading session.',
+    confidence: 'low'
+  };
+}
+
+/**
  * CORE BUSINESS LOGIC: Stock Analysis Engine
  * 
  * PURPOSE: Enriches basic stock data with advanced momentum/breakout indicators
@@ -549,40 +615,16 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
   try {
     console.log(`🔍 Enhanced analysis for ${symbol} (${strategy} strategy)...`);
 
-    // Use screener data if available
-    let realTimeData = screenData;
-    if (!realTimeData) {
-      realTimeData = await alpaca.getRealTimeQuote(symbol);
-    }
-
+    // Use Finviz data directly (already fetched, no API calls needed)
+    const realTimeData = screenData;
     if (!realTimeData) return null;
 
-    const currentPrice = realTimeData.close || 0;
+    const currentPrice = realTimeData.close || realTimeData.price || 0;
     const previousClose = realTimeData.previousClose || currentPrice;
 
-    // 1. Calculate real relative volume using historical data
-    const avgVolume = await alpaca.getHistoricalAverageVolume(symbol, 30);
-
-    // Use screen/live data first; if tiny or zero, fall back to cumulative intraday sum
-    let currentVolume = Number(realTimeData.volume) || 0;
-    if (currentVolume <= 0 || currentVolume < 10000) {
-      try {
-        const intraday = await alpaca.getIntradayData(symbol, '1');
-        const now = new Date();
-        const etNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const todayET = etNow.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-        let sum = 0;
-        for (const rec of intraday) {
-          const recET = new Date(rec.datetime).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-          if (recET === todayET) sum += Number(rec.volume) || 0;
-        }
-        if (sum > currentVolume) currentVolume = sum;
-        console.log(`📊 Volume sources (${symbol}): live=${(realTimeData.volume || 0).toLocaleString()} | intradaySum=${sum.toLocaleString()}`);
-      } catch {
-        // keep currentVolume
-      }
-    }
-
+    // 1. Use Finviz volume data (already fetched)
+    const currentVolume = Number(realTimeData.volume) || 0;
+    const avgVolume = Number(realTimeData.avgVolume) || currentVolume; // Finviz provides avg volume
     const relativeVolume = avgVolume > 0 ? currentVolume / avgVolume : 0;
     console.log(`📊 ${symbol}: RelVol ${relativeVolume.toFixed(2)}x (Current: ${currentVolume.toLocaleString()}, Avg: ${avgVolume.toLocaleString()})`);
 
@@ -594,11 +636,11 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
     const timeUrgency = alpacaEnhanced.getPremarketUrgency();
     console.log(`⏰ ${symbol}: Time urgency - ${timeUrgency.timeWindow} window, ${timeUrgency.urgencyMultiplier.toFixed(2)}x multiplier`);
 
-    // 4. Momentum criteria check (for momentum strategy)
+    // 4. Momentum criteria check (for momentum strategy) - use Finviz data
     let momentumCriteria;
     if (strategy === 'momentum') {
       try {
-        momentumCriteria = await alpacaEnhanced.checkMomentumCriteria(symbol, currentPrice);
+        momentumCriteria = await alpacaEnhanced.checkMomentumCriteria(symbol, currentPrice, screenData);
         console.log(`🎯 ${symbol}: Momentum criteria - Near 20-day high: ${momentumCriteria.isNear20DayHigh}, Above SMAs: ${momentumCriteria.isAboveSMAs}, Score: ${momentumCriteria.momentumScore}`);
       } catch (error) {
         console.log(`⚠️ ${symbol}: Momentum criteria check failed, using defaults`);
@@ -651,7 +693,7 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
  * - Quality over quantity approach (top 10 stocks)
  * - Real-time validation prevents stale/declining stock signals
  */
-async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: ScanFilters): Promise<any[]> {
+async function getMomentumStocks(strategy: string, filters: ScanFilters): Promise<any[]> {
   try {
     console.log('Discovering fresh momentum stocks from market-wide screening...')
 
@@ -675,7 +717,9 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
           console.log('⚠️ Skipping stock with no symbol');
           continue;
         }
-        console.log(`Analyzing fresh candidate ${symbol}: $${stock.price || stock.close}, vol: ${stock.volume}, change: ${stock.changePercent || stock.change_p}%`)
+        const stockPrice = stock.price || stock.close || 0;
+        const stockChange = stock.changePercent || stock.change_p || 0;
+        console.log(`Analyzing fresh candidate ${symbol}: $${stockPrice}, vol: ${stock.volume}, change: ${stockChange}%`)
 
         // Filter out warrants and rights - use explicit patterns to avoid false positives
         const isWarrantOrRight = (
@@ -694,13 +738,14 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
 
         // Apply price and volume filters to remove penny stocks and low-quality candidates
         const minPriceThreshold = filters.minPrice && filters.minPrice > 0 ? filters.minPrice : 1.00 // Default to $1.00 minimum
-        if (stock.close < minPriceThreshold) {
-          console.log(`${symbol} filtered: price $${stock.close} < $${minPriceThreshold}`)
+        const stockPriceForFilter = stock.price || stock.close || 0;
+        if (stockPriceForFilter < minPriceThreshold) {
+          console.log(`${symbol} filtered: price $${stockPriceForFilter} < $${minPriceThreshold}`)
           continue
         }
 
-        if (stock.close > filters.maxPrice) {
-          console.log(`${symbol} filtered: price $${stock.close} > $${filters.maxPrice}`)
+        if (stockPriceForFilter > filters.maxPrice) {
+          console.log(`${symbol} filtered: price $${stockPriceForFilter} > $${filters.maxPrice}`)
           continue
         }
 
@@ -718,54 +763,59 @@ async function getMomentumStocks(strategy: 'momentum' | 'breakout', filters: Sca
         let fundamentals = null
         let technicals = null
 
-        // FLOAT & INSTITUTIONAL OWNERSHIP FILTERING: Only fetch if filters are actually set!
-        // This avoids unnecessary API calls and rate limiting
+        // Use Finviz float and institutional data (already fetched)
         const needsFloatFilter = filters.maxFloat && filters.maxFloat > 0;
         const needsInstitutionalFilter = filters.maxInstitutionalOwnership || filters.minInstitutionalOwnership;
 
         if ((strategy === 'momentum' || strategy === 'breakout' || strategy === 'mean-reversion') &&
           (needsFloatFilter || needsInstitutionalFilter)) {
-          try {
-            // Only fetch fundamentals if we actually need to filter by them
-            fundamentals = await alpaca.getFundamentals(symbol)
-            console.log(`📊 ${symbol}: Fetched fundamentals for filtering`)
-
-            // Check float size (only if maxFloat > 0)
-            if (needsFloatFilter && fundamentals?.General?.SharesFloat && filters.maxFloat) {
-              const floatShares = fundamentals.General.SharesFloat
-              if (floatShares > filters.maxFloat) {
-                console.log(`${symbol} filtered: float ${(floatShares / 1000000).toFixed(1)}M > ${(filters.maxFloat / 1000000).toFixed(1)}M`)
-                continue
-              }
+          
+          // Parse float from Finviz data (e.g., "18.3M" -> 18300000)
+          if (needsFloatFilter && stock.float && filters.maxFloat) {
+            const floatStr = String(stock.float);
+            let floatShares = 0;
+            if (floatStr.includes('M')) {
+              floatShares = parseFloat(floatStr.replace('M', '')) * 1000000;
+            } else if (floatStr.includes('B')) {
+              floatShares = parseFloat(floatStr.replace('B', '')) * 1000000000;
+            } else {
+              floatShares = parseFloat(floatStr) || 0;
             }
-
-            // Check institutional ownership
-            if (needsInstitutionalFilter && (fundamentals as any)?.SharesStats?.PercentInstitutions !== undefined) {
-              const institutionalPct = (fundamentals as any).SharesStats.PercentInstitutions * 100 // Convert to percentage
-
-              // Momentum: Filter out high institutional (>30%)
-              if (filters.maxInstitutionalOwnership && institutionalPct > filters.maxInstitutionalOwnership) {
-                console.log(`${symbol} filtered: institutional ${institutionalPct.toFixed(1)}% > ${filters.maxInstitutionalOwnership}% (too high for momentum)`)
-                continue
-              }
-
-              // Mean Reversion: Filter out low institutional (<50%)
-              if (filters.minInstitutionalOwnership && institutionalPct < filters.minInstitutionalOwnership) {
-                console.log(`${symbol} filtered: institutional ${institutionalPct.toFixed(1)}% < ${filters.minInstitutionalOwnership}% (too low for mean reversion)`)
-                continue
-              }
+            
+            if (floatShares > 0 && floatShares > filters.maxFloat) {
+              console.log(`${symbol} filtered: float ${(floatShares / 1000000).toFixed(1)}M > ${(filters.maxFloat / 1000000).toFixed(1)}M`)
+              continue
             }
-          } catch (error) {
-            console.log(`⚠️ ${symbol}: Could not fetch fundamentals for filtering - ${error}`)
-            // Continue without filtering - don't exclude stocks just because API failed
           }
-        } else {
-          console.log(`⏭️ ${symbol}: Skipping fundamentals fetch (no float/institutional filters set)`)
+
+          // Parse institutional ownership from Finviz data (e.g., "25.5%" -> 25.5)
+          if (needsInstitutionalFilter && stock.institutional) {
+            const institutionalPct = parseFloat(String(stock.institutional).replace('%', '')) || 0;
+
+            // Momentum: Filter out high institutional (>30%)
+            if (filters.maxInstitutionalOwnership && institutionalPct > filters.maxInstitutionalOwnership) {
+              console.log(`${symbol} filtered: institutional ${institutionalPct.toFixed(1)}% > ${filters.maxInstitutionalOwnership}% (too high for momentum)`)
+              continue
+            }
+
+            // Mean Reversion: Filter out low institutional (<50%)
+            if (filters.minInstitutionalOwnership && institutionalPct < filters.minInstitutionalOwnership) {
+              console.log(`${symbol} filtered: institutional ${institutionalPct.toFixed(1)}% < ${filters.minInstitutionalOwnership}% (too low for mean reversion)`)
+              continue
+            }
+          }
         }
 
-        // Get technical indicators for scoring (optional)
-        const techData = await alpaca.getTechnicals(symbol)
-        technicals = techData?.[0] || null
+        // Use Finviz technical data (already fetched) instead of making additional API calls
+        technicals = {
+          SMA_20: stock.sma20 || 0,
+          SMA_50: stock.sma50 || 0,
+          SMA_200: stock.sma200 || 0,
+          RSI_14: stock.rsi || 0,
+          MACD: 0, // Finviz doesn't provide MACD
+          MACD_Signal: 0,
+          MACD_Histogram: 0
+        }
 
         // Check data freshness and add warnings
         // Convert timestamp to milliseconds if it's in seconds (Unix timestamp)
@@ -856,74 +906,20 @@ export async function POST(request: NextRequest) {
     // Extract strategy and filters from request
     const strategy = body.strategy || 'momentum'
 
-    // Adaptive filters based on market session and strategy
-    const baselineFilters: ScanFilters = scanMode === 'premarket' ?
-      // PREMARKET MODE: EARLY BREAKOUT DETECTION (1-3 days before breakout)
-      (strategy === 'momentum' ? {
-        minChange: -5, // Allow slight pullbacks (building phase)
-        maxChange: 8,  // ❌ CRITICAL: Exclude stocks already up 10%+ (too late!)
-        minVolume: 1000000, // >1M volume for momentum
-        maxPrice: 20, // <$20 price - CONSISTENT WITH REGULAR HOURS
-        minPrice: 1.00, // Avoid penny stocks
-        minRelativeVolume: 1.5, // >1.5x relative volume
-        minScore: 0,
-        minMarketCap: 300000000, // Small cap and over
-        maxMarketCap: 0,
-        maxFloat: 0, // No float limit - show all stocks
-        maxInstitutionalOwnership: 30 // <30% institutional for retail-driven volatility
-      } : {
-        minChange: 5, // 5%+ for breakout strategy
-        maxChange: 100,
-        minVolume: 25000,
-        maxPrice: 20,
-        minPrice: 1.00,
-        minRelativeVolume: 2.0, // Even higher for breakouts
-        minScore: 0,
-        minMarketCap: 0,
-        maxMarketCap: 0,
-        maxFloat: 0 // No float limit - show all stocks
-      }) :
-      // REGULAR HOURS MODE: EARLY BREAKOUT DETECTION (building setups)
-      (strategy === 'momentum' ? {
-        minChange: -5, // Allow consolidation/pullbacks
-        maxChange: 8,  // ❌ Exclude stocks already up 10%+ (late entries)
-        minVolume: 1000000, // >1M avg volume (matches sh_avgvol_o1000)
-        maxPrice: 20, // <$20 price - EXPANDED RANGE for more opportunities
-        minPrice: 1.00,
-        minRelativeVolume: 1.5, // >1.5x relative volume
-        minScore: 0,
-        minMarketCap: 300000000, // Small cap and over (matches cap_smallover)
-        maxMarketCap: 0,
-        maxFloat: 0, // No float limit - show all stocks
-        maxInstitutionalOwnership: 30 // <30% institutional for retail-driven volatility
-      } : {
-        minChange: 10, // 10%+ for breakout during regular hours
-        maxChange: 100,
-        minVolume: 0, // No minimum volume for breakouts
-        maxPrice: 20, // <$20 for breakouts
-        minPrice: 2.00,
-        minRelativeVolume: 5.0, // >5x relative volume for breakouts
-        minScore: 0,
-        minMarketCap: 0,
-        maxMarketCap: 0,
-        maxFloat: 0 // No float limit - show all stocks
-      })
-
-    // Frontend refinement filters (applied on top of baseline)
-    const refinementFilters: ScanFilters = {
-      minChange: body.minChange > 0 ? Math.max(body.minChange, baselineFilters.minChange) : baselineFilters.minChange,
-      maxChange: body.maxChange > 0 ? body.maxChange : baselineFilters.maxChange,
-      minVolume: body.minVolume > 0 ? Math.max(body.minVolume, baselineFilters.minVolume) : baselineFilters.minVolume,
-      maxPrice: body.maxPrice > 0 ? Math.min(body.maxPrice, baselineFilters.maxPrice) : baselineFilters.maxPrice,
-      minPrice: body.minPrice > 0 ? Math.max(body.minPrice, baselineFilters.minPrice!) : baselineFilters.minPrice!,
-      minRelativeVolume: body.minRelativeVolume > 0 ? Math.max(body.minRelativeVolume, baselineFilters.minRelativeVolume) : baselineFilters.minRelativeVolume,
-      minScore: body.minScore > 0 ? Math.max(body.minScore, baselineFilters.minScore) : baselineFilters.minScore,
-      minMarketCap: body.minMarketCap > 0 ? Math.max(body.minMarketCap, baselineFilters.minMarketCap!) : baselineFilters.minMarketCap!,
-      maxMarketCap: body.maxMarketCap > 0 ? Math.min(body.maxMarketCap, baselineFilters.maxMarketCap!) : baselineFilters.maxMarketCap!,
-      maxFloat: body.maxFloat > 0 ? Math.min(body.maxFloat, baselineFilters.maxFloat || Infinity) : baselineFilters.maxFloat
+    // Use filters directly from frontend (strategy-specific presets)
+    const filters: ScanFilters = {
+      minChange: body.minChange ?? 0,
+      maxChange: body.maxChange ?? 100,
+      minVolume: body.minVolume ?? 1000000,
+      maxPrice: body.maxPrice ?? 20,
+      minPrice: body.minPrice ?? 1.00,
+      minRelativeVolume: body.minRelativeVolume ?? 1.5,
+      minScore: body.minScore ?? 0,
+      minMarketCap: body.minMarketCap ?? 300000000,
+      maxMarketCap: body.maxMarketCap ?? 0,
+      maxFloat: body.maxFloat ?? 0,
+      maxInstitutionalOwnership: body.maxInstitutionalOwnership ?? 0
     }
-
-    const filters = refinementFilters
 
     console.log('Starting premarket scan with filters:', filters)
 
@@ -931,65 +927,8 @@ export async function POST(request: NextRequest) {
     const momentumStocks = await getMomentumStocks(strategy, filters)
     console.log(`Processing ${momentumStocks.length} momentum stocks from EODHD`)
 
-    // MAXIMUM WEBSOCKET UTILIZATION: Get live data for ALL discovered stocks
-    if (momentumStocks.length > 0) {
-      // FMP doesn't have a WebSocket manager yet, so we'll skip this check or implement it later
-      // const isWebSocketConnected = alpaca.isWebSocketConnected();
-      console.log(`🔴 MAXIMUM Live Mode: Processing ALL ${momentumStocks.length} stocks with live data...`);
-
-      // Process ALL stocks in batches for maximum live data coverage
-      const batchSize = 15; // Increased batch size for more aggressive WebSocket usage
-      let totalEnhanced = 0;
-
-      for (let i = 0; i < momentumStocks.length; i += batchSize) {
-        const batch = momentumStocks.slice(i, i + batchSize);
-        const symbols = batch.map((item: any) => {
-          const stock = item.stock || item;
-          const symbol = stock.symbol || stock.code || '';
-          return symbol.replace('.US', '');
-        }).filter(s => s); // Remove empty symbols
-
-        try {
-          console.log(`🚀 WebSocket Batch ${Math.floor(i / batchSize) + 1}: Processing ${symbols.length} stocks for live data...`);
-
-          // Alpaca doesn't use .US suffix - just pass symbols directly
-          const liveQuotes = await alpaca.getRealTimeQuotes(symbols);
-          console.log(`✅ Batch ${Math.floor(i / batchSize) + 1}: Enhanced ${liveQuotes.length}/${symbols.length} stocks with LIVE WebSocket data`);
-
-          // Update ALL stocks in this batch with live data
-          liveQuotes.forEach((liveQuote: any) => {
-            const matchingItem = batch.find((item: any) => {
-              const stock = item.stock || item;
-              const stockSymbol = stock.symbol || stock.code || '';
-              const quoteSymbol = liveQuote.symbol || liveQuote.code || '';
-              return stockSymbol === quoteSymbol || stockSymbol === `${quoteSymbol}.US`;
-            });
-            if (matchingItem) {
-              const matchingStock = matchingItem.stock || matchingItem;
-              matchingStock.close = liveQuote.price || liveQuote.close;
-              matchingStock.change = liveQuote.change;
-              matchingStock.change_p = liveQuote.changePercent || liveQuote.change_p;
-              matchingStock.volume = liveQuote.volume;
-              matchingStock.timestamp = liveQuote.timestamp || Date.now();
-              matchingStock.previousClose = liveQuote.previousClose;
-              totalEnhanced++;
-              const displaySymbol = matchingStock.symbol || matchingStock.code;
-              console.log(`🔴 LIVE: ${displaySymbol} → $${matchingStock.close}, vol: ${matchingStock.volume?.toLocaleString()}, change: ${matchingStock.change_p?.toFixed(2)}%`);
-            }
-          });
-
-          // Small delay between batches to respect API limits but maintain speed
-          if (i + batchSize < momentumStocks.length) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-
-        } catch (error) {
-          console.log(`⚠️ WebSocket batch ${Math.floor(i / batchSize) + 1} failed, continuing with next batch:`, error);
-        }
-      }
-
-      console.log(`🔴 LIVE DATA SUMMARY: Enhanced ${totalEnhanced}/${momentumStocks.length} stocks (${Math.round((totalEnhanced / momentumStocks.length) * 100)}%) with WebSocket data`);
-    }
+    // Skip WebSocket enhancement - Finviz data is already fresh and complete
+    console.log(`✅ Using Finviz data directly for ${momentumStocks.length} stocks (no additional API calls needed)`);
 
     // Process ALL stocks with live WebSocket data - maximum utilization for accurate scoring
     const topStocks = momentumStocks.slice(0, 50) // Increased to 50 for maximum live data coverage
@@ -1031,9 +970,16 @@ export async function POST(request: NextRequest) {
         const dataSource = isLiveData ? '🔴 LIVE WebSocket' : '📡 REST API';
         console.log(`🔴 SCORING ${symbol}: Using ${dataSource} data (${Math.round(dataAge / 1000)}s old) - Price: $${stock.close}, Vol: ${currentVolume.toLocaleString()}, Change: ${stock.change_p?.toFixed(2)}%`);
 
-        // Get technical data for MACD analysis
-        const technicalsData = await alpaca.getTechnicals(symbol);
-        const technicals = technicalsData?.[0] || {};
+        // Use Finviz technical data (already available from stock object)
+        const technicals = {
+          SMA_20: stock.sma20 || 0,
+          SMA_50: stock.sma50 || 0,
+          SMA_200: stock.sma200 || 0,
+          RSI_14: stock.rsi || 0,
+          MACD: 0,
+          MACD_Signal: 0,
+          MACD_Histogram: 0
+        };
 
         // Enhanced MACD analysis for momentum validation
         const macdAnalysis = analyzeMACDSignals(technicals);
@@ -1208,7 +1154,7 @@ export async function POST(request: NextRequest) {
           `Relative Volume: ${relativeVolume >= 1.5 ? 'PASS' : 'FAIL'} (Has: ${relativeVolume.toFixed(2)}x / Needs: > 1.5x)`,
           `Gap: ${gapAnalysis.gapPercent.toFixed(1)}% (${gapAnalysis.isSignificant ? 'Significant' : 'Small'})`,
           `Momentum: ${momentumCriteria?.momentumScore || 0}/13 criteria met`,
-          `Technical: ${technicalsData ? 'Available' : 'Limited data'}`,
+          `Technical: ${technicals ? 'Available' : 'Limited data'}`,
           ...(predictiveSetup ? [
             `Setup Readiness: ${predictiveSetup.setupScore}/25 (${predictiveSetup.flags.tightBase ? 'Tight base' : 'Loose'}, ${predictiveSetup.flags.nearPivot ? 'Near pivot' : 'Far'}, ${predictiveSetup.flags.rsUptrend ? 'RS rising' : 'RS flat'})`
           ] : [])
@@ -1331,7 +1277,7 @@ export async function POST(request: NextRequest) {
           marketCap: 'Unknown',
           float: floatShares, // Float in shares (e.g., 50000000 = 50M)
           institutionalOwnership, // Percentage (e.g., 25.5 = 25.5%)
-          lastUpdated: new Date(stock.timestamp * 1000).toISOString(),
+          lastUpdated: stock.timestamp ? new Date(stock.timestamp * 1000).toISOString() : new Date().toISOString(),
           news: newsData,
           gapAnalysis: {
             gapPercent: gapAnalysis.gapPercent,
@@ -1478,17 +1424,21 @@ export async function POST(request: NextRequest) {
     console.log(`🏆 Quality breakdown: ${qualityBreakdown.premium} premium, ${qualityBreakdown.standard} standard, ${qualityBreakdown.caution} caution`);
     console.log(`🔴 WebSocket Stats: ${liveDataCount}/${stocks.length} stocks using live data (${webSocketStats.liveDataPercentage}%)`);
 
+    // Determine recommended strategy based on market conditions
+    const recommendedStrategy = determineRecommendedStrategy(marketStatus, stocks);
+    
     return NextResponse.json({
       stocks,
       scanTime: new Date().toISOString(),
-      filters: refinementFilters,
+      filters,
       strategy,
       scanMode,
       marketStatus,
       count: stocks.length,
       filteredCount,
       qualityBreakdown,
-      webSocketStats
+      webSocketStats,
+      recommendedStrategy // Add market condition-based recommendation
     })
 
   } catch (error) {

@@ -52,5 +52,50 @@ export const alpaca = {
       minVolume,
       maxPrice: 1000
     });
+  },
+  
+  async getRealTimeQuotes(symbols: string[]) {
+    // Get real-time quotes for multiple symbols
+    const quotes = await Promise.all(
+      symbols.map(async (symbol) => {
+        try {
+          const quote = await twelvedata.getRealTimeQuote(symbol);
+          return quote;
+        } catch (error) {
+          console.log(`Failed to get quote for ${symbol}:`, error);
+          return null;
+        }
+      })
+    );
+    return quotes.filter(q => q !== null);
+  },
+  
+  async getHistoricalAverageVolume(symbol: string, days: number = 30) {
+    try {
+      // Get historical data for the specified number of days
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      
+      const data = await twelvedata.getHistoricalData(
+        symbol,
+        startDate.toISOString().split('T')[0],
+        endDate.toISOString().split('T')[0]
+      );
+      
+      if (!data || data.length === 0) {
+        return 0;
+      }
+      
+      // Calculate average volume
+      const totalVolume = data.reduce((sum: number, bar: any) => {
+        return sum + (parseInt(bar.volume) || 0);
+      }, 0);
+      
+      return Math.round(totalVolume / data.length);
+    } catch (error) {
+      console.log(`Failed to get average volume for ${symbol}:`, error);
+      return 0;
+    }
   }
 };
