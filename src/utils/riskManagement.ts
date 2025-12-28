@@ -83,7 +83,7 @@ export class AutomatedTradingEngine {
     try {
       // Execute all API calls in parallel but handle errors individually
       const [chartResult, newsResult, volatilityResult] = await Promise.allSettled([
-        this.analyzeChartPatterns(symbol, currentPrice),
+        this.analyzeChartPatterns(symbol, currentPrice, stockData),
         this.validateNewsCatalyst(symbol),
         this.calculateVolatility(symbol, stockData)
       ]);
@@ -262,23 +262,21 @@ export class AutomatedTradingEngine {
   }
 
   /**
-   * REAL CHART PATTERN ANALYSIS: Using Alpaca Technical Data
-   * DISABLED: Alpaca integration removed after Finviz migration
+   * REAL CHART PATTERN ANALYSIS: Using Finviz/Twelve Data Technical Data
    */
-  private async analyzeChartPatterns(symbol: string, currentPrice: number) {
+  private async analyzeChartPatterns(symbol: string, currentPrice: number, stockData?: any) {
     try {
-      // DISABLED: Alpaca integration removed
-      // const technicals = await alpaca.getTechnicalIndicators(symbol);
-      const technicals = null; // Placeholder
-      const latestTech = technicals || {};
+      // Use technical data from stockData if provided (from stock-data API)
+      const latestTech = stockData || {};
       
       let bullishSignals = 0;
       let bearishSignals = 0;
       
       // 1. SMA Analysis (Strong bullish if above all SMAs)
-      const sma20 = latestTech.sma20 || 0;
-      const sma50 = latestTech.sma50 || 0;
-      const sma200 = latestTech.sma200 || 0;
+      // Try multiple field names for compatibility
+      const sma20 = latestTech.SMA_20 || latestTech.sma20 || 0;
+      const sma50 = latestTech.SMA_50 || latestTech.sma50 || 0;
+      const sma200 = latestTech.SMA_200 || latestTech.sma200 || 0;
       
       if (sma20 > 0 && currentPrice > sma20) bullishSignals++;
       if (sma50 > 0 && currentPrice > sma50) bullishSignals++;

@@ -8,6 +8,7 @@ import { scoringEngine, type StockData } from '@/utils/scoringEngine';
 import { computePredictiveSignals } from '@/utils/predictiveSignals';
 import { getCompanyFundamentals } from '@/utils/alphaVantageApi';
 import { getFinvizClient } from '@/utils/finviz-api';
+import { twelvedata } from '@/utils/twelvedata';
 
 // Create a comprehensive Alpaca client wrapper for enhanced methods
 const alpacaEnhanced = {
@@ -693,18 +694,61 @@ async function getEnhancedStockData(symbol: string, screenData?: any, strategy: 
  * - Quality over quantity approach (top 10 stocks)
  * - Real-time validation prevents stale/declining stock signals
  */
+/**
+ * Enrich Finviz stocks with average volume from Twelve Data
+ * This fixes the relativeVolume = 0 issue
+ */
+async function enrichWithAverageVolume(stocks: any[]): Promise<any[]> {
+  console.log(`📊 Enriching ${stocks.length} stocks with average volume data...`);
+  
+  const enrichedStocks = await Promise.all(
+    stocks.map(async (stock) => {
+      try {
+        const symbol = stock.symbol || stock.ticker;
+        if (!symbol) return stock;
+        
+        // Fetch average volume from Twelve Data using historical data
+        const avgVolume = await twelvedata.getHistoricalAverageVolume(symbol, 30);
+        
+        if (avgVolume > 0 && avgVolume !== stock.volume) {
+          const relativeVolume = stock.volume / avgVolume;
+          console.log(`✅ ${symbol}: Avg volume ${avgVolume.toLocaleString()}, RelVol ${relativeVolume.toFixed(2)}x`);
+          
+          return {
+            ...stock,
+            avgVolume,
+            relativeVolume
+          };
+        } else {
+          console.log(`⚠️ ${symbol}: Could not get valid avg volume (got ${avgVolume}), keeping relVol at ${stock.relativeVolume || 0}`);
+        }
+        
+        return stock;
+      } catch (error) {
+        console.log(`⚠️ Could not fetch avg volume for ${stock.symbol || stock.ticker}:`, error);
+        return stock;
+      }
+    })
+  );
+  
+  return enrichedStocks;
+}
+
 async function getMomentumStocks(strategy: string, filters: ScanFilters): Promise<any[]> {
   try {
     console.log('Discovering fresh momentum stocks from market-wide screening...')
 
     // Get dynamically discovered stocks
-    const premarketMovers = await fetchPremarketMovers(strategy, filters)
+    let premarketMovers = await fetchPremarketMovers(strategy, filters)
     console.log(`Discovered ${premarketMovers.length} fresh momentum candidates`)
 
     if (premarketMovers.length === 0) {
       console.log('No momentum movers found - returning empty results')
       return []
     }
+    
+    // Finviz already provides avgVolume and relativeVolume - no need for Twelve Data enrichment
+    console.log(`✅ Using Finviz average volume data (avoiding Twelve Data rate limits)`)
 
     const qualifiedStocks: { stock: any; score: number; fundamentals?: any }[] = []
 

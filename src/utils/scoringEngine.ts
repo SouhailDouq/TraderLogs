@@ -428,8 +428,10 @@ export class ProfessionalScoringEngine {
   private calculateVolumeAndFloatScore(relativeVolume: number, volume: number, float: number, stockData: StockData, strategy: TradingStrategy, breakdown: ScoreBreakdown): number {
     let score = 0
 
-    // 1. Relative Volume (Max 15 points)
-    if (relativeVolume > 0) {
+    // 1. Volume Scoring (Max 15 points)
+    // Use relative volume if available (>1), otherwise use absolute volume thresholds
+    if (relativeVolume > 1) {
+      // Relative volume available - use it
       if (relativeVolume >= 10) {
         score += 15
         breakdown.signals.push(`Extreme volume (${relativeVolume.toFixed(1)}x) - massive interest`)
@@ -442,8 +444,24 @@ export class ProfessionalScoringEngine {
       } else if (relativeVolume >= 1.5) {
         score += 5
         breakdown.signals.push(`Good volume (${relativeVolume.toFixed(1)}x)`)
+      }
+    } else {
+      // Relative volume not available - use absolute volume thresholds
+      // These thresholds align with momentum breakout patterns
+      if (volume >= 10_000_000) {
+        score += 15
+        breakdown.signals.push(`Very high volume (${(volume / 1_000_000).toFixed(1)}M)`)
+      } else if (volume >= 5_000_000) {
+        score += 12
+        breakdown.signals.push(`High volume (${(volume / 1_000_000).toFixed(1)}M)`)
+      } else if (volume >= 2_000_000) {
+        score += 8
+        breakdown.signals.push(`Good volume (${(volume / 1_000_000).toFixed(1)}M)`)
+      } else if (volume >= 1_000_000) {
+        score += 5
+        breakdown.signals.push(`Adequate volume (${(volume / 1_000_000).toFixed(1)}M)`)
       } else {
-        breakdown.warnings.push(`Low relative volume (${relativeVolume.toFixed(1)}x)`)
+        breakdown.warnings.push(`Low volume (${(volume / 1_000_000).toFixed(1)}M)`)
       }
     }
 

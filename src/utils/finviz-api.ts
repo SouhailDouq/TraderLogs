@@ -150,41 +150,150 @@ export class FinvizAPIClient {
     try {
       const filterString = filters.join(',');
       
-      console.log(`📊 Fetching Finviz screener (overview + technical): ${filters.join(', ')}`);
+      console.log(`📊 Fetching Finviz screener with HTML parsing for Rel Volume`);
       
-      // Fetch BOTH views in parallel to get complete data
-      const [overviewResponse, technicalResponse] = await Promise.all([
-        fetch(`${this.screenerUrl}?v=111&f=${filterString}&auth=${this.authToken}`),
-        fetch(`${this.screenerUrl}?v=171&f=${filterString}&auth=${this.authToken}`)
-      ]);
+      // Fetch HTML page to get Rel Volume data (not available in CSV)
+      const htmlUrl = `https://finviz.com/screener.ashx?v=111&f=${filterString}&auth=${this.authToken}`;
+      const htmlResponse = await fetch(htmlUrl);
       
-      if (!overviewResponse.ok || !technicalResponse.ok) {
-        throw new Error(`Finviz API error: ${overviewResponse.status} or ${technicalResponse.status}`);
+      if (!htmlResponse.ok) {
+        throw new Error(`Finviz API error: ${htmlResponse.status}`);
       }
       
-      const [overviewText, technicalText] = await Promise.all([
-        overviewResponse.text(),
-        technicalResponse.text()
-      ]);
+      const htmlText = await htmlResponse.text();
       
-      // Parse both CSVs
-      const overviewStocks = this.parseCSV(overviewText);
-      const technicalStocks = this.parseCSV(technicalText);
+      // Parse HTML table to extract stock data including Rel Volume
+      const stocks = await this.parseHTMLTable(htmlText);
       
-      console.log(`✅ Finviz returned ${overviewStocks.length} stocks (merged overview + technical)`);
+      // If HTML parsing failed, fall back to CSV export with BOTH views
+      if (stocks.length === 0) {
+        console.log('⚠️ HTML parsing failed, falling back to CSV export (overview + technical)');
+        
+        // Fetch BOTH overview (v=111) and technical (v=171) views to get complete data
+        const [overviewResponse, technicalResponse] = await Promise.all([
+          fetch(`${this.screenerUrl}?v=111&f=${filterString}&auth=${this.authToken}`),
+          fetch(`${this.screenerUrl}?v=171&f=${filterString}&auth=${this.authToken}`)
+        ]);
+        
+        const [overviewText, technicalText] = await Promise.all([
+          overviewResponse.text(),
+          technicalResponse.text()
+        ]);
+        
+        // Parse both CSVs
+        const overviewStocks = this.parseCSV(overviewText);
+        const technicalStocks = this.parseCSV(technicalText);
+        
+        console.log(`✅ Finviz CSV returned ${overviewStocks.length} stocks (merged overview + technical)`);
+        
+        // Merge the data - technical view has SMAs/RSI, overview has other data
+        const mergedStocks = overviewStocks.map((overviewStock, index) => {
+          const technicalStock = technicalStocks[index] || {};
+          return { ...overviewStock, ...technicalStock };
+        });
+        
+        return mergedStocks.map(stock => this.convertToStandardFormat(stock));
+      }
       
-      // Merge the data - technical view has SMAs/RSI, overview has Avg Volume
-      const mergedStocks = overviewStocks.map((overviewStock, index) => {
-        const technicalStock = technicalStocks[index] || {};
-        return { ...overviewStock, ...technicalStock };
-      });
+      console.log(`✅ Finviz returned ${stocks.length} stocks from HTML table`);
       
       // Convert all stocks to standard format with proper field names
-      return mergedStocks.map(stock => this.convertToStandardFormat(stock));
+      return stocks.map(stock => this.convertToStandardFormat(stock));
     } catch (error) {
       console.error('❌ Error fetching Finviz screener:', error);
       throw error;
     }
+  }
+
+  /**
+   * Parse HTML table from Finviz screener page
+   * This gets us the Rel Volume data that's not in CSV exports
+   * 
+   * Fallback: If HTML parsing fails, use CSV export
+   */
+  private async parseHTMLTable(html: string): Promise<FinvizStock[]> {
+    const stocks: FinvizStock[] = [];
+    
+    try {
+      // Finviz uses different table structures, try multiple patterns
+      
+      // Pattern 1: Look for the screener table by ID or class
+      let tableMatch = html.match(/<table[^>]*(?:id="screener-table"|class="[^"]*screener[^"]*")[^>]*>([\s\S]*?)<\/table>/i);
+      
+      // Pattern 2: Look for any table with ticker data
+      if (!tableMatch) {
+        tableMatch = html.match(/<table[^>]*>([\s\S]*?)<\/table>/i);
+      }
+      
+      if (!tableMatch) {
+        console.log('⚠️ Could not find any table in HTML, falling back to CSV');
+        return stocks;
+      }
+      
+      const tableContent = tableMatch[0];
+      
+      // Extract all rows
+      const allRows = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+      
+      if (allRows.length < 2) {
+        console.log('⚠️ Not enough rows in table, falling back to CSV');
+        return stocks;
+      }
+      
+      // First row should be headers
+      const headerRow = allRows[0];
+      if (!headerRow) {
+        console.log('⚠️ No header row found');
+        return stocks;
+      }
+      
+      const headers: string[] = [];
+      const headerCells = headerRow.match(/<t[dh][^>]*>(.*?)<\/t[dh]>/gi) || [];
+      
+      headerCells.forEach(cell => {
+        const text = cell.replace(/<[^>]+>/g, '').trim();
+        if (text) headers.push(text);
+      });
+      
+      console.log(`📋 Found ${headers.length} columns:`, headers.slice(0, 10).join(', '));
+      
+      // Parse data rows (skip header row)
+      for (let i = 1; i < allRows.length; i++) {
+        const row = allRows[i];
+        const cells = row.match(/<td[^>]*>(.*?)<\/td>/gi) || [];
+        
+        if (cells.length === 0) continue;
+        
+        const stock: any = {};
+        cells.forEach((cell, index) => {
+          if (index >= headers.length) return;
+          
+          // Extract text content, removing HTML tags
+          let value = cell.replace(/<[^>]+>/g, '').trim();
+          
+          // Clean up special characters
+          value = value.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+          
+          const header = headers[index];
+          if (header && value) {
+            stock[header] = value;
+          }
+        });
+        
+        // Only add if we have a ticker
+        if (stock.Ticker || stock.Symbol) {
+          if (!stock.Ticker && stock.Symbol) stock.Ticker = stock.Symbol;
+          stocks.push(stock as FinvizStock);
+        }
+      }
+      
+      console.log(`✅ Parsed ${stocks.length} stocks from HTML table`);
+      
+    } catch (error) {
+      console.error('❌ Error parsing HTML table:', error);
+    }
+    
+    return stocks;
   }
 
   /**
@@ -277,10 +386,28 @@ export class FinvizAPIClient {
     const change = (price * changePercent) / 100;
     
     const volume = this.parseVolume(stock.Volume || '0');
-    const avgVolume = this.parseVolume(stock['Avg Volume'] || '0');
-    // Finviz provides 'Rel Volume' directly, or calculate it
+    
+    // Finviz provides 'Rel Volume' directly - use it if available
     const relVolumeStr = stock['Rel Volume'] || '';
-    const relativeVolume = relVolumeStr ? parseFloat(relVolumeStr) : (avgVolume > 0 ? volume / avgVolume : 0);
+    let relativeVolume = 0;
+    let avgVolume = 0;
+    
+    if (relVolumeStr && relVolumeStr !== '-') {
+      // Finviz provides relative volume directly (e.g., "2.45")
+      relativeVolume = parseFloat(relVolumeStr);
+      // Calculate avgVolume from relativeVolume if we have it
+      if (relativeVolume > 0 && volume > 0) {
+        avgVolume = Math.round(volume / relativeVolume);
+      }
+    } else {
+      // Fallback: try to get avgVolume from Finviz (rarely available in CSV)
+      avgVolume = this.parseVolume(stock['Avg Volume'] || '0');
+      if (avgVolume > 0 && volume > 0) {
+        relativeVolume = volume / avgVolume;
+      }
+    }
+    
+    console.log(`📊 ${stock.Ticker}: Vol=${volume.toLocaleString()}, RelVol=${relativeVolume.toFixed(2)}x, AvgVol=${avgVolume.toLocaleString()}`);
     
     // Parse technical indicators
     // Finviz v=171 returns SMAs as PERCENTAGES (distance from SMA), not actual prices
