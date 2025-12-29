@@ -7,6 +7,13 @@ export async function POST(request: NextRequest) {
     const { symbol, score, currentPrice, stockData, riskParams } = body
 
     console.log('🔍 TRADE VALIDATION START:', symbol, 'at', currentPrice, 'score:', score)
+    console.log('📊 Validation received stockData:', {
+      sma20: stockData?.sma20,
+      sma50: stockData?.sma50,
+      sma200: stockData?.sma200,
+      rsi: stockData?.rsi,
+      week52High: stockData?.week52High
+    })
     
     if (!symbol || score === undefined || score === null || !currentPrice) {
       console.error('❌ Missing required parameters:', { symbol, score, currentPrice })

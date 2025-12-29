@@ -273,17 +273,22 @@ export class AutomatedTradingEngine {
       let bearishSignals = 0;
       
       // 1. SMA Analysis (Strong bullish if above all SMAs)
-      // Try multiple field names for compatibility
+      // Try multiple field names for compatibility with both APIs
       const sma20 = latestTech.SMA_20 || latestTech.sma20 || 0;
       const sma50 = latestTech.SMA_50 || latestTech.sma50 || 0;
       const sma200 = latestTech.SMA_200 || latestTech.sma200 || 0;
+      
+      console.log(`🔍 Chart Analysis using SMAs: SMA20=${sma20}, SMA50=${sma50}, SMA200=${sma200}, Price=${currentPrice}`);
       
       if (sma20 > 0 && currentPrice > sma20) bullishSignals++;
       if (sma50 > 0 && currentPrice > sma50) bullishSignals++;
       if (sma200 > 0 && currentPrice > sma200) bullishSignals++;
       
       // SMA alignment (bullish when SMA20 > SMA50 > SMA200)
-      if (sma20 > sma50 && sma50 > sma200) bullishSignals++;
+      if (sma20 > 0 && sma50 > 0 && sma200 > 0 && sma20 > sma50 && sma50 > sma200) {
+        bullishSignals++;
+        console.log(`✅ Perfect SMA alignment detected`);
+      }
       
       // 2. RSI Analysis
       const rsi = latestTech.rsi || 50;
@@ -293,49 +298,21 @@ export class AutomatedTradingEngine {
         bullishSignals++; // Bullish momentum without overbought
       }
       
-      // 3. 52-Week High Analysis
-      let high52Week = 0; // Alpaca doesn't provide 52-week high directly
+      // 3. 52-Week High Analysis - Use data from stockData if available
+      let high52Week = latestTech.week52High || latestTech['52WeekHigh'] || 0;
       let proximityToHigh = 0;
       
       if (high52Week > 0) {
         proximityToHigh = (currentPrice / high52Week) * 100;
+        console.log(`✅ Using 52-week high from stockData: $${high52Week.toFixed(2)}, proximity: ${proximityToHigh.toFixed(1)}%`);
         if (proximityToHigh > 90) {
           bullishSignals++; // Near 52-week high (momentum)
         }
       } else {
-        // Fallback: Calculate 52-week high from historical data
-        console.log(`⚠️ No 52-week high data for ${symbol}, fetching from historical data...`);
-        try {
-          const oneYearAgo = new Date();
-          oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-          // DISABLED: Alpaca integration removed
-          // const bars = await alpaca.getHistoricalBars(...);
-          const bars: any[] = []; // Placeholder
-          const historicalData = bars.map((bar: any) => ({
-            date: new Date(bar.t).toISOString().split('T')[0],
-            close: bar.c,
-            high: bar.h,
-            low: bar.l
-          }));
-          
-          if (historicalData && historicalData.length > 0) {
-            high52Week = Math.max(...historicalData.map((d: any) => d.high));
-            proximityToHigh = (currentPrice / high52Week) * 100;
-            console.log(`✅ Calculated 52-week high: $${high52Week.toFixed(2)}, proximity: ${proximityToHigh.toFixed(1)}%`);
-            
-            if (proximityToHigh > 90) {
-              bullishSignals++; // Near 52-week high (momentum)
-            }
-          } else {
-            // Final fallback
-            high52Week = currentPrice * 1.1;
-            proximityToHigh = (currentPrice / high52Week) * 100;
-          }
-        } catch (error) {
-          console.log(`⚠️ Failed to fetch historical data for ${symbol}, using approximation`);
-          high52Week = currentPrice * 1.1;
-          proximityToHigh = (currentPrice / high52Week) * 100;
-        }
+        // Fallback: Use approximation if no data available
+        console.log(`⚠️ No 52-week high data for ${symbol}, using approximation`);
+        high52Week = currentPrice * 1.1;
+        proximityToHigh = (currentPrice / high52Week) * 100;
       }
       
       // 4. MACD Analysis

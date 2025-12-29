@@ -44,6 +44,16 @@ export default function TradeValidationPanel({ selectedStock, onTradeDecision, o
             relativeVolume: selectedStock.relativeVolume || 1,
             changePercent: selectedStock.changePercent || 0,
             volume: selectedStock.volume || 0,
+            // Pass SMA and technical data for consistent analysis
+            sma20: selectedStock.sma20 || 0,
+            sma50: selectedStock.sma50 || 0,
+            sma200: selectedStock.sma200 || 0,
+            SMA_20: selectedStock.sma20 || 0,
+            SMA_50: selectedStock.sma50 || 0,
+            SMA_200: selectedStock.sma200 || 0,
+            rsi: selectedStock.rsi || 50,
+            week52High: selectedStock.week52High || 0,
+            '52WeekHigh': selectedStock.week52High || 0,
             gapAnalysis: selectedStock.gapAnalysis,
             momentumCriteria: selectedStock.momentumCriteria
           },

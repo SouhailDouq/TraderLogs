@@ -113,17 +113,35 @@ You can still analyze this stock by entering data manually.`,
     // Extract data from Finviz or Twelve Data
     const price = finvizData ? finvizData.price : (realTimeData?.close || 0);
     const changePercent = finvizData ? finvizData.changePercent : (realTimeData?.change_p || 0);
-    const currentVolume = finvizData ? finvizData.volume : (realTimeData?.volume || 0);
+    let currentVolume = finvizData ? finvizData.volume : (realTimeData?.volume || 0);
     
-    // Get Avg Volume from Finviz if available, otherwise Twelve Data
+    // PRIORITY: Use Finviz RelVol if available (most reliable)
     let avgVolume = finvizData?.avgVolume || 0;
     let relativeVolume = finvizData?.relativeVolume || 0;
     
-    // If Finviz doesn't have avg volume, get it from Twelve Data
-    if (!avgVolume || avgVolume === 0) {
-      console.log(`📊 Fetching Avg Volume from Twelve Data (not in Finviz)...`);
+    // If current volume is 0 or missing, try to get it from Twelve Data intraday
+    if (currentVolume === 0 && !finvizData) {
+      console.log(`📊 Current volume is 0, fetching from Twelve Data intraday...`);
+      try {
+        const intradayData = await twelvedata.getIntradayData(symbol);
+        if (intradayData && intradayData.length > 0) {
+          // Sum up volume from all intraday bars for today
+          currentVolume = intradayData.reduce((sum, bar) => sum + (bar.volume || 0), 0);
+          console.log(`✅ Got current volume from intraday data: ${currentVolume.toLocaleString()}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Failed to fetch intraday volume:`, error);
+      }
+    }
+    
+    // Only use Twelve Data if BOTH avgVolume AND relativeVolume are missing from Finviz
+    // This prevents overriding Finviz's native RelVol with incorrect Twelve Data calculations
+    if ((!avgVolume || avgVolume === 0) && (!relativeVolume || relativeVolume === 0)) {
+      console.log(`📊 No volume data from Finviz, fetching from Twelve Data as fallback...`);
       avgVolume = await twelvedata.getHistoricalAverageVolume(symbol, 30);
       relativeVolume = avgVolume > 0 ? currentVolume / avgVolume : 0;
+    } else if (finvizData?.relativeVolume && finvizData.relativeVolume > 0) {
+      console.log(`✅ Using Finviz native RelVol: ${relativeVolume.toFixed(2)}x (most reliable)`);
     }
     
     console.log(`📊 Volume Analysis: Current=${currentVolume.toLocaleString()}, Avg=${avgVolume.toLocaleString()}, RelVol=${relativeVolume.toFixed(2)}x`);

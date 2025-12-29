@@ -353,7 +353,16 @@ export default function TradeAnalyzer() {
     const finalScore = data.score !== undefined ? data.score : setup.positionScore
     console.log('🎯 Final score for validation:', finalScore)
     
-    // Create stock object for validation
+    // Log what we received from API
+    console.log('📊 Frontend received from API:', {
+      sma20: data.sma20,
+      sma50: data.sma50,
+      sma200: data.sma200,
+      rsi: data.rsi,
+      week52High: data.week52High
+    })
+    
+    // Create stock object for validation with complete technical data
     const stockForValidation = {
       symbol: data.symbol,
       price: data.price,
@@ -361,6 +370,12 @@ export default function TradeAnalyzer() {
       changePercent: parseFloat(data.change?.replace('%', '') || '0'),
       volume: parseFloat(data.volume?.replace(/[,M]/g, '') || '0') * (data.volume?.includes('M') ? 1000000 : 1),
       relativeVolume: parseFloat(data.relVolume || '1'),
+      // Pass through SMA data from API response
+      sma20: parseFloat(data.sma20 || '0'),
+      sma50: parseFloat(data.sma50 || '0'),
+      sma200: parseFloat(data.sma200 || '0'),
+      rsi: parseFloat(data.rsi || '50'),
+      week52High: parseFloat(data.week52High || '0'),
       gapAnalysis: {
         gapPercent: parseFloat(data.change?.replace('%', '') || '0'),
         gapType: parseFloat(data.change?.replace('%', '') || '0') > 0 ? 'gap_up' : 'gap_down',
@@ -372,6 +387,14 @@ export default function TradeAnalyzer() {
         score: setup.positionScore
       }
     }
+    
+    console.log('📊 Frontend sending to validation:', {
+      sma20: stockForValidation.sma20,
+      sma50: stockForValidation.sma50,
+      sma200: stockForValidation.sma200,
+      rsi: stockForValidation.rsi,
+      week52High: stockForValidation.week52High
+    })
     
     setSelectedStockForValidation(stockForValidation)
   }
