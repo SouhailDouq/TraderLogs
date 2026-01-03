@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { IBKRParser } from '@/utils/ibkr';
-import { Trade } from '@/utils/trading212';
+import { Trade } from '@/utils/store';
 
 interface IBKRImportProps {
     onImport: (trades: Trade[]) => void;

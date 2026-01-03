@@ -159,6 +159,7 @@ export class TradeService {
             profitLoss: trade.profitLoss || 0,
             source,
             sourceId,
+            currency: trade.currency || null,
             // Position tracking fields
             positionOpenedAt: trade.positionOpenedAt ? new Date(trade.positionOpenedAt) : null,
             exitDeadline: trade.exitDeadline ? new Date(trade.exitDeadline) : null,

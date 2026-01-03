@@ -85,6 +85,7 @@ model Trade {
   source       String?  // 'CSV' or 'API'
   sourceId     String?  // Original ID from source (e.g., Trading212 order ID)
   broker       String?  // 'Trading212' or 'InteractiveBrokers' or 'Manual'
+  currency     String?  // Currency of the trade (USD, EUR, etc.)
   
   // Position tracking for open trades
   positionOpenedAt DateTime? // When position was opened

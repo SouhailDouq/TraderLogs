@@ -17,7 +17,7 @@ import PerformanceMetrics from '@/components/Performance/PerformanceMetrics';
 import { UnifiedStockData } from '@/services/marketstackService';
 import { useTrading212 } from '@/hooks/useTrading212';
 import IBKRImport from '@/components/Import/IBKRImport';
-import { Trade } from '@/utils/trading212';
+import { Trade } from '@/utils/store';
 import toast from 'react-hot-toast';
 
 export default function MonitorPage() {
@@ -185,23 +185,51 @@ export default function MonitorPage() {
     toast.success('API configuration cleared');
   };
 
-  // Handle IBKR Import
-  const handleIBKRImport = (importedTrades: Trade[]) => {
-    // Convert to Store Trade type (ensure ID exists)
-    const storeTrades: any[] = importedTrades.map((t, i) => ({
-      ...t,
-      id: t.id || `ibkr-${t.symbol}-${t.date}-${i}-${Date.now()}`,
-      profitLoss: t.profitLoss || 0,
-      // Ensure other required fields for Store Trade are present if needed
-      // Store Trade has: date, symbol, type, price, quantity, profitLoss, etc.
-      // IBKR Trade (from trading212.ts) has similar fields.
-    }));
+  // Handle IBKR Import - Save to database
+  const handleIBKRImport = async (importedTrades: Trade[]) => {
+    try {
+      setIsLoading(true);
+      
+      // Convert IBKR trades to database format
+      const tradesToSave = importedTrades.map((t) => ({
+        symbol: t.symbol,
+        type: t.type.toLowerCase(), // 'BUY' -> 'buy', 'SELL' -> 'sell'
+        quantity: t.quantity,
+        price: t.price,
+        date: t.date,
+        total: t.total,
+        fees: t.fees || null,
+        notes: t.notes || 'IBKR Import',
+        source: 'IBKR',
+        sourceId: `IBKR-${t.symbol}-${t.date}-${t.type}-${t.quantity}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+      }));
 
-    // Append new trades to existing ones
-    const newTrades = [...trades, ...storeTrades];
-    setTrades(newTrades);
-    toast.success(`Imported ${importedTrades.length} trades from IBKR`);
-    setShowIBKRImport(false);
+      // Save trades to database via API
+      const response = await fetch('/api/trades/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ trades: tradesToSave }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save trades to database');
+      }
+
+      const result = await response.json();
+      
+      toast.success(`Imported ${result.saved || importedTrades.length} trades from IBKR (${result.skipped || 0} duplicates skipped)`);
+      setShowIBKRImport(false);
+      
+      // Refresh trades from database
+      window.location.reload();
+    } catch (error) {
+      console.error('IBKR import error:', error);
+      toast.error(`Failed to import IBKR trades: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Fix hydration issue by ensuring component is mounted before showing time

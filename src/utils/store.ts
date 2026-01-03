@@ -26,6 +26,7 @@ export interface Trade {
   source?: string
   sourceId?: string
   broker?: string // 'Trading212' or 'InteractiveBrokers' or 'Manual'
+  currency?: string // Currency of the trade (USD, EUR, etc.)
   journal?: TradeJournal
   isOpen?: boolean // True if position is still open (not fully sold)
   position?: 'long' | 'short' | 'closed' // Position status
@@ -94,12 +95,14 @@ export interface TradeStore {
 // Function to analyze positions and mark open vs closed trades
 const analyzePositions = (trades: Trade[]): Trade[] => {
   console.log('=== Position Analysis Debug ===')
-  const positions: Record<string, { bought: number; sold: number; trades: Trade[] }> = {}
+  console.log(`📊 Total trades to analyze: ${trades.length}`)
+  
+  const positions: Record<string, { bought: number; sold: number; trades: Trade[]; buyTrades: Trade[]; sellTrades: Trade[] }> = {}
   
   // Group trades by symbol
   trades.forEach(trade => {
     if (!positions[trade.symbol]) {
-      positions[trade.symbol] = { bought: 0, sold: 0, trades: [] }
+      positions[trade.symbol] = { bought: 0, sold: 0, trades: [], buyTrades: [], sellTrades: [] }
     }
     positions[trade.symbol].trades.push(trade)
     
@@ -109,9 +112,94 @@ const analyzePositions = (trades: Trade[]): Trade[] => {
     
     if (isBuy) {
       positions[trade.symbol].bought += trade.quantity
+      positions[trade.symbol].buyTrades.push(trade)
     } else if (isSell) {
       positions[trade.symbol].sold += trade.quantity
+      positions[trade.symbol].sellTrades.push(trade)
     }
+  })
+  
+  // Calculate P&L for SELL trades by matching with BUY trades (FIFO)
+  Object.keys(positions).forEach(symbol => {
+    const position = positions[symbol]
+    const buyTrades = [...position.buyTrades].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    const sellTrades = [...position.sellTrades].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    
+    console.log(`\n📈 Processing ${symbol}: ${buyTrades.length} BUY trades, ${sellTrades.length} SELL trades`)
+    
+    // USD to EUR conversion rate (approximate, you can make this dynamic)
+    const USD_TO_EUR = 0.92
+    
+    let buyIndex = 0
+    let buyRemainingQty = buyTrades[0]?.quantity || 0
+    
+    sellTrades.forEach(sellTrade => {
+      let sellRemainingQty = sellTrade.quantity
+      let totalCost = 0
+      let totalFees = (sellTrade.fees || 0)
+      let matchedBuyTrades = 0
+      
+      // Match this sell with buy trades (FIFO) - use ORIGINAL prices before conversion
+      while (sellRemainingQty > 0 && buyIndex < buyTrades.length) {
+        const buyTrade = buyTrades[buyIndex]
+        const qtyToMatch = Math.min(sellRemainingQty, buyRemainingQty)
+        
+        totalCost += qtyToMatch * buyTrade.price
+        totalFees += (buyTrade.fees || 0) * (qtyToMatch / buyTrade.quantity)
+        matchedBuyTrades++
+        
+        sellRemainingQty -= qtyToMatch
+        buyRemainingQty -= qtyToMatch
+        
+        if (buyRemainingQty === 0) {
+          buyIndex++
+          buyRemainingQty = buyTrades[buyIndex]?.quantity || 0
+        }
+      }
+      
+      // If no matching buy trades found, this is a sell without a buy in the dataset
+      // Don't calculate P&L for these trades
+      if (matchedBuyTrades === 0) {
+        console.log(`⚠️ No matching BUY trades found for ${symbol} SELL on ${sellTrade.date}. Skipping P&L calculation.`)
+        return
+      }
+      
+      // Calculate P&L: (sell price * quantity) - cost - fees (all in original currency)
+      const sellRevenue = sellTrade.price * sellTrade.quantity
+      let calculatedPnL = sellRevenue - totalCost - totalFees
+      
+      // Convert USD to EUR if currency is USD
+      const currency = sellTrade.currency || 'EUR'
+      if (currency === 'USD') {
+        // Convert P&L from USD to EUR
+        const originalPnL = calculatedPnL
+        calculatedPnL = calculatedPnL * USD_TO_EUR
+        
+        console.log(`💱 Converting ${symbol} P&L from USD to EUR: $${originalPnL.toFixed(2)} → €${calculatedPnL.toFixed(2)}`)
+        
+        // Convert display amounts to EUR
+        sellTrade.price = sellTrade.price * USD_TO_EUR
+        sellTrade.total = (sellTrade.total || 0) * USD_TO_EUR
+        sellTrade.fees = (sellTrade.fees || 0) * USD_TO_EUR
+      }
+      
+      // Only override profitLoss if it's 0 (IBKR trades) or null
+      if (sellTrade.profitLoss === 0 || sellTrade.profitLoss === null || sellTrade.profitLoss === undefined) {
+        sellTrade.profitLoss = calculatedPnL
+        console.log(`💰 Calculated P&L for ${symbol} SELL: €${calculatedPnL.toFixed(2)}`)
+      }
+    })
+    
+    // Convert BUY trades from USD to EUR for display (AFTER P&L calculation)
+    buyTrades.forEach(buyTrade => {
+      const currency = buyTrade.currency || 'EUR'
+      if (currency === 'USD') {
+        console.log(`💱 Converting ${symbol} BUY display from USD to EUR: $${buyTrade.price.toFixed(2)} → €${(buyTrade.price * USD_TO_EUR).toFixed(2)}`)
+        buyTrade.price = buyTrade.price * USD_TO_EUR
+        buyTrade.total = (buyTrade.total || 0) * USD_TO_EUR
+        buyTrade.fees = (buyTrade.fees || 0) * USD_TO_EUR
+      }
+    })
   })
   
   // Log position analysis for August 22 OPEN trades
@@ -600,11 +688,34 @@ const parseCSVContent = (content: string): CSVTrade[] => {
         })
       }
 
+      // Parse date with better error handling
+      let parsedDate: string;
+      try {
+        const rawDate = row[timeField];
+        // Handle various date formats:
+        // - "2026-01-02;072229" (IBKR with semicolon)
+        // - "2026-01-02" (standard)
+        // - "01/02/2026" (US format)
+        let dateStr = rawDate;
+        if (rawDate.includes(';')) {
+          // IBKR format: "2026-01-02;072229" -> "2026-01-02"
+          dateStr = rawDate.split(';')[0];
+        }
+        const dateObj = new Date(dateStr);
+        if (isNaN(dateObj.getTime())) {
+          throw new Error(`Invalid date: ${rawDate}`);
+        }
+        parsedDate = dateObj.toISOString().split('T')[0];
+      } catch (error) {
+        console.error(`Failed to parse date at row ${index + 1}:`, row[timeField], error);
+        throw new Error(`Invalid date format in row ${index + 1}: "${row[timeField]}". Expected format: YYYY-MM-DD or MM/DD/YYYY`);
+      }
+
       // Create CSVTrade object with all required fields
       const trade: CSVTrade = {
         action: row[actionField].toLowerCase(),
         ticker: row[tickerField],
-        date: new Date(row[timeField]).toISOString().split('T')[0],
+        date: parsedDate,
         name: row[headerMap['Name']] || '',
         shares: shares,
         price: priceInEUR,

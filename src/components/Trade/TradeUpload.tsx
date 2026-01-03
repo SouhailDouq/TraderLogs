@@ -4,14 +4,16 @@ import { useState } from 'react'
 import { useTradeStore } from '@/utils/store'
 import { toast } from 'react-hot-toast'
 import LoadingOverlay from '@/components/ui/LoadingOverlay'
+import { IBKRParser } from '@/utils/ibkr'
 
-
+type ImportType = 'trading212' | 'ibkr'
 
 export default function TradeUpload() {
   const [dragActive, setDragActive] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingStep, setProcessingStep] = useState('')
   const [progress, setProgress] = useState(0)
+  const [importType, setImportType] = useState<ImportType>('trading212')
 
   const processCSV = useTradeStore(state => state.processCSV)
   const trades = useTradeStore(state => state.trades)
@@ -28,7 +30,7 @@ export default function TradeUpload() {
   }
 
   const processFile = async (file: File) => {
-    console.log('Processing file:', file.name, 'Type:', file.type)
+    console.log('Processing file:', file.name, 'Type:', file.type, 'Import type:', importType)
     
     if (file.type !== 'text/csv') {
       toast.error('Please upload a CSV file')
@@ -40,7 +42,7 @@ export default function TradeUpload() {
     setProcessingStep('Reading file...')
     
     // Show immediate feedback
-    toast.loading('Starting CSV import...', { id: 'csv-import' })
+    toast.loading(`Starting ${importType === 'ibkr' ? 'IBKR' : 'Trading 212'} CSV import...`, { id: 'csv-import' })
 
     try {
       console.log('Starting file processing...')
@@ -48,6 +50,85 @@ export default function TradeUpload() {
       // Process CSV content
       const content = await file.text()
       console.log('File content length:', content.length)
+
+      // Handle IBKR import differently
+      if (importType === 'ibkr') {
+        setProcessingStep('Parsing IBKR CSV...')
+        setProgress(30)
+        
+        const ibkrTrades = IBKRParser.parseCSV(content)
+        
+        if (ibkrTrades.length === 0) {
+          toast.dismiss('csv-import')
+          toast.error('No trades found in IBKR CSV. Please check the file format.')
+          setIsProcessing(false)
+          return
+        }
+
+        // Check for future dates (likely a mistake in Flex Query date range)
+        const now = new Date()
+        const futureTrades = ibkrTrades.filter(t => new Date(t.date) > now)
+        if (futureTrades.length > 0) {
+          const futureDate = new Date(futureTrades[0].date).toLocaleDateString()
+          const confirmed = window.confirm(
+            `⚠️ Warning: ${futureTrades.length} trade(s) have future dates (e.g., ${futureDate}).\n\n` +
+            `This is likely a mistake in your IBKR Flex Query date range.\n\n` +
+            `These trades won't appear on the calendar until that date.\n\n` +
+            `Do you want to continue importing anyway?`
+          )
+          if (!confirmed) {
+            toast.dismiss('csv-import')
+            toast.error('Import cancelled. Please check your IBKR Flex Query date range.')
+            setIsProcessing(false)
+            return
+          }
+        }
+
+        setProcessingStep('Saving trades to database...')
+        setProgress(60)
+
+        // Save to database via API
+        const response = await fetch('/api/trades/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trades: ibkrTrades.map(t => ({
+              symbol: t.symbol,
+              type: t.type.toLowerCase(),
+              quantity: t.quantity,
+              price: t.price,
+              date: t.date,
+              total: t.total,
+              fees: t.fees || null,
+              notes: t.notes || 'IBKR Import',
+              currency: t.currency || 'USD',
+              source: 'IBKR',
+              sourceId: `IBKR-${t.symbol}-${t.date}-${t.type}-${t.quantity}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+            }))
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to save IBKR trades to database')
+        }
+
+        const result = await response.json()
+        
+        setProgress(100)
+        setProcessingStep('Complete!')
+        
+        toast.dismiss('csv-import')
+        toast.success(`Imported ${result.saved} IBKR trades (${result.skipped} duplicates skipped). Refreshing page...`)
+        
+        // Simple page reload to refresh calendar with new trades
+        setTimeout(() => {
+          window.location.reload()
+        }, 1000)
+        
+        return
+      }
+
+      // Original Trading 212 CSV processing
       console.log('File content preview:', content.substring(0, 500))
       console.log('Full content (first 1000 chars):', content.substring(0, 1000))
       
@@ -123,7 +204,7 @@ export default function TradeUpload() {
           if (allTradesData.trades && Array.isArray(allTradesData.trades)) {
             const mappedTrades = allTradesData.trades.map((dbTrade: any) => ({
               id: dbTrade.id,
-              date: dbTrade.date,
+              date: dbTrade.date.split('T')[0], // Normalize ISO date to yyyy-MM-dd
               symbol: dbTrade.symbol,
               type: dbTrade.type,
               name: dbTrade.name || '',
@@ -220,6 +301,42 @@ export default function TradeUpload() {
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">Import Trades</h2>
             <p className="text-sm text-gray-600 dark:text-gray-400">Upload your CSV file to import trading data</p>
           </div>
+        </div>
+
+        {/* Import Type Selector */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            Select Broker
+          </label>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setImportType('trading212')}
+              disabled={isProcessing}
+              className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
+                importType === 'trading212'
+                  ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg scale-105'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              Trading 212
+            </button>
+            <button
+              onClick={() => setImportType('ibkr')}
+              disabled={isProcessing}
+              className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${
+                importType === 'ibkr'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-lg scale-105'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              Interactive Brokers
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            {importType === 'trading212' 
+              ? '📊 Upload Trading 212 CSV export file' 
+              : '📊 Upload IBKR Flex Query or Activity Statement CSV'}
+          </p>
         </div>
       
       <div className="space-y-6">
