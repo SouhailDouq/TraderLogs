@@ -6,6 +6,19 @@ import TradeValidationPanel from '@/components/TradeValidationPanel'
 import TradingInstructions from '@/components/TradingInstructions'
 import MarketConditionIndicator from '@/components/MarketConditionIndicator'
 
+interface MarketContext {
+  vix: number
+  vixLevel: 'LOW' | 'NORMAL' | 'ELEVATED' | 'HIGH' | 'EXTREME'
+  spyPrice: number
+  spyChange: number
+  spyChangePercent: number
+  spyTrend: 'bullish' | 'bearish' | 'neutral'
+  marketCondition: 'trending' | 'volatile' | 'choppy'
+  tradingRecommendation: 'AGGRESSIVE' | 'NORMAL' | 'CAUTIOUS' | 'AVOID'
+  reasoning: string[]
+  timestamp: number
+}
+
 interface PremarketStock {
   symbol: string
   price: number
@@ -98,6 +111,8 @@ export default function PremarketScanner() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [selectedStrategy, setSelectedStrategy] = useState<TradingStrategy>('momentum')
   const [error, setError] = useState<string | null>(null)
+  const [marketContext, setMarketContext] = useState<MarketContext | null>(null)
+  const [tradingBlocked, setTradingBlocked] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
   const [isInitialized, setIsInitialized] = useState(false)
   const [selectedStock, setSelectedStock] = useState<PremarketStock | null>(null)
@@ -317,6 +332,21 @@ export default function PremarketScanner() {
 
       if (response.ok) {
         const data = await response.json()
+        
+        // Handle market context and trading blocked status
+        if (data.marketContext) {
+          setMarketContext(data.marketContext)
+        }
+        
+        if (data.blocked) {
+          setTradingBlocked(true)
+          setStocks([])
+          setError(data.message || 'Trading blocked due to extreme market conditions')
+          return
+        } else {
+          setTradingBlocked(false)
+        }
+        
         const processedStocks = (data.stocks || []).map((stock: PremarketStock) => ({
           ...stock,
           // Add price action classification based on change percentage
@@ -658,6 +688,51 @@ export default function PremarketScanner() {
             </div>
           )}
         </div>
+
+        {/* Market Context Banner */}
+        {marketContext && (
+          <div className={`mb-6 rounded-lg shadow-lg p-4 border-2 transition-colors ${
+            marketContext.tradingRecommendation === 'AGGRESSIVE' ? 'bg-green-50 border-green-500' :
+            marketContext.tradingRecommendation === 'NORMAL' ? 'bg-blue-50 border-blue-400' :
+            marketContext.tradingRecommendation === 'CAUTIOUS' ? 'bg-yellow-50 border-yellow-500' :
+            'bg-red-50 border-red-500'
+          }`}>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl">
+                  {marketContext.tradingRecommendation === 'AGGRESSIVE' ? '🚀' :
+                   marketContext.tradingRecommendation === 'NORMAL' ? '📊' :
+                   marketContext.tradingRecommendation === 'CAUTIOUS' ? '⚠️' : '🚫'}
+                </span>
+                <div>
+                  <h3 className={`text-xl font-bold ${
+                    marketContext.tradingRecommendation === 'AGGRESSIVE' ? 'text-green-700' :
+                    marketContext.tradingRecommendation === 'NORMAL' ? 'text-blue-700' :
+                    marketContext.tradingRecommendation === 'CAUTIOUS' ? 'text-yellow-700' :
+                    'text-red-700'
+                  }`}>
+                    {marketContext.tradingRecommendation} MODE
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    VIX: {marketContext.vix.toFixed(1)} ({marketContext.vixLevel}) | 
+                    SPY: {marketContext.spyChangePercent >= 0 ? '+' : ''}{marketContext.spyChangePercent.toFixed(2)}% ({marketContext.spyTrend})
+                  </p>
+                </div>
+              </div>
+              {marketContext.reasoning && marketContext.reasoning.length > 0 && (
+                <div className="text-sm text-gray-700 max-w-md">
+                  <span className="font-semibold">Market Analysis:</span> {marketContext.reasoning[0]}
+                </div>
+              )}
+            </div>
+            {tradingBlocked && (
+              <div className="mt-4 p-3 bg-red-100 border border-red-300 rounded-lg">
+                <p className="text-red-800 font-bold">🚫 TRADING BLOCKED</p>
+                <p className="text-red-700 text-sm">Market conditions are too volatile. No entries recommended.</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Trading Instructions */}
         <div className="mb-8">

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { twelvedata } from '@/utils/twelvedata'
-import { scoringEngine, type StockData as ScoringStockData } from '@/utils/scoringEngine';
 import { getFinvizClient, type ScreenerStock } from '@/utils/finviz-api';
 import { apiCache } from '@/utils/apiCache';
 import { calculateStrategyScore, TRADING_STRATEGIES } from '@/utils/tradingStrategies';
+import { calculateEntryPrice } from '@/utils/entryPriceCalculator';
+import { getMarketContext } from '@/utils/marketContext';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -223,6 +224,29 @@ You can still analyze this stock by entering data manually.`,
     console.log(`📊 Scoring Signals:`, scoring.signals);
     console.log(`⚠️ Scoring Warnings:`, scoring.warnings);
     
+    // Calculate entry price recommendations
+    const stockForEntry = {
+      symbol: symbol.toUpperCase(),
+      price: price,
+      sma20: techData.SMA_20,
+      sma50: techData.SMA_50,
+      sma200: techData.SMA_200,
+      high52w: techData['52WeekHigh'],
+      low52w: techData['52WeekLow'],
+      rsi: techData.RSI_14,
+      volume: currentVolume,
+      avgVolume: avgVolume,
+      changePercent: changePercent,
+      float: finvizData?.float
+    };
+    
+    const entryPriceData = calculateEntryPrice(stockForEntry);
+    console.log(`💰 Entry Price: $${entryPriceData.entryPrice.toFixed(2)} | Stop: $${entryPriceData.stopLoss.toFixed(2)} | Target: $${entryPriceData.target1.toFixed(2)} | R:R ${entryPriceData.riskReward.toFixed(2)}:1`);
+    
+    // Get market context
+    const marketContext = await getMarketContext();
+    console.log(`🌍 Market Context: ${marketContext.tradingRecommendation} | VIX: ${marketContext.vix.toFixed(1)} | SPY: ${marketContext.spyChangePercent >= 0 ? '+' : ''}${marketContext.spyChangePercent.toFixed(2)}%`);
+    
     // Use signals and warnings from unified scoring
     const analysisReasoning = [
       ...scoring.signals,
@@ -290,11 +314,18 @@ You can still analyze this stock by entering data manually.`,
       macdSignal: null,
       macdHistogram: null,
       
-      // Market context
+      // Entry price recommendations
+      entryPrice: entryPriceData,
+      
+      // Market context (real VIX & SPY data)
       marketContext: {
-        vix: null, // Would need separate VIX call
-        spyTrend: null, // Would need SPY analysis
-        marketCondition: score >= 70 ? 'bullish' : score <= 40 ? 'bearish' : 'neutral'
+        vix: marketContext.vix,
+        vixLevel: marketContext.vixLevel,
+        spyChange: marketContext.spyChangePercent,
+        spyTrend: marketContext.spyTrend,
+        marketCondition: marketContext.marketCondition,
+        tradingRecommendation: marketContext.tradingRecommendation,
+        reasoning: marketContext.reasoning
       },
       
       // Data quality info with detailed source tracking

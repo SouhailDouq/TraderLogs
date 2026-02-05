@@ -10,7 +10,6 @@ import CurrencySwitcher from '@/components/CurrencySwitcher'
 import { StrategySelector, TradingStrategy } from '@/components/Strategy/StrategySelector'
 import TradeValidationPanel from '@/components/TradeValidationPanel'
 import MarketConditionIndicator from '@/components/MarketConditionIndicator'
-import { scoringEngine, type StockData as ScoringStockData } from '@/utils/scoringEngine'
 // Removed direct API import - now using backend route
 
 interface StockData {
@@ -30,6 +29,20 @@ interface StockData {
     avgVolume?: number
     isPremarket?: boolean
     marketStatus?: string
+  }
+  entryPrice?: {
+    entryPrice: number
+    stopLoss: number
+    target1: number
+    target2: number
+    target3: number
+    riskReward: number
+    entryStrategy: string
+    entryTiming: string
+    positionSize: number
+    riskAmount: number
+    confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+    warnings: string[]
   }
   forwardPE: string
   peg: string
@@ -72,11 +85,14 @@ interface StockData {
   isPremarket?: boolean
   marketContext?: {
     vix: number
+    vixLevel?: 'LOW' | 'NORMAL' | 'ELEVATED' | 'HIGH' | 'EXTREME'
     spyTrend: 'bullish' | 'bearish' | 'neutral'
-    spyPrice: number
+    spyPrice?: number
     spyChange: number
-    marketCondition: 'trending' | 'volatile' | 'sideways'
-    sectorRotation: {
+    marketCondition: 'trending' | 'volatile' | 'sideways' | 'choppy'
+    tradingRecommendation?: 'AGGRESSIVE' | 'NORMAL' | 'CAUTIOUS' | 'AVOID'
+    reasoning?: string[]
+    sectorRotation?: {
       technology: number
       financials: number
       energy: number
@@ -880,6 +896,136 @@ export default function TradeAnalyzer() {
           </div>
         )}
 
+        {/* Market Context Banner */}
+        {stockData.marketContext && (
+          <div className={`mb-6 rounded-lg shadow-lg p-4 border-2 transition-colors ${
+            stockData.marketContext.tradingRecommendation === 'AGGRESSIVE' ? 'bg-green-50 border-green-500' :
+            stockData.marketContext.tradingRecommendation === 'NORMAL' ? 'bg-blue-50 border-blue-400' :
+            stockData.marketContext.tradingRecommendation === 'CAUTIOUS' ? 'bg-yellow-50 border-yellow-500' :
+            'bg-red-50 border-red-500'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">
+                  {stockData.marketContext.tradingRecommendation === 'AGGRESSIVE' ? '🚀' :
+                   stockData.marketContext.tradingRecommendation === 'NORMAL' ? '📊' :
+                   stockData.marketContext.tradingRecommendation === 'CAUTIOUS' ? '⚠️' : '🚫'}
+                </span>
+                <div>
+                  <h3 className={`text-lg font-bold ${
+                    stockData.marketContext.tradingRecommendation === 'AGGRESSIVE' ? 'text-green-700' :
+                    stockData.marketContext.tradingRecommendation === 'NORMAL' ? 'text-blue-700' :
+                    stockData.marketContext.tradingRecommendation === 'CAUTIOUS' ? 'text-yellow-700' :
+                    'text-red-700'
+                  }`}>
+                    {stockData.marketContext.tradingRecommendation} MODE
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    VIX: {stockData.marketContext.vix?.toFixed(1)} ({stockData.marketContext.vixLevel}) | 
+                    SPY: {stockData.marketContext.spyChange >= 0 ? '+' : ''}{stockData.marketContext.spyChange?.toFixed(2)}% ({stockData.marketContext.spyTrend})
+                  </p>
+                </div>
+              </div>
+              {stockData.marketContext.reasoning && stockData.marketContext.reasoning.length > 0 && (
+                <div className="text-xs text-gray-600 max-w-md">
+                  {stockData.marketContext.reasoning[0]}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Entry Price Recommendations */}
+        {stockData.entryPrice && (
+          <div className={`mb-6 rounded-lg shadow-lg p-6 border-2 transition-colors ${
+            stockData.entryPrice.confidence === 'HIGH' ? 'bg-green-50 border-green-500' :
+            stockData.entryPrice.confidence === 'MEDIUM' ? 'bg-blue-50 border-blue-400' :
+            'bg-yellow-50 border-yellow-400'
+          }`}>
+            <div className="flex items-center gap-3 mb-4">
+              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <h2 className={`text-xl font-semibold ${
+                isDarkMode ? 'text-white' : 'text-gray-800'
+              }`}>Entry Price Recommendations</h2>
+              <span className={`ml-auto px-3 py-1 rounded-full text-sm font-bold ${
+                stockData.entryPrice.confidence === 'HIGH' ? 'bg-green-200 text-green-800' :
+                stockData.entryPrice.confidence === 'MEDIUM' ? 'bg-blue-200 text-blue-800' :
+                'bg-yellow-200 text-yellow-800'
+              }`}>
+                {stockData.entryPrice.confidence} CONFIDENCE
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <div className="p-4 bg-white rounded-lg border-2 border-blue-300">
+                <p className="text-sm text-gray-600 mb-1">Entry Price</p>
+                <p className="text-2xl font-bold text-blue-600">{formatPrice(stockData.entryPrice.entryPrice)}</p>
+              </div>
+              
+              <div className="p-4 bg-white rounded-lg border-2 border-red-300">
+                <p className="text-sm text-gray-600 mb-1">Stop Loss</p>
+                <p className="text-2xl font-bold text-red-600">{formatPrice(stockData.entryPrice.stopLoss)}</p>
+                <p className="text-xs text-gray-500">
+                  -{((stockData.entryPrice.entryPrice - stockData.entryPrice.stopLoss) / stockData.entryPrice.entryPrice * 100).toFixed(1)}%
+                </p>
+              </div>
+              
+              <div className="p-4 bg-white rounded-lg border-2 border-green-300">
+                <p className="text-sm text-gray-600 mb-1">Target 1 ⭐</p>
+                <p className="text-2xl font-bold text-green-600">{formatPrice(stockData.entryPrice.target1)}</p>
+                <p className="text-xs text-gray-500">
+                  +{((stockData.entryPrice.target1 - stockData.entryPrice.entryPrice) / stockData.entryPrice.entryPrice * 100).toFixed(1)}%
+                </p>
+              </div>
+              
+              <div className="p-4 bg-white rounded-lg border-2 border-green-400">
+                <p className="text-sm text-gray-600 mb-1">Target 2</p>
+                <p className="text-2xl font-bold text-green-700">{formatPrice(stockData.entryPrice.target2)}</p>
+                <p className="text-xs text-gray-500">
+                  +{((stockData.entryPrice.target2 - stockData.entryPrice.entryPrice) / stockData.entryPrice.entryPrice * 100).toFixed(1)}%
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="p-3 bg-white rounded-lg border border-gray-300">
+                <p className="text-xs text-gray-600 mb-1">Risk/Reward</p>
+                <p className="text-lg font-bold text-gray-800">{stockData.entryPrice.riskReward.toFixed(2)}:1</p>
+              </div>
+              
+              <div className="p-3 bg-white rounded-lg border border-gray-300">
+                <p className="text-xs text-gray-600 mb-1">Position Size</p>
+                <p className="text-lg font-bold text-gray-800">{stockData.entryPrice.positionSize} shares</p>
+                <p className="text-xs text-gray-500">
+                  {formatPrice(stockData.entryPrice.positionSize * stockData.entryPrice.entryPrice)} total
+                </p>
+              </div>
+              
+              <div className="p-3 bg-white rounded-lg border border-gray-300">
+                <p className="text-xs text-gray-600 mb-1">Risk Amount</p>
+                <p className="text-lg font-bold text-red-600">{formatPrice(stockData.entryPrice.riskAmount)}</p>
+                <p className="text-xs text-gray-500">per share</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-white rounded-lg border-l-4 border-blue-500">
+              <p className="text-sm font-bold text-gray-800 mb-2">📋 {stockData.entryPrice.entryStrategy}</p>
+              <p className="text-sm text-gray-600 mb-3">{stockData.entryPrice.entryTiming}</p>
+              
+              {stockData.entryPrice.warnings && stockData.entryPrice.warnings.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <p className="text-xs font-bold text-orange-700 mb-2">⚠️ Warnings:</p>
+                  {stockData.entryPrice.warnings.map((warning, idx) => (
+                    <p key={idx} className="text-xs text-orange-600 mb-1">• {warning}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Market Context Display */}
         {stockData.marketContext && (
           <div className={`mb-6 rounded-lg shadow-lg p-6 transition-colors ${
@@ -891,7 +1037,7 @@ export default function TradeAnalyzer() {
               </svg>
               <h2 className={`text-xl font-semibold ${
                 isDarkMode ? 'text-white' : 'text-gray-800'
-              }`}>Market Context</h2>
+              }`}>Detailed Market Context</h2>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

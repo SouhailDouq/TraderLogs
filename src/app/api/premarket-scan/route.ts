@@ -3,11 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { alpaca } from '@/utils/alpaca';
-import { momentumValidator } from '@/utils/momentumValidator';
-import { scoringEngine, type StockData } from '@/utils/scoringEngine';
-import { computePredictiveSignals } from '@/utils/predictiveSignals';
-import { getCompanyFundamentals } from '@/utils/alphaVantageApi';
+import { calculateStrategyScore, TRADING_STRATEGIES, type Strategy } from '@/utils/tradingStrategies';
 import { getFinvizClient } from '@/utils/finviz-api';
+import { getMarketContext, shouldAllowTrading, getMinimumScore } from '@/utils/marketContext';
 import { twelvedata } from '@/utils/twelvedata';
 
 // Create a comprehensive Alpaca client wrapper for enhanced methods
@@ -936,6 +934,28 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log('Premarket scan request:', body)
 
+    // STEP 1: Check market conditions FIRST
+    console.log('🌍 Fetching market context (VIX & SPY)...')
+    const marketContext = await getMarketContext()
+    console.log(`📊 Market Context: ${marketContext.tradingRecommendation} | VIX: ${marketContext.vix.toFixed(1)} | SPY: ${marketContext.spyChangePercent >= 0 ? '+' : ''}${marketContext.spyChangePercent.toFixed(2)}%`)
+    
+    // Block trading if market is too dangerous
+    const tradingAllowed = shouldAllowTrading(marketContext)
+    if (!tradingAllowed.allowed) {
+      console.log(`🚫 TRADING BLOCKED: ${tradingAllowed.reason}`)
+      return NextResponse.json({
+        stocks: [],
+        marketContext,
+        scanTime: new Date().toISOString(),
+        message: tradingAllowed.reason,
+        blocked: true
+      })
+    }
+    
+    // Get minimum score threshold based on market conditions
+    const minScoreThreshold = getMinimumScore(marketContext)
+    console.log(`🎯 Minimum score threshold: ${minScoreThreshold} (${marketContext.tradingRecommendation} mode)`)
+
     // Extract weekend mode override from request
     const forceWeekendMode = body.weekendMode === true
 
@@ -1031,44 +1051,71 @@ export async function POST(request: NextRequest) {
           console.log(`📊 ${symbol}: MACD ${macdAnalysis.signal} - ${macdAnalysis.description}`);
         }
 
+        // Get float and institutional ownership data BEFORE scoring (use cached if available!)
+        let floatShares: number | undefined = undefined;
+        let institutionalOwnership: number | undefined = undefined;
+
+        // Use cached fundamentals if available, otherwise fetch from Alpha Vantage
+        if (cachedFundamentals) {
+          console.log(`📊 ${symbol}: Using cached fundamentals`);
+          if (cachedFundamentals?.General?.SharesFloat) {
+            floatShares = cachedFundamentals.General.SharesFloat;
+            if (floatShares !== undefined) {
+              console.log(`📊 ${symbol}: Float = ${(floatShares / 1000000).toFixed(1)}M shares (cached)`);
+            }
+          }
+          if ((cachedFundamentals as any)?.SharesStats?.PercentInstitutions !== undefined) {
+            institutionalOwnership = (cachedFundamentals as any).SharesStats.PercentInstitutions * 100;
+            if (institutionalOwnership !== undefined) {
+              console.log(`🏛️ ${symbol}: Institutional Ownership = ${institutionalOwnership.toFixed(1)}% (cached)`);
+            }
+          }
+        }
+
         // Collect warnings instead of filtering out completely
         const warnings: string[] = [];
         let qualityTier: 'premium' | 'standard' | 'caution' = 'premium';
 
         // UNIFIED MOMENTUM VALIDATION (Same as Trade Analyzer)
         if (strategy === 'momentum') {
-          const momentumData = {
-            symbol,
-            currentPrice: stock.close || stock.price || 0,
-            volume: currentVolume || 0,
-            relativeVolume: relativeVolume,
-            changePercent: stock.change_p || 0,
-            technicalData: technicals ? {
-              sma20: technicals.SMA_20 || 0,
-              sma50: technicals.SMA_50 || 0,
-              sma200: technicals.SMA_200 || 0,
-              proximityToHigh: momentumCriteria?.highProximity || 0,
-              rsi: technicals.RSI_14 || 0
-            } : undefined
-          };
-
-          const momentumValidation = momentumValidator.validateMomentum(momentumData);
-
-          console.log(`🎯 ${symbol}: Momentum validation - ${momentumValidation.momentumScore}/${momentumValidation.maxScore} points`);
-          momentumValidation.reasoning.forEach(reason => console.log(`   ${reason}`));
-
-          if (momentumValidation.isEarlyBreakout) {
-            console.log(`🚀 ${symbol}: EARLY BREAKOUT DETECTED!`);
-            // Boost quality for early breakouts
-            if (qualityTier !== 'premium') qualityTier = 'premium';
-          }
-
-          // Add momentum-specific warnings
-          momentumValidation.warnings.forEach((warning: string) => warnings.push(warning));
-
-          // Downgrade quality if insufficient momentum criteria
-          if (momentumValidation.momentumScore < 6) {
-            qualityTier = 'caution';
+          // Inline momentum validation (momentumValidator.ts was deleted)
+          if (technicals && momentumCriteria) {
+            const currentPrice = stock.close || stock.price || 0;
+            const { SMA_20, SMA_50, SMA_200, RSI_14 } = technicals;
+            const { highProximity } = momentumCriteria;
+            
+            // Check for early breakout conditions
+            const isAboveAllSMAs = currentPrice > SMA_20 && currentPrice > SMA_50 && currentPrice > SMA_200;
+            const isNearHighs = highProximity > 85;
+            const hasStrongRSI = RSI_14 > 60 && RSI_14 < 80;
+            
+            // Calculate momentum score
+            let momentumScore = 0;
+            if (isAboveAllSMAs) momentumScore += 3;
+            if (isNearHighs) momentumScore += 3;
+            if (hasStrongRSI) momentumScore += 2;
+            if (relativeVolume > 2) momentumScore += 2;
+            
+            console.log(`🎯 ${symbol}: Momentum score ${momentumScore}/10 - Above SMAs: ${isAboveAllSMAs}, Near highs: ${isNearHighs}, RSI: ${RSI_14.toFixed(0)}`);
+            
+            // Early breakout detection
+            if (isAboveAllSMAs && isNearHighs && hasStrongRSI && relativeVolume > 1.5) {
+              console.log(`🚀 ${symbol}: EARLY BREAKOUT DETECTED!`);
+              if (qualityTier !== 'premium') qualityTier = 'premium';
+            }
+            
+            // Add momentum warnings
+            if (!isAboveAllSMAs) {
+              warnings.push('⚠️ Not above all SMAs - weak momentum structure');
+            }
+            if (highProximity < 70) {
+              warnings.push('⚠️ Far from 52-week high - not in breakout zone');
+            }
+            
+            // Downgrade quality if insufficient momentum
+            if (momentumScore < 6) {
+              qualityTier = 'caution';
+            }
           }
         }
 
@@ -1147,13 +1194,33 @@ export async function POST(request: NextRequest) {
         console.log(`📊 Premarket Scanner Scoring: Market=${alpacaEnhanced.getMarketHoursStatus()}, isPremarket=${scoringData.isPremarket}, Gap=${gapAnalysis.gapPercent.toFixed(2)}%, RelVol=${relativeVolume.toFixed(2)}x`);
         console.log(`📊 Premarket Scanner Data: Price=$${stock.close}, Change=${stock.change_p?.toFixed(2)}%, Volume=${currentVolume.toLocaleString()}, AvgVol=${avgVolume.toLocaleString()}`);
 
-        // Use the NEW scoring engine from scoringEngine.ts
-        const scoreBreakdown = scoringEngine.calculateScore(stockDataForScoring, strategy as any);
-        const baseScore = scoreBreakdown.finalScore;
+        // Use UNIFIED scoring from tradingStrategies.ts
+        const tradingStrategy = TRADING_STRATEGIES['breakout-momentum']; // Use your proven Finviz criteria
+        const stockForScoring = {
+          symbol,
+          price: stock.close,
+          changePercent: stock.change_p,
+          volume: currentVolume,
+          relativeVolume,
+          sma20: technicals.SMA_20,
+          sma50: technicals.SMA_50,
+          sma200: technicals.SMA_200,
+          rsi: technicals.RSI_14,
+          high52w: stock.high || stock.close,
+          float: floatShares ? floatShares / 1000000 : undefined, // Convert to millions
+          shortFloat: undefined, // Will be added when available from Finviz
+          avgVolume: avgVolume || ((currentVolume || 0) / (relativeVolume || 1))
+        };
+        
+        const scoring = calculateStrategyScore(stockForScoring, tradingStrategy);
+        const baseScore = scoring.score;
 
         // Log breakdown for debugging
         if (baseScore > 60) {
-          console.log(`🏆 ${symbol} Score Breakdown: Price=${scoreBreakdown.price}, Vol=${scoreBreakdown.volume}, Trend=${scoreBreakdown.trend}, Mom=${scoreBreakdown.momentum}, Sent=${scoreBreakdown.sentiment}, Cat=${scoreBreakdown.catalyst}, Prox=${scoreBreakdown.proximity}, Mkt=${scoreBreakdown.market}, Risk=${scoreBreakdown.riskPenalties}`);
+          console.log(`🏆 ${symbol} Score: ${baseScore}/100 (${scoring.quality}) - Signals: ${scoring.signals.join(', ')}`);
+          if (scoring.warnings.length > 0) {
+            console.log(`⚠️ ${symbol} Warnings: ${scoring.warnings.join(', ')}`);
+          }
         }
 
         // REMOVED: Volume bonus was double-counting volume (already included in calculateScore)
@@ -1259,26 +1326,9 @@ export async function POST(request: NextRequest) {
           console.log(`❌ ${symbol}: News fetch failed - ${error}`);
         }
 
-        // Get float and institutional ownership data (use cached if available!)
-        let floatShares: number | undefined = undefined;
-        let institutionalOwnership: number | undefined = undefined;
-
-        // Use cached fundamentals if available, otherwise fetch from Alpha Vantage
-        if (cachedFundamentals) {
-          console.log(`📊 ${symbol}: Using cached fundamentals`);
-          if (cachedFundamentals?.General?.SharesFloat) {
-            floatShares = cachedFundamentals.General.SharesFloat;
-            if (floatShares !== undefined) {
-              console.log(`📊 ${symbol}: Float = ${(floatShares / 1000000).toFixed(1)}M shares (cached)`);
-            }
-          }
-          if ((cachedFundamentals as any)?.SharesStats?.PercentInstitutions !== undefined) {
-            institutionalOwnership = (cachedFundamentals as any).SharesStats.PercentInstitutions * 100;
-            if (institutionalOwnership !== undefined) {
-              console.log(`🏛️ ${symbol}: Institutional Ownership = ${institutionalOwnership.toFixed(1)}% (cached)`);
-            }
-          }
-        } else {
+        // Float and institutional ownership already fetched above (before scoring)
+        // If not cached, fetch from Alpha Vantage now
+        if (!cachedFundamentals) {
           // Fetch from Alpha Vantage (separate rate limits from EODHD)
           // Add delay to avoid rate limiting (300ms between calls)
           await new Promise(resolve => setTimeout(resolve, 300));
@@ -1388,6 +1438,12 @@ export async function POST(request: NextRequest) {
 
     const stocks = allStocks
       .filter(stock => {
+        // Market context filter - Only show stocks that meet minimum score threshold
+        if (stock.score < minScoreThreshold) {
+          console.log(`🚫 FILTERED OUT ${stock.symbol}: Score ${stock.score} below ${minScoreThreshold} threshold (${marketContext.tradingRecommendation} mode)`);
+          return false;
+        }
+        
         // Stale data filter - Apply during ALL market hours (premarket, regular, afterhours)
         const dataAge = Date.now() - new Date(stock.lastUpdated).getTime();
         const dataAgeMinutes = Math.round(dataAge / 60000);
@@ -1478,6 +1534,7 @@ export async function POST(request: NextRequest) {
       strategy,
       scanMode,
       marketStatus,
+      marketContext, // Add market context (VIX, SPY, trading recommendation)
       count: stocks.length,
       filteredCount,
       qualityBreakdown,

@@ -9,7 +9,7 @@
 
 // @ts-nocheck
 import { twelvedata } from './twelvedata'; // DISABLED: Removed Alpaca after Finviz migration
-import { momentumValidator, type MomentumValidationResult } from './momentumValidator'
+// Removed momentumValidator - now using tradingStrategies.ts for unified scoring
 
 // Type definitions for compatibility
 type EODHDTechnicals = any;
@@ -162,17 +162,31 @@ export class AutomatedTradingEngine {
     
     console.log(`🎯 Momentum data for validation:`, momentumData);
     
-    const momentumValidation = momentumValidator.validateMomentum(momentumData);
-    
-    if (momentumValidation.isEarlyBreakout) {
-      reasoning.push(`🚀 Early breakout detected (${momentumValidation.momentumScore}/${momentumValidation.maxScore} momentum points)`);
-      // Boost confidence for early breakouts
-      if (confidence === 'MEDIUM') confidence = 'HIGH';
+    // Basic momentum validation without momentumValidator (deleted file)
+    // Check for early breakout conditions manually
+    let isEarlyBreakout = false;
+    if (momentumData.technicalData) {
+      const { sma20, sma50, sma200, proximityToHigh, rsi } = momentumData.technicalData;
+      
+      // Early breakout: Price above all SMAs, near highs, strong RSI
+      const isAboveAllSMAs = currentPrice > sma20 && currentPrice > sma50 && currentPrice > sma200;
+      const isNearHighs = proximityToHigh > 85;
+      const hasStrongRSI = rsi > 60 && rsi < 80;
+      
+      if (isAboveAllSMAs && isNearHighs && hasStrongRSI && momentumData.relativeVolume > 1.5) {
+        reasoning.push(`🚀 Early breakout detected: Above SMAs, ${proximityToHigh.toFixed(0)}% of high, RSI ${rsi.toFixed(0)}`);
+        if (confidence === 'MEDIUM') confidence = 'HIGH';
+        isEarlyBreakout = true;
+      }
+      
+      // Add momentum warnings
+      if (!isAboveAllSMAs) {
+        warnings.push('⚠️ Not above all SMAs - weak momentum structure');
+      }
+      if (proximityToHigh < 70) {
+        warnings.push('⚠️ Far from 52-week high - not in breakout zone');
+      }
     }
-    
-    // Add momentum-specific warnings and reasoning
-    momentumValidation.warnings.forEach((warning: string) => warnings.push(warning));
-    momentumValidation.reasoning.forEach((reason: string) => reasoning.push(reason));
 
     // 5. VOLUME ANALYSIS
     const volumeAnalysis = this.analyzeVolumeProfile(stockData);
@@ -210,7 +224,7 @@ export class AutomatedTradingEngine {
       volatility, 
       confidence, 
       currentPrice,
-      momentumValidation.isEarlyBreakout
+      isEarlyBreakout
     );
 
     // 7. STOP LOSS CALCULATION (Technical + Volatility Based)
@@ -233,7 +247,7 @@ export class AutomatedTradingEngine {
       confidence, 
       warnings.length, 
       optimalSize,
-      momentumValidation.isEarlyBreakout
+      isEarlyBreakout
     );
 
     reasoning.push(`Score: ${score}/100 (${confidence} confidence)`);

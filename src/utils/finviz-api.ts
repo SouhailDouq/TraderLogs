@@ -105,7 +105,8 @@ export interface ScreenerStock {
   volume: number;
   relativeVolume?: number;
   avgVolume?: number;
-  float?: string;
+  float?: number; // Float in millions (e.g., 45.2 = 45.2M shares)
+  floatShares?: number; // Actual float shares count
   sma20?: number;
   sma50?: number;
   sma200?: number;
@@ -116,9 +117,10 @@ export interface ScreenerStock {
   beta?: string;
   atr?: string;
   volatility?: string;
-  shortFloat?: string;
-  insider?: string;
-  institutional?: string;
+  shortFloat?: number; // Short interest as % of float (e.g., 15.5 = 15.5%)
+  shortRatio?: number; // Days to cover (e.g., 3.2 = 3.2 days)
+  insider?: number; // Insider ownership % (e.g., 25.5 = 25.5%)
+  institutional?: number; // Institutional ownership % (e.g., 45.2 = 45.2%)
   timestamp?: number; // Unix timestamp in seconds
   previousClose?: number; // Calculated from price and change
 }
@@ -436,6 +438,24 @@ export class FinvizAPIClient {
     const low52w = parseFloat(stock['52W Low'] || stock['52-Week Low'] || '0');
     const from52wHigh = high52w > 0 ? ((high52w - price) / high52w) * 100 : 100;
     
+    // Parse float (shares outstanding in millions)
+    const floatStr = stock.Float || stock['Shs Float'] || '';
+    const floatValue = this.parseVolume(floatStr) / 1000000; // Convert to millions
+    
+    // Parse short interest data
+    const shortFloatStr = stock['Short Float'] || stock['Float Short'] || '';
+    const shortFloat = parseFloat(shortFloatStr.replace(/[^0-9.-]/g, '') || '0');
+    
+    const shortRatioStr = stock['Short Ratio'] || '';
+    const shortRatio = parseFloat(shortRatioStr.replace(/[^0-9.-]/g, '') || '0');
+    
+    // Parse ownership data
+    const insiderStr = stock['Insider Own'] || '';
+    const insider = parseFloat(insiderStr.replace(/[^0-9.-]/g, '') || '0');
+    
+    const institutionalStr = stock['Inst Own'] || '';
+    const institutional = parseFloat(institutionalStr.replace(/[^0-9.-]/g, '') || '0');
+    
     return {
       ticker: stock.Ticker,
       symbol: stock.Ticker, // Add symbol alias
@@ -453,7 +473,8 @@ export class FinvizAPIClient {
       volume,
       relativeVolume,
       avgVolume,
-      float: stock.Float || stock['Shs Float'],
+      float: floatValue > 0 ? floatValue : undefined,
+      floatShares: floatValue > 0 ? floatValue * 1000000 : undefined,
       sma20,
       sma50,
       sma200,
@@ -464,9 +485,10 @@ export class FinvizAPIClient {
       beta: stock.Beta,
       atr: stock.ATR || stock['ATR (14)'],
       volatility: stock.Volatility,
-      shortFloat: stock['Short Float'] || stock['Float Short'],
-      insider: stock['Insider Own'],
-      institutional: stock['Inst Own'],
+      shortFloat: shortFloat > 0 ? shortFloat : undefined,
+      shortRatio: shortRatio > 0 ? shortRatio : undefined,
+      insider: insider > 0 ? insider : undefined,
+      institutional: institutional > 0 ? institutional : undefined,
       timestamp: Date.now() / 1000, // Add current timestamp in seconds
       previousClose: price / (1 + (changePercent / 100)) // Calculate previous close from current price and change
     };

@@ -100,8 +100,12 @@ export class IBKRParser {
                 
                 // Skip rows with empty DateTime (summary rows)
                 const dateTimeIdx = headerMap['DateTime'] || headerMap['Date/Time'];
-                if (dateTimeIdx !== undefined && !parts[dateTimeIdx]) {
-                    continue;
+                if (dateTimeIdx !== undefined) {
+                    const dateTimeValue = parts[dateTimeIdx];
+                    if (!dateTimeValue || dateTimeValue.trim() === '') {
+                        console.log(`⏭️  Skipping summary row (no DateTime)`);
+                        continue;
+                    }
                 }
 
                 const trade = this.parseTradeLine(parts, headerMap);
@@ -138,7 +142,8 @@ export class IBKRParser {
         const buySell = get('Buy/Sell'); // "BUY" or "SELL"
         const currency = get('Currency') || 'USD'; // Default to USD if not specified
 
-        if (!symbol || !dateStr || !quantityStr || !priceStr) return null;
+        // Skip rows with missing required fields
+        if (!symbol || !quantityStr || !priceStr || !dateStr) return null;
         
         // Filter out forex pairs (symbols with dots like EUR.USD)
         if (symbol.includes('.')) {
